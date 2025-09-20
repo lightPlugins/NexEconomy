@@ -1,0 +1,5 @@
+general:
+  prefix: '<yellow>[<gold>NEXDROPS<yellow>]</yellow>'
+  no-permission: '<red>You do not have permission to perform this command.</red>'
+  reload: '<gray>Configuration reloaded <yellow>successfully<gray>!'#
+  switch-language: '<gray>Language switched to <yellow><nex_language><gray>!'

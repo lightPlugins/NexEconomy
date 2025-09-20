@@ -1,0 +1,7 @@
+name: ${name}
+version: ${version}
+main: io.nexstudios.economy.NexEconomy
+api-version: '1.21'
+depend:
+  - Nexus
+softdepend: [ ]

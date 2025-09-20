@@ -1,0 +1,4 @@
+logging:
+  debug:
+    enable: false
+    level: 3

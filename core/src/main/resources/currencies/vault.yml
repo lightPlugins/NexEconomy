@@ -1,0 +1,14 @@
+name: 'Coins'
+symbol:
+  plural: 'Coins'
+  singular: 'Coin'
+placeholder: '<yellow>#name#: <yellow>#amount# <gray>#symbol#'
+command:
+  main: 'my_command'
+  aliases:
+    - 'some_alias'
+fraction-digits: 0
+currency-type: vault # virtual, vault
+start-balance: 120
+max-balance: -1
+
