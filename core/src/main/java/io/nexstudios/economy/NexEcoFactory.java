@@ -1,7 +1,7 @@
 package io.nexstudios.economy;
 
-import io.nexstudios.economy.model.CurrencyType;
-import io.nexstudios.economy.model.NexCurrency;
+import io.nexstudios.economy.currency.NexCurrencyType;
+import io.nexstudios.economy.currency.NexCurrency;
 import io.nexstudios.nexus.bukkit.files.NexusFileReader;
 import net.kyori.adventure.text.Component;
 import org.bukkit.configuration.file.FileConfiguration;
@@ -10,6 +10,7 @@ import org.bukkit.plugin.java.JavaPlugin;
 import org.jetbrains.annotations.NotNull;
 
 import java.io.File;
+import java.io.IOException;
 import java.math.BigDecimal;
 import java.util.*;
 
@@ -23,6 +24,8 @@ public class NexEcoFactory {
 
     private final NexusFileReader currencyFiles;
     private final Map<String, NexCurrency> currenciesByKey = new HashMap<>();
+    // Keep stable reverse mapping: currency instance -> key
+    private final Map<NexCurrency, String> keysByCurrency = new IdentityHashMap<>();
 
     public NexEcoFactory(NexusFileReader currencyFiles) {
         this.currencyFiles = currencyFiles;
@@ -32,10 +35,12 @@ public class NexEcoFactory {
 
     private void loadCurrencies() {
         currenciesByKey.clear();
+        keysByCurrency.clear();
         for (File currencyFile : currencyFiles.getFiles()) {
             NexCurrency currency = createCurrency(currencyFile);
             String key = resolveKey(currencyFile, currency);
             currenciesByKey.put(key, currency);
+            keysByCurrency.put(currency, key);
         }
         NexEconomy.nexusLogger.info("Loaded currencies: " + String.join(", ", currenciesByKey.keySet()));
     }
@@ -58,10 +63,11 @@ public class NexEcoFactory {
      * @param currency  The {@link NexCurrency} instance representing the external currency to be registered.
      * @param plugin    The {@link JavaPlugin} instance representing the plugin that provides the currency.
      */
-    public void registerExternalCurrencies(String namespace, NexCurrency currency, JavaPlugin plugin) {
+    public boolean registerExternalCurrencies(String namespace, NexCurrency currency, JavaPlugin plugin) {
         NexEconomy.nexusLogger.info("Registering external currency: " + currency.getName() + " by " + plugin.getName());
         currenciesByKey.put(namespace, currency);
-        loadCurrencies();
+        keysByCurrency.put(currency, namespace.toLowerCase(Locale.ROOT));
+        return createFileFromCurrency(currency);
     }
 
     /**
@@ -86,6 +92,7 @@ public class NexEcoFactory {
         String base = (dot > 0 ? fileName.substring(0, dot) : fileName);
         if (!base.isEmpty()) return base.toLowerCase(Locale.ROOT);
 
+        // Fallback on visual name (not recommended, but kept as last resort)
         return currency.getName().toString().toLowerCase(Locale.ROOT);
     }
 
@@ -113,12 +120,27 @@ public class NexEcoFactory {
     }
 
     /**
-     * Finds and retrieves a list of {@link NexCurrency} instances that match the specified {@link CurrencyType}.
+     * Returns the stable key (namespace) for a given currency instance.
+     * This is the filename without extension or explicit 'key' from config.
+     */
+    public String keyOf(NexCurrency currency) {
+        String key = keysByCurrency.get(currency);
+        if (key != null) return key;
+        // Fallback: attempt reverse lookup (should not be needed in normal flow)
+        for (Map.Entry<String, NexCurrency> e : currenciesByKey.entrySet()) {
+            if (e.getValue() == currency) return e.getKey();
+        }
+        // As last resort, return a lower-cased plain string of name (not ideal)
+        return currency.getName().toString().toLowerCase(Locale.ROOT);
+    }
+
+    /**
+     * Finds and retrieves a list of {@link NexCurrency} instances that match the specified {@link NexCurrencyType}.
      *
-     * @param type the {@link CurrencyType} to filter the currencies. Must not be null.
+     * @param type the {@link NexCurrencyType} to filter the currencies. Must not be null.
      * @return a list of {@link NexCurrency} instances that match the provided type. If no matches are found, an empty list is returned.
      */
-    public List<NexCurrency> findByType(CurrencyType type) {
+    public List<NexCurrency> findByType(NexCurrencyType type) {
         return currenciesByKey.values().stream()
                 .filter(c -> c.getCurrencyType() == type)
                 .toList();
@@ -145,14 +167,14 @@ public class NexEcoFactory {
         String rawType = config.getString("type", "vault");
         String normalizedType = rawType.trim().toUpperCase(Locale.ROOT);
 
-        CurrencyType parsedType;
+        NexCurrencyType parsedType;
         try {
-            parsedType = CurrencyType.valueOf(normalizedType);
+            parsedType = NexCurrencyType.valueOf(normalizedType);
         } catch (IllegalArgumentException ex) {
             NexEconomy.nexusLogger.warning("Unknown currency type '" + rawType + "' in " + file.getName() + ", falling back to VAULT");
-            parsedType = CurrencyType.VAULT;
+            parsedType = NexCurrencyType.VAULT;
         }
-        final CurrencyType currencyType = parsedType;
+        final NexCurrencyType currencyType = parsedType;
 
         final BigDecimal startBalance = new BigDecimal(String.valueOf(config.get("start-balance", "0")));
         final BigDecimal maxBalance = new BigDecimal(String.valueOf(config.get("max-balance", "-1")));
@@ -165,9 +187,58 @@ public class NexEcoFactory {
             @Override public String getMainCommand() { return mainCommand; }
             @Override public List<String> getAliases() { return aliases; }
             @Override public int getFractionDigits() { return fractionDigits; }
-            @Override public CurrencyType getCurrencyType() { return currencyType; }
+            @Override public NexCurrencyType getCurrencyType() { return currencyType; }
             @Override public BigDecimal getStartBalance() { return startBalance; }
             @Override public BigDecimal getMaxBalance() { return maxBalance; }
         };
+    }
+
+    private boolean createFileFromCurrency(NexCurrency currency) {
+
+        if (currency.getCurrencyType() == NexCurrencyType.VAULT) {
+            NexEconomy.nexusLogger.warning("Cannot create file for VAULT currency: " + currency.getName());
+            NexEconomy.nexusLogger.warning("Vault currencies are automatically registered and loaded by the plugin!");
+            return false;
+        }
+
+        File file = new File("/currencies/extern/" + currency.getName() + ".yml");
+        if (file.exists()) {
+            NexEconomy.nexusLogger.warning("Currency file already exists for " + currency.getName());
+            return false;
+        }
+
+        try {
+            if(file.createNewFile()) {
+                NexEconomy.nexusLogger.info("Created new currency file for " + currency.getName());
+            } else {
+                NexEconomy.nexusLogger.warning("Failed to create currency file for " + currency.getName());
+                return false;
+            }
+        } catch (IOException e) {
+            NexEconomy.nexusLogger.warning("Failed to create currency file for " + currency.getName());
+            NexEconomy.nexusLogger.warning("Please check the file permissions and try again.");
+            throw new RuntimeException(e);
+        }
+
+        YamlConfiguration config = YamlConfiguration.loadConfiguration(file);
+        config.set("name", currency.getName());
+        config.set("symbol.plural", currency.getPluralSymbol());
+        config.set("symbol.singular", currency.getSingularSymbol());
+        config.set("placeholder", currency.getPlaceholder());
+        config.set("command.main", currency.getMainCommand());
+        config.set("command.aliases", currency.getAliases());
+        config.set("fraction-digits", currency.getFractionDigits());
+        config.set("type", currency.getCurrencyType().name());
+        config.set("start-balance", currency.getStartBalance());
+        config.set("max-balance", currency.getMaxBalance());
+
+        try {
+            config.save(file);
+            return true;
+        } catch (IOException e) {
+            NexEconomy.nexusLogger.warning("Failed to save currency file for " + currency.getName());
+            NexEconomy.nexusLogger.warning("Please check the file permissions and try again.");
+            throw new RuntimeException(e);
+        }
     }
 }

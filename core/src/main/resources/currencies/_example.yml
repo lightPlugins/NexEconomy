@@ -7,8 +7,8 @@ command:
   main: 'my_command'
   aliases:
     - 'some_alias'
-fractional-digits: 2
-currency-type: vault # virtual, vault
+fraction-digits: 2
+type: vault # virtual, vault
 start-balance: 120
 max-balance: -1
 

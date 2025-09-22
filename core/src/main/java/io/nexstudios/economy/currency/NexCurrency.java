@@ -1,4 +1,4 @@
-package io.nexstudios.economy.model;
+package io.nexstudios.economy.currency;
 
 import net.kyori.adventure.text.Component;
 
@@ -14,7 +14,7 @@ public interface NexCurrency {
     String getMainCommand();
     List<String> getAliases();
     int getFractionDigits();
-    CurrencyType getCurrencyType();
+    NexCurrencyType getCurrencyType();
     BigDecimal getStartBalance();
     BigDecimal getMaxBalance();
 
