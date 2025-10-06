@@ -1,5 +1,6 @@
 package io.nexstudios.economy;
 
+import io.nexstudios.economy.commands.CurrencyCommand;
 import io.nexstudios.economy.currency.NexCurrency;
 import io.nexstudios.economy.economy.InMemoryEcoService;
 import io.nexstudios.economy.economy.persistence.EcoPersistencePort;
@@ -19,6 +20,7 @@ import io.nexstudios.nexus.libs.commands.PaperCommandManager;
 import lombok.Getter;
 import net.milkbowl.vault.economy.Economy;
 import org.bukkit.Bukkit;
+import org.bukkit.entity.Player;
 import org.bukkit.event.HandlerList;
 import org.bukkit.plugin.RegisteredServiceProvider;
 import org.bukkit.plugin.ServicePriority;
@@ -96,7 +98,7 @@ public class NexEconomy extends JavaPlugin {
             int imported = ecoService.importAllSnapshots(all);
             nexusLogger.info("Startup warm-load imported " + imported + " account(s) into cache.");
         } catch (TimeoutException te) {
-            nexusLogger.error("Startup warm-load timed out, continuing without full preload.");
+            nexusLogger.warning("Startup warm-load timed out, continuing without full preload.");
         } catch (Exception ex) {
             nexusLogger.error("Startup warm-load failed: " + ex.getMessage());
         }
@@ -150,8 +152,69 @@ public class NexEconomy extends JavaPlugin {
     }
 
     private void registerCommands() {
-        // register ACF commands if any
+        boolean redisEnabled = settingsFile != null && settingsFile.getBoolean("economy.redis.enabled", false);
+
+        // Global completions (no dynamic placeholders)
+        commandManager.getCommandCompletions().registerCompletion("ecoPlayers",
+                c -> Bukkit.getOnlinePlayers().stream().map(Player::getName).toList());
+        commandManager.getCommandCompletions().registerCompletion("ecoAmounts", c -> List.of("1", "10", "100"));
+        commandManager.getCommandCompletions().registerCompletion("ecoFlags", c -> List.of("-s"));
+
+        for (var currency : nexEcoFactory.getCurrencies()) {
+            String key = nexEcoFactory.keyOf(currency);
+            String main = currency.getMainCommand();
+            List<String> aliases = currency.getAliases() != null ? currency.getAliases() : List.of();
+
+            // Build replacement string: "main|alias1|alias2"
+            String joined = buildAliasString(main, aliases);
+            nexusLogger.info("Built alias string for '" + key + "': " + joined);
+
+            // IMPORTANT: set the replacement BEFORE registering the command
+            commandManager.getCommandReplacements().addReplacement("currency", joined);
+
+            var cmd = new CurrencyCommand(
+                    currency, key, ecoService, commandManager, nexusLanguage, redisEnabled, transactionLogger
+            );
+            commandManager.registerCommand(cmd);
+
+            nexusLogger.info("Registered currency command: /" + sanitizeAlias(main)
+                    + (aliases.isEmpty() ? "" : " (" + String.join(", ", aliases) + ")"));
+        }
     }
+
+
+    private static String sanitizeAlias(String s) {
+        if (s == null) return "";
+        String t = s.trim();
+        // Strip leading slash
+        if (t.startsWith("/")) t = t.substring(1);
+
+        // Strip surrounding placeholder markers like %name% -> name
+        if (t.length() >= 2 && t.startsWith("%") && t.endsWith("%")) {
+            t = t.substring(1, t.length() - 1).trim();
+        }
+
+        // Strip accidental leading/trailing '%' if any remain
+        while (t.startsWith("%")) t = t.substring(1).trim();
+        while (t.endsWith("%")) t = t.substring(0, t.length() - 1).trim();
+
+        return t;
+    }
+
+    private static String buildAliasString(String main, List<String> aliases) {
+        java.util.ArrayList<String> parts = new java.util.ArrayList<>();
+        String m = sanitizeAlias(main);
+        if (!m.isEmpty()) parts.add(m);
+        if (aliases != null) {
+            for (String a : aliases) {
+                String s = sanitizeAlias(a);
+                if (!s.isEmpty()) parts.add(s);
+            }
+        }
+        // Join with '|', required by ACF replacement aliases
+        return String.join("|", parts);
+    }
+
 
     private void registerListeners() {
         // other listeners if any
