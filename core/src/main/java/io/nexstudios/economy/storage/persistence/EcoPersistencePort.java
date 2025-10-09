@@ -1,6 +1,6 @@
-package io.nexstudios.economy.economy.persistence;
+package io.nexstudios.economy.storage.persistence;
 
-import io.nexstudios.economy.economy.persistence.model.DbAccountSnapshot;
+import io.nexstudios.economy.storage.persistence.model.DbAccountSnapshot;
 
 import java.util.List;
 import java.util.Map;

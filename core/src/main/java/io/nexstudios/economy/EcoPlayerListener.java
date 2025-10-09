@@ -1,6 +1,6 @@
 package io.nexstudios.economy;
 
-import io.nexstudios.economy.economy.InMemoryEcoService;
+import io.nexstudios.economy.storage.InMemoryEcoService;
 import org.bukkit.event.EventHandler;
 import org.bukkit.event.Listener;
 import org.bukkit.event.player.PlayerJoinEvent;

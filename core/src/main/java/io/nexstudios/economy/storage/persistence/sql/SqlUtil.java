@@ -1,4 +1,4 @@
-package io.nexstudios.economy.economy.persistence.sql;
+package io.nexstudios.economy.storage.persistence.sql;
 
 import java.sql.PreparedStatement;
 import java.sql.ResultSet;

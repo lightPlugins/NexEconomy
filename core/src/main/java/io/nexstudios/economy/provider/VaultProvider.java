@@ -1,8 +1,8 @@
 package io.nexstudios.economy.provider;
 
 import io.nexstudios.economy.currency.NexCurrency;
-import io.nexstudios.economy.economy.NexEcoService;
-import io.nexstudios.economy.economy.NexEcoResponse;
+import io.nexstudios.economy.storage.NexEcoService;
+import io.nexstudios.economy.storage.NexEcoResponse;
 import net.kyori.adventure.text.serializer.plain.PlainTextComponentSerializer;
 import net.milkbowl.vault.economy.Economy;
 import net.milkbowl.vault.economy.EconomyResponse;

@@ -1,4 +1,4 @@
-package io.nexstudios.economy.economy.model;
+package io.nexstudios.economy.storage.model;
 
 import java.util.Locale;
 import java.util.Objects;

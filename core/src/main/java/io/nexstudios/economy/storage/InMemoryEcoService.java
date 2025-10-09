@@ -1,13 +1,13 @@
-package io.nexstudios.economy.economy;
+package io.nexstudios.economy.storage;
 
 import io.nexstudios.economy.currency.NexCurrency;
-import io.nexstudios.economy.economy.model.AccountKey;
-import io.nexstudios.economy.economy.model.PlayerAccount;
-import io.nexstudios.economy.economy.persistence.EcoPersistencePort;
-import io.nexstudios.economy.economy.persistence.model.DbAccountSnapshot;
-import io.nexstudios.economy.economy.support.EcoLocks;
-import io.nexstudios.economy.economy.support.EcoMath;
-import io.nexstudios.economy.economy.support.TransactionLogger;
+import io.nexstudios.economy.storage.model.AccountKey;
+import io.nexstudios.economy.storage.model.PlayerAccount;
+import io.nexstudios.economy.storage.persistence.EcoPersistencePort;
+import io.nexstudios.economy.storage.persistence.model.DbAccountSnapshot;
+import io.nexstudios.economy.storage.support.EcoLocks;
+import io.nexstudios.economy.storage.support.EcoMath;
+import io.nexstudios.economy.storage.support.TransactionLogger;
 import io.nexstudios.economy.NexEconomy;
 
 import java.math.BigDecimal;
@@ -15,7 +15,7 @@ import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.locks.Lock;
 
-import static io.nexstudios.economy.economy.NexEcoResponse.ResponseType.*;
+import static io.nexstudios.economy.storage.NexEcoResponse.ResponseType.*;
 
 /**
  * Cache-first economy service with dirty tracking and batch DB flush.

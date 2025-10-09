@@ -1,4 +1,4 @@
-package io.nexstudios.economy.economy;
+package io.nexstudios.economy.storage;
 
 import java.math.BigDecimal;
 

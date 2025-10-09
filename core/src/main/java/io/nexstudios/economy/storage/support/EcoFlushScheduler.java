@@ -1,7 +1,7 @@
-package io.nexstudios.economy.economy.support;
+package io.nexstudios.economy.storage.support;
 
 import io.nexstudios.economy.NexEconomy;
-import io.nexstudios.economy.economy.InMemoryEcoService;
+import io.nexstudios.economy.storage.InMemoryEcoService;
 import org.bukkit.Bukkit;
 import org.bukkit.plugin.Plugin;
 

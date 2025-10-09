@@ -1,4 +1,4 @@
-package io.nexstudios.economy.economy.persistence.model;
+package io.nexstudios.economy.storage.persistence.model;
 
 import java.math.BigDecimal;
 

@@ -1,4 +1,4 @@
-package io.nexstudios.economy.economy.support;
+package io.nexstudios.economy.storage.support;
 
 import io.nexstudios.economy.currency.NexCurrency;
 

@@ -1,6 +1,6 @@
-package io.nexstudios.economy.economy.support;
+package io.nexstudios.economy.storage.support;
 
-import io.nexstudios.economy.economy.model.AccountKey;
+import io.nexstudios.economy.storage.model.AccountKey;
 
 import java.util.concurrent.locks.Lock;
 import java.util.concurrent.locks.ReentrantLock;

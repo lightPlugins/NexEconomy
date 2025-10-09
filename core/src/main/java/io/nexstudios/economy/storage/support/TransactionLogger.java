@@ -1,4 +1,4 @@
-package io.nexstudios.economy.economy.support;
+package io.nexstudios.economy.storage.support;
 
 import org.bukkit.plugin.Plugin;
 

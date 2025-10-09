@@ -1,7 +1,7 @@
-package io.nexstudios.economy.economy.persistence.sql;
+package io.nexstudios.economy.storage.persistence.sql;
 
-import io.nexstudios.economy.economy.persistence.EcoPersistencePort;
-import io.nexstudios.economy.economy.persistence.model.DbAccountSnapshot;
+import io.nexstudios.economy.storage.persistence.EcoPersistencePort;
+import io.nexstudios.economy.storage.persistence.model.DbAccountSnapshot;
 
 import javax.sql.DataSource;
 import java.math.BigDecimal;

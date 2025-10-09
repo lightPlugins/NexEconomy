@@ -1,10 +1,10 @@
 package io.nexstudios.economy.commands;
 import io.nexstudios.economy.NexEconomy;
 import io.nexstudios.economy.currency.NexCurrency;
-import io.nexstudios.economy.economy.NexEcoResponse;
-import io.nexstudios.economy.economy.NexEcoService;
-import io.nexstudios.economy.economy.support.EcoMath;
-import io.nexstudios.economy.economy.support.TransactionLogger;
+import io.nexstudios.economy.storage.NexEcoResponse;
+import io.nexstudios.economy.storage.NexEcoService;
+import io.nexstudios.economy.storage.support.EcoMath;
+import io.nexstudios.economy.storage.support.TransactionLogger;
 import io.nexstudios.nexus.bukkit.language.NexusLanguage;
 import io.nexstudios.nexus.libs.commands.BaseCommand;
 import io.nexstudios.nexus.libs.commands.PaperCommandManager;
