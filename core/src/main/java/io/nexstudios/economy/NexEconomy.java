@@ -1,6 +1,7 @@
 package io.nexstudios.economy;
 
 import io.nexstudios.economy.commands.CurrencyCommand;
+import io.nexstudios.economy.commands.ReloadCommand;
 import io.nexstudios.economy.currency.NexCurrency;
 import io.nexstudios.economy.storage.InMemoryEcoService;
 import io.nexstudios.economy.storage.persistence.EcoPersistencePort;
@@ -27,8 +28,7 @@ import org.bukkit.plugin.ServicePriority;
 import org.bukkit.plugin.java.JavaPlugin;
 
 import java.time.Duration;
-import java.util.List;
-import java.util.Objects;
+import java.util.*;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
 
@@ -54,6 +54,9 @@ public class NexEconomy extends JavaPlugin {
     private VaultProvider nexVaultProvider;
     private NexEcoFactory nexEcoFactory;
     private EcoPlayerListener playerListener;
+
+    private Map<String, CurrencyCommand> currencyCommandMap = new HashMap<>();
+    private List<CurrencyCommand> registeredCurrencyCommands = new ArrayList<>();
 
     @Override
     public void onLoad() {
@@ -149,7 +152,163 @@ public class NexEconomy extends JavaPlugin {
 
     public void onReload() {
         loadNexusFiles();
+        this.messageSender = new MessageSender(nexusLanguage);
+
+        // Rebuild factory with new currency configs
+        if (nexEcoFactory != null) {
+            nexusLogger.info("Reloading currency configurations...");
+
+            // Check for removed currencies
+            Set<String> oldKeys = new HashSet<>(currencyCommandMap.keySet());
+
+            nexEcoFactory = new NexEcoFactory(currencyFiles);
+
+            Set<String> newKeys = nexEcoFactory.getCurrencies().stream()
+                    .map(nexEcoFactory::keyOf)
+                    .collect(java.util.stream.Collectors.toSet());
+
+            oldKeys.removeAll(newKeys);
+            if (!oldKeys.isEmpty()) {
+                nexusLogger.warning("The following currencies were removed but their commands remain active until server restart:");
+                oldKeys.forEach(key -> nexusLogger.warning(" - " + key));
+            }
+
+            // Refresh all cached accounts with new currency instances
+            int refreshed = ecoService.refreshCurrencies();
+            nexusLogger.info("Refreshed " + refreshed + " cached account(s) with new currency configs.");
+
+            // Update VaultProvider with new currency instance (without re-registering)
+            NexCurrency vaultCurrency = nexEcoFactory.getVaultCurrency();
+            nexVaultProvider.updateCurrency(vaultCurrency);
+
+            boolean redisEnabled = settingsFile != null && settingsFile.getBoolean("economy.redis.enabled", false);
+
+            // Detect new currencies
+            Set<String> newCurrencies = new HashSet<>(newKeys);
+            newCurrencies.removeAll(currencyCommandMap.keySet());
+
+            // Update existing commands and register new ones
+            int updated = 0;
+            int registered = 0;
+
+            for (var currency : nexEcoFactory.getCurrencies()) {
+                String key = nexEcoFactory.keyOf(currency);
+                CurrencyCommand existingCmd = currencyCommandMap.get(key);
+
+                if (existingCmd != null) {
+                    // Update existing command
+                    existingCmd.updateCurrency(currency);
+                    updated++;
+                    nexusLogger.info("Updated currency command for: " + key);
+                } else {
+                    // Register new command
+                    String main = currency.getMainCommand();
+                    List<String> aliases = currency.getAliases() != null ? currency.getAliases() : List.of();
+                    String joined = buildAliasString(main, aliases);
+
+                    commandManager.getCommandReplacements().addReplacement("currency", joined);
+
+                    var newCmd = new CurrencyCommand(
+                            currency, key, ecoService, commandManager, nexusLanguage, redisEnabled, transactionLogger
+                    );
+                    commandManager.registerCommand(newCmd);
+                    currencyCommandMap.put(key, newCmd);
+                    registered++;
+
+                    nexusLogger.info("Registered new currency command: /" + sanitizeAlias(main)
+                            + (aliases.isEmpty() ? "" : " (" + String.join(", ", aliases) + ")"));
+                }
+            }
+
+            nexusLogger.info("Currency configurations reloaded: " + updated + " updated, " + registered + " newly registered.");
+
+            // Auto-initialize accounts for new currencies
+            if (!newCurrencies.isEmpty()) {
+                Bukkit.getScheduler().runTaskAsynchronously(this, () ->
+                        autoInitNewCurrencies(newCurrencies)
+                );
+            }
+        }
     }
+
+    /**
+     * Automatically creates accounts for new currencies for all players who have a vault account.
+     */
+    private void autoInitNewCurrencies(Set<String> newCurrencyKeys) {
+        try {
+            nexusLogger.info("Auto-initializing accounts for new currencies: " + String.join(", ", newCurrencyKeys));
+
+            // 1. First: Create accounts for all online players (immediate)
+            Set<UUID> onlinePlayerIds = Bukkit.getOnlinePlayers().stream()
+                    .map(org.bukkit.entity.Player::getUniqueId)
+                    .collect(java.util.stream.Collectors.toSet());
+
+            int onlineCreated = 0;
+            for (UUID playerId : onlinePlayerIds) {
+                var newCurrencies = newCurrencyKeys.stream()
+                        .map(nexEcoFactory::findByKey)
+                        .filter(Optional::isPresent)
+                        .map(Optional::get)
+                        .toList();
+
+                int created = ecoService.ensureAccountsForPlayer(playerId, newCurrencies);
+                if (created > 0) {
+                    ecoService.flushPlayerNow(playerId);
+                    onlineCreated += created;
+                }
+            }
+
+            nexusLogger.info("Created " + onlineCreated + " account(s) for " + onlinePlayerIds.size() + " online player(s).");
+
+            // 2. Then: Get all players with vault accounts from DB
+            String vaultKey = nexEcoFactory.keyOf(nexEcoFactory.getVaultCurrency());
+            Set<UUID> vaultPlayerIds = ecoPersistence.getAllPlayerIdsWithCurrency(vaultKey)
+                    .get(30, java.util.concurrent.TimeUnit.SECONDS);
+
+            // Remove online players (already handled)
+            vaultPlayerIds.removeAll(onlinePlayerIds);
+
+            if (vaultPlayerIds.isEmpty()) {
+                nexusLogger.info("No offline players with vault accounts found.");
+                return;
+            }
+
+            nexusLogger.info("Found " + vaultPlayerIds.size() + " offline player(s) with vault accounts. Creating accounts...");
+
+            // 3. Create accounts for offline players in batches
+            int batchSize = 100;
+            List<UUID> playerList = new ArrayList<>(vaultPlayerIds);
+            int offlineCreated = 0;
+
+            for (int i = 0; i < playerList.size(); i += batchSize) {
+                int end = Math.min(i + batchSize, playerList.size());
+                List<UUID> batch = playerList.subList(i, end);
+
+                for (UUID playerId : batch) {
+                    var newCurrencies = newCurrencyKeys.stream()
+                            .map(nexEcoFactory::findByKey)
+                            .filter(Optional::isPresent)
+                            .map(Optional::get)
+                            .toList();
+
+                    int created = ecoService.ensureAccountsForPlayer(playerId, newCurrencies);
+                    if (created > 0) {
+                        ecoService.flushPlayerNow(playerId);
+                        offlineCreated += created;
+                    }
+                }
+
+                nexusLogger.info("Progress: " + end + "/" + playerList.size() + " players processed.");
+            }
+
+            nexusLogger.info("Successfully created " + offlineCreated + " account(s) for " + vaultPlayerIds.size() + " offline player(s).");
+
+        } catch (Exception e) {
+            nexusLogger.error("Failed to auto-initialize new currency accounts: " + e.getMessage());
+            e.printStackTrace();
+        }
+    }
+
 
     private void registerCommands() {
         boolean redisEnabled = settingsFile != null && settingsFile.getBoolean("economy.redis.enabled", false);
@@ -177,10 +336,19 @@ public class NexEconomy extends JavaPlugin {
             );
             commandManager.registerCommand(cmd);
 
+            // Store command for reload updates
+            currencyCommandMap.put(key, cmd);
+
             nexusLogger.info("Registered currency command: /" + sanitizeAlias(main)
                     + (aliases.isEmpty() ? "" : " (" + String.join(", ", aliases) + ")"));
         }
+
+        // Register global commands (only once)
+        commandManager.registerCommand(new ReloadCommand());
     }
+
+
+
 
 
     private static String sanitizeAlias(String s) {

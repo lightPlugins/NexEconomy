@@ -9,11 +9,17 @@ import io.nexstudios.nexus.bukkit.language.NexusLanguage;
 import io.nexstudios.nexus.libs.commands.BaseCommand;
 import io.nexstudios.nexus.libs.commands.PaperCommandManager;
 import io.nexstudios.nexus.libs.commands.annotation.*;
+import net.kyori.adventure.text.minimessage.tag.resolver.Placeholder;
+import net.kyori.adventure.text.minimessage.tag.resolver.TagResolver;
+import net.kyori.adventure.text.serializer.plain.PlainTextComponentSerializer;
+import org.bukkit.Bukkit;
 import org.bukkit.OfflinePlayer;
 import org.bukkit.command.CommandSender;
+import org.bukkit.command.ConsoleCommandSender;
 import org.bukkit.entity.Player;
 
 import java.math.BigDecimal;
+import java.util.List;
 import java.util.Locale;
 import java.util.UUID;
 
@@ -24,7 +30,7 @@ import java.util.UUID;
 @Description("Economy commands for a specific currency")
 public class CurrencyCommand extends BaseCommand {
 
-    private final NexCurrency currency;
+    private NexCurrency currency;
     private final String key;
     private final NexEcoService eco;
     private final NexusLanguage lang;
@@ -45,8 +51,12 @@ public class CurrencyCommand extends BaseCommand {
         this.redisEnabled = redisEnabled;
         this.txLogger = txLogger;
         // Global completions are registered in NexEconomy.registerCommands()
-        // Keep per-instance logic minimal here.
     }
+
+    public void updateCurrency(NexCurrency newCurrency) {
+        this.currency = newCurrency;
+    }
+
 
     // balance (self)
     @Subcommand("balance")
@@ -54,16 +64,21 @@ public class CurrencyCommand extends BaseCommand {
     @Description("Show your balance")
     public void balanceSelf(CommandSender sender) {
         if (!hasPermission(sender, Permissions.CURRENCY_BALANCE_SELF, Permissions.GLOBAL_BALANCE_SELF)) {
-            sender.sendMessage("You lack permission.");
+            NexEconomy.getInstance().getMessageSender().send(sender, "general.no-permission");
             return;
         }
         if (!(sender instanceof Player player)) {
-            sender.sendMessage("Console: Please specify a player: /" + rootLabel() + " balance <player>");
+            NexEconomy.nexusLogger.error("Please specify a player: <dark_red>" + rootLabel() + "<red balance <player>");
             return;
         }
         BigDecimal bal = eco.getBalance(player.getUniqueId(), key);
-        sender.sendMessage("Balance (" + key + "): " + formatAmount(bal));
-        txLogger.log(player.getUniqueId(), key, "CMD_BALANCE_SELF", "balance=" + bal);
+        TagResolver resolve = TagResolver.resolver(
+                Placeholder.parsed("amount", formatAmount(bal)),
+                Placeholder.parsed("currency", bal.doubleValue() == 1 ?
+                        PlainTextComponentSerializer.plainText().serialize(currency.getSingularSymbol()) :
+                        PlainTextComponentSerializer.plainText().serialize(currency.getPluralSymbol()))
+        );
+        NexEconomy.getInstance().getMessageSender().send(sender, "currency.balance", resolve);
     }
 
     // balance other
@@ -73,12 +88,138 @@ public class CurrencyCommand extends BaseCommand {
     @Description("Show balance of another player")
     public void balanceOther(CommandSender sender, OfflinePlayer target) {
         if (!hasPermission(sender, Permissions.CURRENCY_BALANCE_OTHER, Permissions.GLOBAL_BALANCE_OTHER)) {
-            sender.sendMessage("You lack permission.");
+            NexEconomy.getInstance().getMessageSender().send(sender, "general.no-permission");
             return;
         }
+
         BigDecimal bal = eco.getBalance(target.getUniqueId(), key);
-        sender.sendMessage("Balance (" + key + ") of " + safeName(target) + ": " + formatAmount(bal));
-        txLogger.log(senderUuid(sender), key, "CMD_BALANCE_OTHER", "target=" + safeName(target) + " balance=" + bal);
+        TagResolver resolve = TagResolver.resolver(
+                Placeholder.parsed("amount", formatAmount(bal)),
+                Placeholder.parsed("currency", bal.doubleValue() == 1 ?
+                        PlainTextComponentSerializer.plainText().serialize(currency.getSingularSymbol()) :
+                        PlainTextComponentSerializer.plainText().serialize(currency.getPluralSymbol())),
+                Placeholder.parsed("target", safeName(target))
+        );
+        NexEconomy.getInstance().getMessageSender().send(sender, "currency.balance-other", resolve);
+    }
+
+    @Subcommand("baltop")
+    @CommandCompletion(" ")
+    @Description("Show top 10 players with highest balance")
+    public void balanceTop(CommandSender sender) {
+        if (!hasPermission(sender, Permissions.CURRENCY_BALANCE_TOP, Permissions.GLOBAL_BALANCE_TOP)) {
+            NexEconomy.getInstance().getMessageSender().send(sender, "general.no-permission");
+            return;
+        }
+
+        List<NexEcoService.AccountView> topAccounts = eco.getTopBalances(key, 10);
+
+        if (topAccounts.isEmpty()) {
+            NexEconomy.getInstance().getMessageSender().send(sender, "general.response-error", TagResolver.resolver(
+                    Placeholder.parsed("error", "No stored player found")
+            ));
+            return;
+        }
+
+        BigDecimal totalBalance = topAccounts.stream()
+                .map(NexEcoService.AccountView::balance)
+                .reduce(BigDecimal.ZERO, BigDecimal::add);
+
+        String currencySymbol = PlainTextComponentSerializer.plainText()
+                .serialize(totalBalance.compareTo(BigDecimal.ONE) == 0
+                        ? currency.getSingularSymbol()
+                        : currency.getPluralSymbol());
+
+        // Header
+        NexEconomy.getInstance().getMessageSender().send(sender, "currency.baltop.header",
+                TagResolver.resolver(
+                        Placeholder.parsed("overall", formatAmount(totalBalance)),
+                        Placeholder.parsed("currency", currencySymbol)
+                )
+        ,false);
+
+        // Content
+        int position = 1;
+        for (NexEcoService.AccountView account : topAccounts) {
+            // max entries -> 10
+            if(position > 5) break;
+            OfflinePlayer player = Bukkit.getOfflinePlayer(account.playerId());
+            String playerName = safeName(player);
+
+            String symbol = PlainTextComponentSerializer.plainText()
+                    .serialize(account.balance().compareTo(BigDecimal.ONE) == 0
+                            ? currency.getSingularSymbol()
+                            : currency.getPluralSymbol());
+
+            NexEconomy.getInstance().getMessageSender().send(sender, "currency.baltop.content",
+                    TagResolver.resolver(
+                            Placeholder.parsed("number", String.valueOf(position)),
+                            Placeholder.parsed("name", playerName),
+                            Placeholder.parsed("amount", formatAmount(account.balance())),
+                            Placeholder.parsed("currency", symbol)
+                    )
+            , false);
+            position++;
+        }
+
+        // Footer
+        NexEconomy.getInstance().getMessageSender().send(sender, "currency.baltop.footer", false);
+    }
+
+
+    @Subcommand("set")
+    @CommandCompletion("@ecoPlayers @ecoAmounts @ecoFlags")
+    @Syntax("<player> <amount> [-s]")
+    @Description("Set balance of another player")
+    public void set(CommandSender sender, OfflinePlayer target, String amountStr, @Optional String silentFlag) {
+        if (!hasPermission(sender, Permissions.CURRENCY_SET, Permissions.GLOBAL_SET)) {
+            NexEconomy.getInstance().getMessageSender().send(sender, "general.no-permission");
+            return;
+        }
+
+        if (!redisEnabled && !isLocalOnline(target)) {
+            NexEconomy.getInstance().getMessageSender().send(sender, "general.cross-server-error");
+            return;
+        }
+
+        if (!isLocalOnline(target)) {
+            NexEconomy.getInstance().getMessageSender().send(sender, "general.player-not-found");
+            return;
+        }
+
+        BigDecimal amount = parseAmount(amountStr);
+        if (amount == null) {
+            NexEconomy.getInstance().getMessageSender().send(sender, "general.wrong-amount");
+            return;
+        }
+
+        NexEcoResponse res = eco.setBalance(target.getUniqueId(), key, amount);
+
+        txLogger.log(senderUuid(sender), key, "CMD_SET",
+                "target=" + safeName(target) + " amount=" + amount + " res=" + res.responseType() + " bal=" + res.balance());
+
+        if(isSilent(silentFlag) && sender instanceof ConsoleCommandSender) {
+            return;
+        }
+
+        TagResolver resolve = TagResolver.resolver(
+                Placeholder.parsed("amount", formatAmount(amount)),
+                Placeholder.parsed("currency", amount.doubleValue() == 1 ?
+                        PlainTextComponentSerializer.plainText().serialize(currency.getSingularSymbol()) :
+                        PlainTextComponentSerializer.plainText().serialize(currency.getPluralSymbol())),
+                Placeholder.parsed("target", safeName(target)),
+                Placeholder.parsed("player", sender.getName()),
+                Placeholder.parsed("error", res.errorMessage() == null ? "" : res.errorMessage())
+        );
+
+        if(res.isSuccess()) {
+            NexEconomy.getInstance().getMessageSender().send(sender, "currency.set", resolve);
+            if(!isSilent(silentFlag) && target.isOnline()) {
+                NexEconomy.getInstance().getMessageSender().send(target.getPlayer(), "currency.set-target", resolve);
+            }
+        } else {
+            NexEconomy.getInstance().getMessageSender().send(sender, "general.response-error", resolve);
+        }
     }
 
     // deposit
@@ -88,36 +229,51 @@ public class CurrencyCommand extends BaseCommand {
     @Description("Deposit amount to a player")
     public void deposit(CommandSender sender, OfflinePlayer target, String amountStr, @Optional String silentFlag) {
         if (!hasPermission(sender, Permissions.CURRENCY_DEPOSIT, Permissions.GLOBAL_DEPOSIT)) {
-            sender.sendMessage("You lack permission.");
+            NexEconomy.getInstance().getMessageSender().send(sender, "general.no-permission");
             return;
         }
 
         if (!redisEnabled && !isLocalOnline(target)) {
-            sender.sendMessage("Target is not online on this server (cross-server disabled).");
+            NexEconomy.getInstance().getMessageSender().send(sender, "general.cross-server-error");
+            return;
+        }
+
+        if (!isLocalOnline(target)) {
+            NexEconomy.getInstance().getMessageSender().send(sender, "general.player-not-found");
             return;
         }
 
         BigDecimal amount = parseAmount(amountStr);
         if (amount == null) {
-            sender.sendMessage("Invalid amount.");
+            NexEconomy.getInstance().getMessageSender().send(sender, "general.wrong-amount");
             return;
         }
 
         NexEcoResponse res = eco.deposit(target, key, amount);
         txLogger.log(senderUuid(sender), key, "CMD_DEPOSIT",
                 "target=" + safeName(target) + " amount=" + amount + " res=" + res.responseType() + " bal=" + res.balance());
+        
+        if(isSilent(silentFlag) && sender instanceof ConsoleCommandSender) {
+            return;
+        }
 
-        switch (res.responseType()) {
-            case SUCCESS -> {
-                sender.sendMessage("Deposited " + formatAmount(res.amount()) + " to " + safeName(target) + ". New balance: " + formatAmount(res.balance()));
-                if (!isSilent(silentFlag) && target.isOnline()) {
-                    target.getPlayer().sendMessage("You received " + formatAmount(res.amount()) + " (" + key + "). New balance: " + formatAmount(res.balance()));
-                }
+        TagResolver resolve = TagResolver.resolver(
+                Placeholder.parsed("amount", formatAmount(amount)),
+                Placeholder.parsed("currency", amount.doubleValue() == 1 ?
+                        PlainTextComponentSerializer.plainText().serialize(currency.getSingularSymbol()) :
+                        PlainTextComponentSerializer.plainText().serialize(currency.getPluralSymbol())),
+                Placeholder.parsed("target", safeName(target)),
+                Placeholder.parsed("player", sender.getName()),
+                Placeholder.parsed("error", res.errorMessage() == null ? "" : res.errorMessage())
+        );
+
+        if(res.isSuccess()) {
+            NexEconomy.getInstance().getMessageSender().send(sender, "currency.deposit", resolve);
+            if(!isSilent(silentFlag) && target.isOnline()) {
+                NexEconomy.getInstance().getMessageSender().send(target.getPlayer(), "currency.deposit-other", resolve);
             }
-            case NOT_NEGATIVE -> sender.sendMessage("Amount must be positive.");
-            case MAX_BALANCE -> sender.sendMessage("Clamped to max balance. Applied: " + formatAmount(res.amount()) + ". New balance: " + formatAmount(res.balance()));
-            case FAILURE, UNKNOWN -> sender.sendMessage("Operation failed.");
-            default -> sender.sendMessage("Unsupported result: " + res.responseType());
+        } else {
+            NexEconomy.getInstance().getMessageSender().send(sender, "general.response-error", resolve);
         }
     }
 
@@ -128,18 +284,23 @@ public class CurrencyCommand extends BaseCommand {
     @Description("Withdraw amount from a player")
     public void withdraw(CommandSender sender, OfflinePlayer target, String amountStr, @Optional String silentFlag) {
         if (!hasPermission(sender, Permissions.CURRENCY_WITHDRAW, Permissions.GLOBAL_WITHDRAW)) {
-            sender.sendMessage("You lack permission.");
+            NexEconomy.getInstance().getMessageSender().send(sender, "general.no-permission");
             return;
         }
 
         if (!redisEnabled && !isLocalOnline(target)) {
-            sender.sendMessage("Target is not online on this server (cross-server disabled).");
+            NexEconomy.getInstance().getMessageSender().send(sender, "general.cross-server-error");
+            return;
+        }
+
+        if (!isLocalOnline(target)) {
+            NexEconomy.getInstance().getMessageSender().send(sender, "general.player-not-found");
             return;
         }
 
         BigDecimal amount = parseAmount(amountStr);
         if (amount == null) {
-            sender.sendMessage("Invalid amount.");
+            NexEconomy.getInstance().getMessageSender().send(sender, "general.wrong-amount");
             return;
         }
 
@@ -147,21 +308,29 @@ public class CurrencyCommand extends BaseCommand {
         txLogger.log(senderUuid(sender), key, "CMD_WITHDRAW",
                 "target=" + safeName(target) + " amount=" + amount + " res=" + res.responseType() + " bal=" + res.balance());
 
-        switch (res.responseType()) {
-            case SUCCESS -> {
-                sender.sendMessage("Withdrew " + formatAmount(res.amount()) + " from " + safeName(target) + ". New balance: " + formatAmount(res.balance()));
-                if (!isSilent(silentFlag) && target.isOnline()) {
-                    target.getPlayer().sendMessage("You paid " + formatAmount(res.amount()) + " (" + key + "). New balance: " + formatAmount(res.balance()));
-                }
+        if(isSilent(silentFlag) && sender instanceof ConsoleCommandSender) {
+            return;
+        }
+
+        TagResolver resolve = TagResolver.resolver(
+                Placeholder.parsed("amount", formatAmount(amount)),
+                Placeholder.parsed("currency", amount.doubleValue() == 1 ?
+                        PlainTextComponentSerializer.plainText().serialize(currency.getSingularSymbol()) :
+                        PlainTextComponentSerializer.plainText().serialize(currency.getPluralSymbol())),
+                Placeholder.parsed("target", safeName(target)),
+                Placeholder.parsed("player", sender.getName()),
+                Placeholder.parsed("error", res.errorMessage() == null ? "" : res.errorMessage())
+        );
+
+        if(res.isSuccess()) {
+            NexEconomy.getInstance().getMessageSender().send(sender, "currency.withdraw", resolve);
+            if(!isSilent(silentFlag) && target.isOnline()) {
+                NexEconomy.getInstance().getMessageSender().send(target.getPlayer(), "currency.withdraw-target", resolve);
             }
-            case NOT_NEGATIVE -> sender.sendMessage("Amount must be positive.");
-            case NOT_ENOUGH -> sender.sendMessage("Not enough balance.");
-            case FAILURE, UNKNOWN -> sender.sendMessage("Operation failed.");
-            default -> sender.sendMessage("Unsupported result: " + res.responseType());
+        } else {
+            NexEconomy.getInstance().getMessageSender().send(sender, "general.response-error", resolve);
         }
     }
-
-    // ----- helpers -----
 
     private boolean hasPermission(CommandSender sender, Permissions specific, Permissions global) {
         String specificNode = specific.withKey(key);

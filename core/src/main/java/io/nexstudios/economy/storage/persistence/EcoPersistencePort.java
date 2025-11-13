@@ -4,6 +4,7 @@ import io.nexstudios.economy.storage.persistence.model.DbAccountSnapshot;
 
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
 
@@ -18,6 +19,12 @@ public interface EcoPersistencePort {
      * Loads all accounts of a player in a single query.
      */
     CompletableFuture<Map<String, DbAccountSnapshot>> loadAllAccountsForPlayer(UUID playerId);
+
+    /**
+     * Returns all player UUIDs that have an account for the given currency.
+     */
+    CompletableFuture<Set<UUID>> getAllPlayerIdsWithCurrency(String currencyKey);
+
 
     /**
      * Loads versions (and optionally balances) for a player to compare staleness (cheap metadata query).

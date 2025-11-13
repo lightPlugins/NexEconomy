@@ -2,4 +2,29 @@ general:
   prefix: '<yellow>[<gold>NEXDROPS<yellow>]</yellow>'
   no-permission: '<red>You do not have permission to perform this command.</red>'
   reload: '<gray>Configuration reloaded <yellow>successfully<gray>!'#
+  wrong-amount: '<red>Please enter a valid amount.</red>'
   switch-language: '<gray>Language switched to <yellow><nex_language><gray>!'
+  response-error: '<red>An error occurred while processing your request. <dark_red><error></red>'
+  cross-server-error: '<red>Target is not online on this server <dark_red>(cross-server disabled)<red>.'
+  player-not-found: '<red>Player <dark_red><player> <red>could not be found.</red>'
+currency:
+  balance: '<gray>You have <yellow><amount> <gray><currency>.'
+  balance-other: '<gray>Player <yellow><target> has <yellow><amount> <gray><currency>.'
+  set: '<gray>You have set the balance of <yellow><target><gray> to <yellow><amount> <gray><currency>.'
+  set-target: '<gray>The player <yellow><player> <gray>has set your balance to <yellow><amount> <gray><currency>.'
+  deposit: '<gray>You have deposited <yellow><amount> <gray><currency> to <yellow><target><gray>.'
+  deposit-other: '<gray>You received <yellow><amount> <gray><currency> from <yellow><target><gray>.'
+  withdraw: '<gray>You have withdrawn <yellow><amount> <gray><currency> from <yellow><target><gray>.'
+  withdraw-other: '<gray>You have removed <yellow><amount> <gray><currency> from <yellow><target><gray>.'
+  baltop:
+    header:
+      - '<gray><strikethrough>-----</strikethrough><yellow>●<gray><strikethrough>-----</strikethrough> <yellow><bold><italic>NEX<gray>Economy <reset><gray><strikethrough>-----</strikethrough><yellow>●<gray><strikethrough>-----</strikethrough>'
+      - ' <gray>Top 10 Players with the largest'
+      - '     <gray>balance on the server'
+      - ' '
+      - '<dark_gray>● <yellow><bold>Overall<reset> <gray>- <yellow><overall> <gray><currency>'
+      - ' '
+    content: '<dark_gray>● <yellow><bold><number><reset><gray># <dark_gray>● <yellow><name> <gray>- <yellow><amount> <gray><currency>'
+    footer:
+      - ' '
+      - '<gray><strikethrough>-----</strikethrough><yellow>●<gray><strikethrough>-----</strikethrough> <gray><strikethrough>-----</strikethrough><yellow>●<gray>⏺<yellow>●<gray><strikethrough>-----</strikethrough> <gray><strikethrough>-----</strikethrough><yellow>●<gray><strikethrough>-----</strikethrough>'

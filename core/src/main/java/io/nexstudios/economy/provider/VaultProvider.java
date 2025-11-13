@@ -16,7 +16,21 @@ import java.math.RoundingMode;
 import java.util.List;
 import java.util.Locale;
 
-public record VaultProvider(NexCurrency currency, NexEcoService eco) implements Economy {
+public class VaultProvider implements Economy {
+
+    private NexCurrency currency; // Nicht mehr final!
+    private final NexEcoService eco;
+
+    public VaultProvider(NexCurrency currency, NexEcoService eco) {
+        this.currency = currency;
+        this.eco = eco;
+    }
+
+    public void updateCurrency(NexCurrency newCurrency) {
+        this.currency = newCurrency;
+    }
+
+
 
     private String key() {
         return PlainTextComponentSerializer.plainText()

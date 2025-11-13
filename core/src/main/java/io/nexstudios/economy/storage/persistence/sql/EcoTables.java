@@ -46,10 +46,15 @@ final class EcoTables {
                 + " FROM " + TABLE + " WHERE " + COL_PLAYER + " = ?";
     }
 
-    static String selectAllRows() {
+    public static String selectAllRows() {
         return "SELECT " + COL_PLAYER + ", " + COL_CURRENCY + ", " + COL_BALANCE + ", " + COL_VERSION + ", " + COL_UPDATED_AT
                 + " FROM " + TABLE;
     }
+
+    static String selectDistinctPlayersByCurrency() {
+        return "SELECT DISTINCT " + COL_PLAYER + " FROM " + TABLE + " WHERE " + COL_CURRENCY + " = ?";
+    }
+
 
     static String upsertMySql() {
         return "INSERT INTO " + TABLE + " ("

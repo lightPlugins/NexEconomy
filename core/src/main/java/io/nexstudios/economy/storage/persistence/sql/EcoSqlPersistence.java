@@ -51,6 +51,37 @@ public record EcoSqlPersistence(DataSource dataSource, EcoSqlDialect dialect) im
     }
 
     @Override
+    public CompletableFuture<Set<UUID>> getAllPlayerIdsWithCurrency(String currencyKey) {
+        return CompletableFuture.supplyAsync(() -> {
+            String sql = EcoTables.selectDistinctPlayersByCurrency();
+            Set<UUID> playerIds = new HashSet<>();
+
+            try (Connection conn = dataSource.getConnection();
+                 PreparedStatement stmt = conn.prepareStatement(sql)) {
+
+                stmt.setString(1, currencyKey.toLowerCase(Locale.ROOT));
+
+                try (ResultSet rs = stmt.executeQuery()) {
+                    while (rs.next()) {
+                        String uuidStr = rs.getString(EcoTables.COL_PLAYER);
+                        try {
+                            playerIds.add(UUID.fromString(uuidStr));
+                        } catch (IllegalArgumentException ignored) {
+                            // Skip invalid UUIDs
+                        }
+                    }
+                }
+            } catch (SQLException e) {
+                throw new RuntimeException("Failed to load player IDs for currency: " + currencyKey, e);
+            }
+
+            return playerIds;
+        });
+    }
+
+
+
+    @Override
     public CompletableFuture<Map<String, DbAccountSnapshot>> loadVersionsForPlayer(UUID playerId) {
         return CompletableFuture.supplyAsync(() -> {
             String sql = EcoTables.selectVersionsForPlayer();

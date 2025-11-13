@@ -11,7 +11,8 @@ import java.util.UUID;
 public class PlayerAccount {
     private final UUID playerId;
     private final String currencyKey;
-    private final NexCurrency currency;
+    @Setter
+    private NexCurrency currency;
     @Setter
     private BigDecimal balance;
 

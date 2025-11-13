@@ -301,6 +301,19 @@ public class InMemoryEcoService implements NexEcoService {
     }
 
     @Override
+    public List<AccountView> getTopBalances(String currencyKey, int limit) {
+        String cKey = currencyKey.toLowerCase(Locale.ROOT);
+        return cache.entrySet().stream()
+                .filter(e -> e.getKey().currencyKey().equals(cKey))
+                .sorted((e1, e2) -> e2.getValue().getBalance().compareTo(e1.getValue().getBalance()))
+                .limit(limit)
+                .map(e -> (AccountView) new ViewImpl(e.getValue()))
+                .toList();
+    }
+
+
+
+    @Override
     public boolean has(UUID playerId, String currencyKey, BigDecimal amount) {
         if (amount == null || amount.signum() <= 0) return true;
         AccountKey ak = new AccountKey(playerId, currencyKey);
@@ -308,6 +321,38 @@ public class InMemoryEcoService implements NexEcoService {
         if (acc == null) return false;
         BigDecimal scaled = EcoMath.scale(acc.getCurrency(), amount);
         return acc.getBalance().compareTo(scaled) >= 0;
+    }
+
+    @Override
+    public NexEcoResponse setBalance(UUID playerId, String currencyKey, BigDecimal amount) {
+        AccountKey ak = new AccountKey(playerId, currencyKey);
+        PlayerAccount acc = cache.get(ak);
+        if (acc == null) {
+            getBalance(playerId, currencyKey);
+            acc = cache.get(ak);
+        }
+
+        Lock lock = locks.lockFor(ak);
+        lock.lock();
+
+        try {
+            if (amount == null || amount.signum() <= 0) {
+                txLogger.log(playerId, currencyKey, "DEPOSIT", "amount=0 result=NOT_NEGATIVE");
+                return new NexEcoResponse(BigDecimal.ZERO, acc.getBalance(), NOT_NEGATIVE, "Amount must be positive");
+            }
+            BigDecimal scaled = EcoMath.scale(acc.getCurrency(), amount);
+
+            acc.setBalance(scaled);
+            acc.setVersion(acc.getVersion() + 1);
+            acc.setDirty(true);
+            acc.setUpdatedAtMillis(System.currentTimeMillis());
+            playerCurrencies.computeIfAbsent(playerId, id -> new HashSet<>()).add(currencyKey);
+
+            txLogger.log(playerId, currencyKey, "SET", "amount=" + scaled + " balance=" + scaled + " result=SUCCESS");
+            return new NexEcoResponse(scaled, scaled, SUCCESS, null);
+        } finally {
+            lock.unlock();
+        }
     }
 
     @Override
@@ -386,6 +431,29 @@ public class InMemoryEcoService implements NexEcoService {
             lock.unlock();
         }
     }
+
+    public int refreshCurrencies() {
+        int updated = 0;
+        for (Map.Entry<AccountKey, PlayerAccount> entry : cache.entrySet()) {
+            AccountKey ak = entry.getKey();
+            PlayerAccount acc = entry.getValue();
+
+            Optional<NexCurrency> freshCurrency = currencyLookup.findByKey(ak.currencyKey());
+            if (freshCurrency.isEmpty()) continue;
+
+            Lock lock = locks.lockFor(ak);
+            lock.lock();
+            try {
+                // Update the currency reference in the account
+                acc.setCurrency(freshCurrency.get());
+                updated++;
+            } finally {
+                lock.unlock();
+            }
+        }
+        return updated;
+    }
+
 
     public int importAllSnapshots(Map<UUID, Map<String, DbAccountSnapshot>> all) {
         if (all == null || all.isEmpty()) return 0;

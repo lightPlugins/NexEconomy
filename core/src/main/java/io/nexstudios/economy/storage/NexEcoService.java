@@ -4,6 +4,7 @@ import io.nexstudios.economy.currency.NexCurrency;
 import org.bukkit.OfflinePlayer;
 
 import java.math.BigDecimal;
+import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
 
@@ -22,9 +23,14 @@ public interface NexEcoService {
     // Checks
     boolean has(UUID playerId, String currencyKey, BigDecimal amount);
 
+    NexEcoResponse setBalance(UUID playerId, String currencyKey, BigDecimal amount);
+
     // Mutationen
     NexEcoResponse deposit(UUID playerId, String currencyKey, BigDecimal amount);
     NexEcoResponse withdraw(UUID playerId, String currencyKey, BigDecimal amount);
+
+    // Top Balances
+    List<AccountView> getTopBalances(String currencyKey, int limit);
 
     // Komfort-Overloads
     default boolean hasAccount(OfflinePlayer player, String currencyKey) {
