@@ -18,7 +18,7 @@ import java.util.Locale;
 
 public class VaultProvider implements Economy {
 
-    private NexCurrency currency; // Nicht mehr final!
+    private NexCurrency currency;
     private final NexEcoService eco;
 
     public VaultProvider(NexCurrency currency, NexEcoService eco) {
@@ -29,8 +29,6 @@ public class VaultProvider implements Economy {
     public void updateCurrency(NexCurrency newCurrency) {
         this.currency = newCurrency;
     }
-
-
 
     private String key() {
         return PlainTextComponentSerializer.plainText()

@@ -27,6 +27,7 @@ import org.bukkit.plugin.RegisteredServiceProvider;
 import org.bukkit.plugin.ServicePriority;
 import org.bukkit.plugin.java.JavaPlugin;
 
+import javax.sql.DataSource;
 import java.time.Duration;
 import java.util.*;
 import java.util.concurrent.TimeUnit;
@@ -347,10 +348,6 @@ public class NexEconomy extends JavaPlugin {
         commandManager.registerCommand(new ReloadCommand());
     }
 
-
-
-
-
     private static String sanitizeAlias(String s) {
         if (s == null) return "";
         String t = s.trim();
@@ -384,9 +381,7 @@ public class NexEconomy extends JavaPlugin {
     }
 
 
-    private void registerListeners() {
-        // other listeners if any
-    }
+    private void registerListeners() { }
 
     private void loadNexusFiles() {
         settingsFile = new NexusFile(this, "settings.yml", nexusLogger, true);
@@ -470,7 +465,7 @@ public class NexEconomy extends JavaPlugin {
         } catch (Exception ignored) {
             // Fallback remains MYSQL
         }
-        javax.sql.DataSource ds = db.getDataSource();
+        DataSource ds = db.getDataSource();
         return new EcoSqlPersistence(ds, dialect);
     }
 

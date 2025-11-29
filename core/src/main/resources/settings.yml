@@ -1,3 +1,15 @@
+# ######################################################  #
+#                    LANGUAGE SETTINGS                     #
+# ######################################################  #
+# Here you can manage the general settings for the core plugin.
+language: english
+
+# ######################################################  #
+#                     LOGGING SYSTEM                      #
+# ######################################################  #
+# The Debug Logging system for the core plugin
+# You can enable or disable the debug logging system
+# and set the debug level.
 logging:
   debug:
     enable: false
