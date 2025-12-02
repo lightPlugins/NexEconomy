@@ -45,4 +45,15 @@ public interface EcoPersistencePort {
      * - SQLite: INSERT ... ON CONFLICT(player_uuid, currency_key) DO UPDATE
      */
     CompletableFuture<Void> upsertBatch(Map<UUID, List<DbAccountSnapshot>> batchByPlayer);
+
+    /**
+     * Deletes all accounts of a specific player from persistence.
+     */
+    CompletableFuture<Void> deletePlayer(UUID playerId);
+
+    /**
+     * Deletes all accounts of all players from persistence.
+     */
+    CompletableFuture<Void> deleteAll();
+
 }

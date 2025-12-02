@@ -164,7 +164,7 @@ public class NexEcoFactory {
 
         final int fractionDigits = config.getInt("fraction-digits", 2);
 
-        String rawType = config.getString("type", "vault");
+        String rawType = config.getString("currency-type", "vault");
         String normalizedType = rawType.trim().toUpperCase(Locale.ROOT);
 
         NexCurrencyType parsedType;
@@ -228,7 +228,7 @@ public class NexEcoFactory {
         config.set("command.main", currency.getMainCommand());
         config.set("command.aliases", currency.getAliases());
         config.set("fraction-digits", currency.getFractionDigits());
-        config.set("type", currency.getCurrencyType().name());
+        config.set("currency-type", currency.getCurrencyType().name());
         config.set("start-balance", currency.getStartBalance());
         config.set("max-balance", currency.getMaxBalance());
 

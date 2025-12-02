@@ -1,5 +1,5 @@
 general:
-  prefix: '<yellow>[<gold>NEXDROPS<yellow>]</yellow>'
+  prefix: '<yellow>[<gold>NEXECONOMY<yellow>]</yellow>'
   no-permission: '<red>You do not have permission to perform this command.</red>'
   reload: '<gray>Configuration reloaded <yellow>successfully<gray>!'#
   wrong-amount: '<red>Please enter a valid amount.</red>'
@@ -7,6 +7,10 @@ general:
   response-error: '<red>An error occurred while processing your request. <dark_red><error></red>'
   cross-server-error: '<red>Target is not online on this server <dark_red>(cross-server disabled)<red>.'
   player-not-found: '<red>Player <dark_red><player> <red>could not be found.</red>'
+  reset-player-start: '<red>Staring reset of player <dark_red><player> <red>...'
+  reset-player-complete: '<gray>Reset of player <yellow><player> <gray>completed successfully.'
+  reset-global: '<red>Starting global reset of all players ...'
+  reset-global-complete: '<gray>Global reset completed successfully.'
 currency:
   balance: '<gray>You have <yellow><amount> <gray><currency>.'
   balance-other: '<gray>Player <yellow><target> has <yellow><amount> <gray><currency>.'

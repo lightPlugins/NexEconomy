@@ -177,6 +177,33 @@ public record EcoSqlPersistence(DataSource dataSource, EcoSqlDialect dialect) im
         });
     }
 
+    @Override
+    public CompletableFuture<Void> deletePlayer(UUID playerId) {
+        return CompletableFuture.runAsync(() -> {
+            String sql = EcoTables.deleteByPlayer();
+            try (Connection c = dataSource.getConnection();
+                 PreparedStatement ps = c.prepareStatement(sql)) {
+                SqlUtil.setUuid(ps, 1, playerId);
+                ps.executeUpdate();
+            } catch (SQLException e) {
+                throw new RuntimeException("deletePlayer failed: " + e.getMessage(), e);
+            }
+        });
+    }
+
+    @Override
+    public CompletableFuture<Void> deleteAll() {
+        return CompletableFuture.runAsync(() -> {
+            String sql = EcoTables.deleteAllRows();
+            try (Connection c = dataSource.getConnection();
+                 PreparedStatement ps = c.prepareStatement(sql)) {
+                ps.executeUpdate();
+            } catch (SQLException e) {
+                throw new RuntimeException("deleteAll failed: " + e.getMessage(), e);
+            }
+        });
+    }
+
     private void ensureSchema() {
         String ddl = (dialect == EcoSqlDialect.SQLITE) ? EcoTables.ddlSqlite() : EcoTables.ddlMySql();
         try (Connection c = dataSource.getConnection();

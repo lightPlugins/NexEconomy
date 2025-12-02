@@ -337,7 +337,7 @@ public class InMemoryEcoService implements NexEcoService {
 
         try {
             if (amount == null || amount.signum() <= 0) {
-                txLogger.log(playerId, currencyKey, "DEPOSIT", "amount=0 result=NOT_NEGATIVE");
+                txLogger.log(playerId, currencyKey, "SET", "amount=0 result=NOT_NEGATIVE");
                 return new NexEcoResponse(BigDecimal.ZERO, acc.getBalance(), NOT_NEGATIVE, "Amount must be positive");
             }
             BigDecimal scaled = EcoMath.scale(acc.getCurrency(), amount);
@@ -485,6 +485,85 @@ public class InMemoryEcoService implements NexEcoService {
             }
         }
         return imported;
+    }
+
+    /**
+     * Deletes all accounts for a specific player (cache + DB) and recreates
+     * fresh accounts with start balance for the given currencies.
+     *
+     * @param playerId   UUID of the player
+     * @param currencies currencies for which new accounts should be created
+     * @return number of newly created accounts
+     */
+    public int resetPlayer(UUID playerId, Collection<NexCurrency> currencies) {
+        Objects.requireNonNull(playerId, "playerId");
+
+        // 1) Cache & Tracking säubern
+        Set<String> keys = playerCurrencies.getOrDefault(playerId, Set.of());
+        for (String cKey : keys) {
+            AccountKey ak = new AccountKey(playerId, cKey);
+            Lock lock = locks.lockFor(ak);
+            lock.lock();
+            try {
+                cache.remove(ak);
+            } finally {
+                lock.unlock();
+            }
+        }
+        playerCurrencies.remove(playerId);
+
+        // 2) DB-Einträge dieses Spielers löschen
+        try {
+            persistence.deletePlayer(playerId).join();
+        } catch (Exception ex) {
+            NexEconomy.nexusLogger.error("Eco: resetPlayer DB delete failed for " + playerId + ": " + ex.getMessage());
+            txLogger.logRaw("ERROR", "resetPlayer deletePlayer failed: player=" + playerId + " msg=" + ex.getMessage());
+        }
+
+        // 3) Neue Accounts im Cache anlegen
+        int created = ensureAccountsForPlayer(playerId, currencies);
+
+        // 4) Direkt in DB flushen
+        if (created > 0) {
+            flushPlayerNow(playerId);
+        }
+
+        return created;
+    }
+
+    /**
+     * Deletes all accounts of all players (cache + DB).
+     * Afterwards, optionally recreates accounts for the given currencies
+     * for all currently online players.
+     *
+     * @param currencies currencies for which online players should get fresh accounts
+     * @return number of newly created accounts
+     */
+    public int resetAllPlayers(Collection<NexCurrency> currencies) {
+        // 1) Cache und Tracking komplett leeren
+        cache.clear();
+        playerCurrencies.clear();
+
+        // 2) Alle DB-Einträge löschen
+        try {
+            persistence.deleteAll().join();
+        } catch (Exception ex) {
+            NexEconomy.nexusLogger.error("Eco: resetAllPlayers DB deleteAll failed: " + ex.getMessage());
+            txLogger.logRaw("ERROR", "resetAllPlayers deleteAll failed: msg=" + ex.getMessage());
+        }
+
+        // 3) Für alle aktuell online Spieler Accounts neu erzeugen und flushen
+        int totalCreated = 0;
+        var onlinePlayers = org.bukkit.Bukkit.getOnlinePlayers();
+        for (org.bukkit.entity.Player p : onlinePlayers) {
+            UUID playerId = p.getUniqueId();
+            int created = ensureAccountsForPlayer(playerId, currencies);
+            if (created > 0) {
+                flushPlayerNow(playerId);
+                totalCreated += created;
+            }
+        }
+        return totalCreated;
     }
 
     private int getImported(int imported, UUID playerId, String cKey, DbAccountSnapshot snap, NexCurrency currency, AccountKey ak) {

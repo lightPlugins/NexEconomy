@@ -136,13 +136,11 @@ public class CurrencyCommand extends BaseCommand {
                         Placeholder.parsed("overall", formatAmount(totalBalance)),
                         Placeholder.parsed("currency", currencySymbol)
                 )
-        ,false);
+                ,false);
 
         // Content
         int position = 1;
         for (NexEcoService.AccountView account : topAccounts) {
-            // max entries -> 10
-            if(position > 5) break;
             OfflinePlayer player = Bukkit.getOfflinePlayer(account.playerId());
             String playerName = safeName(player);
 
@@ -158,7 +156,7 @@ public class CurrencyCommand extends BaseCommand {
                             Placeholder.parsed("amount", formatAmount(account.balance())),
                             Placeholder.parsed("currency", symbol)
                     )
-            , false);
+                    , false);
             position++;
         }
 

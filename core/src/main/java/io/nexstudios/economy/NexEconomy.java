@@ -1,8 +1,9 @@
 package io.nexstudios.economy;
 
 import io.nexstudios.economy.commands.CurrencyCommand;
-import io.nexstudios.economy.commands.ReloadCommand;
+import io.nexstudios.economy.commands.MainCommand;
 import io.nexstudios.economy.currency.NexCurrency;
+import io.nexstudios.economy.placeholder.NexEconomyPlaceholderProvider;
 import io.nexstudios.economy.storage.InMemoryEcoService;
 import io.nexstudios.economy.storage.persistence.EcoPersistencePort;
 import io.nexstudios.economy.storage.persistence.sql.EcoSqlDialect;
@@ -16,11 +17,13 @@ import io.nexstudios.nexus.bukkit.files.NexusFile;
 import io.nexstudios.nexus.bukkit.files.NexusFileReader;
 import io.nexstudios.nexus.bukkit.handler.MessageSender;
 import io.nexstudios.nexus.bukkit.language.NexusLanguage;
+import io.nexstudios.nexus.bukkit.placeholder.NexusPlaceholderRegistry;
 import io.nexstudios.nexus.bukkit.utils.NexusLogger;
 import io.nexstudios.nexus.libs.commands.PaperCommandManager;
 import lombok.Getter;
 import net.milkbowl.vault.economy.Economy;
 import org.bukkit.Bukkit;
+import org.bukkit.OfflinePlayer;
 import org.bukkit.entity.Player;
 import org.bukkit.event.HandlerList;
 import org.bukkit.plugin.RegisteredServiceProvider;
@@ -32,6 +35,7 @@ import java.time.Duration;
 import java.util.*;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
+import java.util.stream.Collectors;
 
 @Getter
 public class NexEconomy extends JavaPlugin {
@@ -95,6 +99,7 @@ public class NexEconomy extends JavaPlugin {
                 transactionLogger
         );
 
+        registerPlaceholders();
 
         try {
             var fut = ecoPersistence.loadAllAccountsAllPlayers();
@@ -241,8 +246,8 @@ public class NexEconomy extends JavaPlugin {
 
             // 1. First: Create accounts for all online players (immediate)
             Set<UUID> onlinePlayerIds = Bukkit.getOnlinePlayers().stream()
-                    .map(org.bukkit.entity.Player::getUniqueId)
-                    .collect(java.util.stream.Collectors.toSet());
+                    .map(Player::getUniqueId)
+                    .collect(Collectors.toSet());
 
             int onlineCreated = 0;
             for (UUID playerId : onlinePlayerIds) {
@@ -264,7 +269,7 @@ public class NexEconomy extends JavaPlugin {
             // 2. Then: Get all players with vault accounts from DB
             String vaultKey = nexEcoFactory.keyOf(nexEcoFactory.getVaultCurrency());
             Set<UUID> vaultPlayerIds = ecoPersistence.getAllPlayerIdsWithCurrency(vaultKey)
-                    .get(30, java.util.concurrent.TimeUnit.SECONDS);
+                    .get(30, TimeUnit.SECONDS);
 
             // Remove online players (already handled)
             vaultPlayerIds.removeAll(onlinePlayerIds);
@@ -314,11 +319,21 @@ public class NexEconomy extends JavaPlugin {
     private void registerCommands() {
         boolean redisEnabled = settingsFile != null && settingsFile.getBoolean("economy.redis.enabled", false);
 
-        // Global completions (no dynamic placeholders)
+        // Global completions (dynamic placeholders)
         commandManager.getCommandCompletions().registerCompletion("ecoPlayers",
                 c -> Bukkit.getOnlinePlayers().stream().map(Player::getName).toList());
         commandManager.getCommandCompletions().registerCompletion("ecoAmounts", c -> List.of("1", "10", "100"));
         commandManager.getCommandCompletions().registerCompletion("ecoFlags", c -> List.of("-s"));
+        commandManager.getCommandCompletions().registerCompletion("ecoAllPlayers", c -> {
+            Set<String> names = new HashSet<>();
+            for (Player p : Bukkit.getOnlinePlayers()) {
+                names.add(p.getName());
+            }
+            for (OfflinePlayer op : Bukkit.getOfflinePlayers()) {
+                if (op.getName() != null) names.add(op.getName());
+            }
+            return new ArrayList<>(names);
+        });
 
         for (var currency : nexEcoFactory.getCurrencies()) {
             String key = nexEcoFactory.keyOf(currency);
@@ -327,7 +342,7 @@ public class NexEconomy extends JavaPlugin {
 
             // Build replacement string: "main|alias1|alias2"
             String joined = buildAliasString(main, aliases);
-            nexusLogger.info("Built alias string for '" + key + "': " + joined);
+            nexusLogger.debug("Built alias string for '" + key + "': " + joined, 1);
 
             // IMPORTANT: set the replacement BEFORE registering the command
             commandManager.getCommandReplacements().addReplacement("currency", joined);
@@ -345,7 +360,7 @@ public class NexEconomy extends JavaPlugin {
         }
 
         // Register global commands (only once)
-        commandManager.registerCommand(new ReloadCommand());
+        commandManager.registerCommand(new MainCommand());
     }
 
     private static String sanitizeAlias(String s) {
@@ -467,6 +482,35 @@ public class NexEconomy extends JavaPlugin {
         }
         DataSource ds = db.getDataSource();
         return new EcoSqlPersistence(ds, dialect);
+    }
+
+    private void registerPlaceholders() {
+        try {
+            var provider = new NexEconomyPlaceholderProvider(this, ecoService);
+
+            long defaultTtlMillis = Duration.ofSeconds(1).toMillis();
+
+            NexusPlaceholderRegistry.CachePolicy policy = new NexusPlaceholderRegistry.CachePolicy(
+                    defaultTtlMillis,
+                    Set.of(),
+                    Map.of()
+            );
+
+            boolean registered = NexusPlaceholderRegistry.register(
+                    this,
+                    "nexeconomy",
+                    provider,
+                    policy
+            );
+
+            if (registered) {
+                nexusLogger.info("Registered NexEconomy placeholders under namespace 'nexeconomy'.");
+            } else {
+                nexusLogger.warning("Failed to register NexEconomy placeholders (namespace 'nexeconomy').");
+            }
+        } catch (Throwable t) {
+            nexusLogger.error("Error while registering NexEconomy placeholders: " + t.getMessage());
+        }
     }
 
 }

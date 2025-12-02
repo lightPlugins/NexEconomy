@@ -55,6 +55,14 @@ final class EcoTables {
         return "SELECT DISTINCT " + COL_PLAYER + " FROM " + TABLE + " WHERE " + COL_CURRENCY + " = ?";
     }
 
+    static String deleteByPlayer() {
+        return "DELETE FROM " + TABLE + " WHERE " + COL_PLAYER + " = ?";
+    }
+
+    static String deleteAllRows() {
+        return "DELETE FROM " + TABLE;
+    }
+
 
     static String upsertMySql() {
         return "INSERT INTO " + TABLE + " ("
