@@ -488,6 +488,35 @@ public class InMemoryEcoService implements NexEcoService {
     }
 
     /**
+     * Clears all cached accounts for a player and reloads them from the database.
+     * This is intended for multi-server setups where the DB is the single source of truth.
+     *
+     * @param playerId player UUID
+     * @return number of accounts loaded from DB
+     */
+    public int reloadAllForPlayer(UUID playerId) {
+        Objects.requireNonNull(playerId, "playerId");
+
+        // 1) Remove all cached accounts for this player.
+        // We iterate over a snapshot of the keys to avoid ConcurrentModification issues.
+        for (AccountKey ak : new ArrayList<>(cache.keySet())) {
+            if (!ak.playerId().equals(playerId)) continue;
+            Lock lock = locks.lockFor(ak);
+            lock.lock();
+            try {
+                cache.remove(ak);
+            } finally {
+                lock.unlock();
+            }
+        }
+        // 2) Remove currency tracking for this player.
+        playerCurrencies.remove(playerId);
+
+        // 3) Fresh load from DB (now behaves like first join for this player).
+        return loadAllForPlayerIfAbsent(playerId);
+    }
+
+    /**
      * Deletes all accounts for a specific player (cache + DB) and recreates
      * fresh accounts with start balance for the given currencies.
      *

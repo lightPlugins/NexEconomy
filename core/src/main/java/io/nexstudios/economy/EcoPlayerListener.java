@@ -19,7 +19,7 @@ public record EcoPlayerListener(InMemoryEcoService eco) implements Listener {
         org.bukkit.Bukkit.getScheduler().runTaskAsynchronously(
                 NexEconomy.getInstance(),
                 () -> {
-                    int loaded = eco.loadAllForPlayerIfAbsent(playerId);
+                    int loaded = eco.reloadAllForPlayer(playerId);
 
                     var allCurrencies = NexEconomy.getInstance().getNexEcoFactory().getCurrencies();
                     int created = eco.ensureAccountsForPlayer(playerId, allCurrencies);
