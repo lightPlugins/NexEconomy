@@ -219,7 +219,7 @@ public class CurrencyCommand extends BaseCommand {
         if (res.isSuccess()) {
             NexEconomy.getInstance().getMessageSender().send(sender, "currency.set", resolve);
             if (!isSilent(silentFlag) && target.isOnline()) {
-                NexEconomy.getInstance().getMessageSender().send(target.getPlayer(), "currency.set-target", resolve);
+                NexEconomy.getInstance().getMessageSender().send(target.getPlayer(), "currency.set-other", resolve);
             }
 
             // Cross-server notification when Redis is enabled
@@ -345,7 +345,7 @@ public class CurrencyCommand extends BaseCommand {
         if (res.isSuccess()) {
             NexEconomy.getInstance().getMessageSender().send(sender, "currency.withdraw", resolve);
             if (!isSilent(silentFlag) && target.isOnline()) {
-                NexEconomy.getInstance().getMessageSender().send(target.getPlayer(), "currency.withdraw-target", resolve);
+                NexEconomy.getInstance().getMessageSender().send(target.getPlayer(), "currency.withdraw-other", resolve);
             }
 
             // Cross-server notification when Redis is enabled

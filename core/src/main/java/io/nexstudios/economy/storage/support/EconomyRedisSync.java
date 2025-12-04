@@ -72,7 +72,7 @@ public class EconomyRedisSync implements InMemoryEcoService.RemoteUpdateBroadcas
         balanceOpt.ifPresentOrElse(
                 id -> {
                     balanceSubscriptionId = id;
-                    NexEconomy.nexusLogger.info("Subscribed to Redis balance channel '" + BALANCE_CHANNEL + "' with id " + id);
+                    NexEconomy.nexusLogger.info("Subscribed to Redis balance channel '" + BALANCE_CHANNEL);
                 },
                 () -> NexEconomy.nexusLogger.warning("Failed to subscribe to Redis balance channel '" + BALANCE_CHANNEL + "'.")
         );
@@ -83,7 +83,7 @@ public class EconomyRedisSync implements InMemoryEcoService.RemoteUpdateBroadcas
         playerOpt.ifPresentOrElse(
                 id -> {
                     playerSyncSubscriptionId = id;
-                    NexEconomy.nexusLogger.info("Subscribed to Redis player-sync channel '" + PLAYER_SYNC_CHANNEL + "' with id " + id);
+                    NexEconomy.nexusLogger.info("Subscribed to Redis player-sync channel '" + PLAYER_SYNC_CHANNEL);
                 },
                 () -> NexEconomy.nexusLogger.warning("Failed to subscribe to Redis player-sync channel '" + PLAYER_SYNC_CHANNEL + "'.")
         );
@@ -94,7 +94,7 @@ public class EconomyRedisSync implements InMemoryEcoService.RemoteUpdateBroadcas
         resetOpt.ifPresentOrElse(
                 id -> {
                     resetSubscriptionId = id;
-                    NexEconomy.nexusLogger.info("Subscribed to Redis reset channel '" + RESET_CHANNEL + "' with id " + id);
+                    NexEconomy.nexusLogger.info("Subscribed to Redis reset channel '" + RESET_CHANNEL);
                 },
                 () -> NexEconomy.nexusLogger.warning("Failed to subscribe to Redis reset channel '" + RESET_CHANNEL + "'.")
         );
@@ -105,7 +105,7 @@ public class EconomyRedisSync implements InMemoryEcoService.RemoteUpdateBroadcas
         notifyOpt.ifPresentOrElse(
                 id -> {
                     notifySubscriptionId = id;
-                    NexEconomy.nexusLogger.info("Subscribed to Redis notify channel '" + NOTIFY_CHANNEL + "' with id " + id);
+                    NexEconomy.nexusLogger.info("Subscribed to Redis notify channel '" + NOTIFY_CHANNEL);
                 },
                 () -> NexEconomy.nexusLogger.warning("Failed to subscribe to Redis notify channel '" + NOTIFY_CHANNEL + "'.")
         );
@@ -116,7 +116,7 @@ public class EconomyRedisSync implements InMemoryEcoService.RemoteUpdateBroadcas
         currencyOpt.ifPresentOrElse(
                 id -> {
                     currencySyncSubscriptionId = id;
-                    NexEconomy.nexusLogger.info("Subscribed to Redis currency-sync channel '" + CURRENCY_SYNC_CHANNEL + "' with id " + id);
+                    NexEconomy.nexusLogger.info("Subscribed to Redis currency-sync channel '" + CURRENCY_SYNC_CHANNEL);
                 },
                 () -> NexEconomy.nexusLogger.warning("Failed to subscribe to Redis currency-sync channel '" + CURRENCY_SYNC_CHANNEL + "'.")
         );
@@ -390,8 +390,6 @@ public class EconomyRedisSync implements InMemoryEcoService.RemoteUpdateBroadcas
                 return;
             }
 
-            NexEconomy.nexusLogger.info("Received Redis player preload message for " + playerIdStr);
-
             UUID playerId = UUID.fromString(playerIdStr);
 
             int loaded = ecoService.loadAllForPlayerIfAbsent(playerId);
@@ -420,12 +418,12 @@ public class EconomyRedisSync implements InMemoryEcoService.RemoteUpdateBroadcas
                 UUID playerId = UUID.fromString(playerIdStr);
 
                 ecoService.applyRemoteResetPlayer(playerId);
-                NexEconomy.nexusLogger.debug("Applied remote player reset for " + playerId, 1);
+                NexEconomy.nexusLogger.info("Applied remote player reset for " + playerId);
 
                 Bukkit.getScheduler().runTask(plugin, () -> {
                     Player p = Bukkit.getPlayer(playerId);
                     if (p != null && p.isOnline()) {
-                        plugin.getMessageSender().send(p, "global.reset-target");
+                        plugin.getMessageSender().send(p, "general.reset-target");
                     }
                 });
             } else if ("RESET_ALL".equalsIgnoreCase(mode)) {
@@ -434,7 +432,7 @@ public class EconomyRedisSync implements InMemoryEcoService.RemoteUpdateBroadcas
 
                 Bukkit.getScheduler().runTask(plugin, () -> {
                     for (Player p : Bukkit.getOnlinePlayers()) {
-                        plugin.getMessageSender().send(p, "global.reset-target");
+                        plugin.getMessageSender().send(p, "general.reset-target");
                     }
                 });
             }
@@ -491,14 +489,13 @@ public class EconomyRedisSync implements InMemoryEcoService.RemoteUpdateBroadcas
                 TagResolver resolver = TagResolver.resolver(
                         Placeholder.parsed("amount", amountFormatted),
                         Placeholder.parsed("currency", symbol),
-                        Placeholder.parsed("player", actor == null ? "" : actor),
-                        Placeholder.parsed("target", target.getName())
+                        Placeholder.parsed("player", actor == null ? "" : actor)
                 );
 
                 switch (op.toUpperCase()) {
-                    case "SET" -> plugin.getMessageSender().send(target, "currency.set-target", resolver);
+                    case "SET" -> plugin.getMessageSender().send(target, "currency.set-other", resolver);
                     case "DEPOSIT" -> plugin.getMessageSender().send(target, "currency.deposit-other", resolver);
-                    case "WITHDRAW" -> plugin.getMessageSender().send(target, "currency.withdraw-target", resolver);
+                    case "WITHDRAW" -> plugin.getMessageSender().send(target, "currency.withdraw-other", resolver);
                     default -> {
                     }
                 }

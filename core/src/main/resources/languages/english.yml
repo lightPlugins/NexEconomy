@@ -18,11 +18,11 @@ currency:
   balance: '<gray>You have <yellow><amount> <gray><currency>.'
   balance-other: '<gray>Player <yellow><target> has <yellow><amount> <gray><currency>.'
   set: '<gray>You have set the balance of <yellow><target><gray> to <yellow><amount> <gray><currency>.'
-  set-target: '<gray>The player <yellow><player> <gray>has set your balance to <yellow><amount> <gray><currency>.'
+  set-other: '<gray>The player <yellow><player> <gray>has set your balance to <yellow><amount> <gray><currency>.'
   deposit: '<gray>You have deposited <yellow><amount> <gray><currency> to <yellow><target><gray>.'
   deposit-other: '<gray>You received <yellow><amount> <gray><currency> from <yellow><target><gray>.'
   withdraw: '<gray>You have withdrawn <yellow><amount> <gray><currency> from <yellow><target><gray>.'
-  withdraw-other: '<gray>You have removed <yellow><amount> <gray><currency> from <yellow><target><gray>.'
+  withdraw-other: '<gray>Player <yellow><player> <gray>has withdrawn <yellow><amount> <gray><currency> from you.'
   baltop:
     header:
       - '<gray><strikethrough>-----</strikethrough><yellow>●<gray><strikethrough>-----</strikethrough> <yellow><bold><italic>NEX<gray>Economy <reset><gray><strikethrough>-----</strikethrough><yellow>●<gray><strikethrough>-----</strikethrough>'
