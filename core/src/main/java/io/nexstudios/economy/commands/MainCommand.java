@@ -2,7 +2,10 @@ package io.nexstudios.economy.commands;
 
 import io.nexstudios.economy.NexEconomy;
 import io.nexstudios.economy.currency.NexCurrency;
+import io.nexstudios.economy.currency.NexCurrencyType;
 import io.nexstudios.economy.storage.InMemoryEcoService;
+import io.nexstudios.nexus.bukkit.NexusPlugin;
+import io.nexstudios.nexus.bukkit.redis.NexusRedisApi;
 import io.nexstudios.nexus.libs.commands.BaseCommand;
 import io.nexstudios.nexus.libs.commands.annotation.*;
 import net.kyori.adventure.text.minimessage.tag.resolver.Placeholder;
@@ -44,12 +47,23 @@ public class MainCommand extends BaseCommand {
             return;
         }
 
-        // Eigene Namensauflösung: erst online, dann bekannte Offline-Spieler (case-insensitive)
+        boolean redisActive = NexusRedisApi.isServicePresent()
+                && NexusRedisApi.isConnected()
+                && NexusPlugin.getInstance().isCrossServerEnabled();
+
+        // Resolve player name: first online, then known offline players (case-insensitive)
         OfflinePlayer target = resolveKnownPlayerByName(targetName);
 
-        // Hier ist target tatsächlich nullable -> Prüfung ist sinnvoll
         if (target == null) {
             NexEconomy.getInstance().getMessageSender().send(sender, "general.player-not-found", resolver);
+            return;
+        }
+
+        // If Redis is not active, only allow resetting players that are currently
+        // online on this server. This prevents wiping data for players that might
+        // be active on another server.
+        if (!redisActive && !target.isOnline()) {
+            NexEconomy.getInstance().getMessageSender().send(sender, "general.cross-server-error", resolver);
             return;
         }
 
@@ -62,8 +76,22 @@ public class MainCommand extends BaseCommand {
 
         Bukkit.getScheduler().runTaskAsynchronously(plugin, () -> {
             int created = eco.resetPlayer(playerId, currencies);
+
+            // If Redis sync is active, broadcast a player reset so other servers clear their caches.
+            if (redisActive && plugin.getEconomyRedisSync() != null) {
+                plugin.getEconomyRedisSync().publishPlayerReset(playerId);
+            }
+
             NexEconomy.nexusLogger.info("Admin reset for player " + playerId + " created " + created + " account(s).");
             NexEconomy.getInstance().getMessageSender().send(sender, "general.reset-player-complete", resolver);
+
+            // Notify player on this server if online
+            Bukkit.getScheduler().runTask(plugin, () -> {
+                Player online = Bukkit.getPlayer(playerId);
+                if (online != null && online.isOnline()) {
+                    NexEconomy.getInstance().getMessageSender().send(online, "global.reset-target");
+                }
+            });
         });
     }
 
@@ -72,6 +100,15 @@ public class MainCommand extends BaseCommand {
     @Description("Deletes all economy data for all players and recreates accounts for online players.")
     public void onResetAll(CommandSender sender) {
         NexEconomy plugin = NexEconomy.getInstance();
+
+        boolean redisActive = NexusRedisApi.isServicePresent()
+                && NexusRedisApi.isConnected();
+
+        if (!redisActive && NexusPlugin.getInstance().isCrossServerEnabled()) {
+            NexEconomy.getInstance().getMessageSender().send(sender, "general.cross-server-error");
+            return;
+        }
+
         InMemoryEcoService eco = plugin.getEcoService();
         Collection<NexCurrency> currencies = plugin.getNexEcoFactory().getCurrencies();
 
@@ -79,17 +116,66 @@ public class MainCommand extends BaseCommand {
 
         Bukkit.getScheduler().runTaskAsynchronously(plugin, () -> {
             int created = eco.resetAllPlayers(currencies);
+
+            // Redis is active here by design; broadcast a global reset so other
+            // servers clear their caches.
+            if (plugin.getEconomyRedisSync() != null) {
+                plugin.getEconomyRedisSync().publishGlobalReset();
+            }
+
             NexEconomy.nexusLogger.info("Admin global reset created " + created + " account(s) for online players.");
             NexEconomy.getInstance().getMessageSender().send(sender, "general.reset-global-complete");
+
+            // Notify all online players on this server
+            Bukkit.getScheduler().runTask(plugin, () -> {
+                for (Player p : Bukkit.getOnlinePlayers()) {
+                    NexEconomy.getInstance().getMessageSender().send(p, "global.reset-target");
+                }
+            });
         });
     }
+
+
+    @Subcommand("sync currencies")
+    @CommandPermission("nexeconomy.admin.sync")
+    @Description("Synchronizes all virtual currency definitions to other servers via Redis.")
+    public void onSyncCurrencies(CommandSender sender) {
+        NexEconomy plugin = NexEconomy.getInstance();
+
+        boolean crossServerEnabled = NexusPlugin.getInstance().isCrossServerEnabled();
+        boolean redisActive = NexusRedisApi.isServicePresent() && NexusRedisApi.isConnected();
+
+        if (!crossServerEnabled || !redisActive || plugin.getEconomyRedisSync() == null) {
+            plugin.getMessageSender().send(sender, "general.cross-server-error");
+            return;
+        }
+
+        plugin.getMessageSender().send(sender, "general.sync-currencies");
+
+        var ecoSync = plugin.getEconomyRedisSync();
+        var factory = plugin.getNexEcoFactory();
+
+        int count = 0;
+        for (NexCurrency currency : factory.getCurrencies()) {
+            if (currency.getCurrencyType() != NexCurrencyType.VIRTUAL) continue;
+            String key = factory.keyOf(currency);
+            ecoSync.publishCurrencyDefinition(currency, key);
+            count++;
+        }
+
+        TagResolver resolver = TagResolver.resolver(
+                Placeholder.parsed("amount", String.valueOf(count))
+        );
+
+        plugin.getMessageSender().send(sender, "general.sync-currencies.complete", resolver);
+    }
+
 
     @Nullable
     private OfflinePlayer resolveKnownPlayerByName(String name) {
         if (name == null || name.isBlank()) return null;
 
-        for (org.bukkit.entity.Player p : Bukkit.getOnlinePlayers()) {
-            p.getName();
+        for (Player p : Bukkit.getOnlinePlayers()) {
             if (p.getName().equalsIgnoreCase(name)) {
                 return p;
             }

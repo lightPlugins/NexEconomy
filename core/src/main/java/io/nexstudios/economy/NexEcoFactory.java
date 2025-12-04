@@ -4,6 +4,7 @@ import io.nexstudios.economy.currency.NexCurrencyType;
 import io.nexstudios.economy.currency.NexCurrency;
 import io.nexstudios.nexus.bukkit.files.NexusFileReader;
 import net.kyori.adventure.text.Component;
+import net.kyori.adventure.text.serializer.plain.PlainTextComponentSerializer;
 import org.bukkit.configuration.file.FileConfiguration;
 import org.bukkit.configuration.file.YamlConfiguration;
 import org.bukkit.plugin.java.JavaPlugin;
@@ -83,17 +84,13 @@ public class NexEcoFactory {
      * @return A string representing the resolved unique key, converted to lowercase. Never null.
      */
     private String resolveKey(File file, NexCurrency currency) {
-        FileConfiguration cfg = YamlConfiguration.loadConfiguration(file);
-        String explicitKey = Optional.ofNullable(cfg.getString("key")).map(String::trim).filter(s -> !s.isEmpty()).orElse(null);
-        if (explicitKey != null) return explicitKey.toLowerCase(Locale.ROOT);
-
         String fileName = file.getName();
         int dot = fileName.lastIndexOf('.');
         String base = (dot > 0 ? fileName.substring(0, dot) : fileName);
-        if (!base.isEmpty()) return base.toLowerCase(Locale.ROOT);
-
-        // Fallback on visual name (not recommended, but kept as last resort)
-        return currency.getName().toString().toLowerCase(Locale.ROOT);
+        if (base.isEmpty()) {
+            throw new IllegalStateException("Currency file without name? " + file.getAbsolutePath());
+        }
+        return sanitizeKey(base);
     }
 
     /**
@@ -126,12 +123,22 @@ public class NexEcoFactory {
     public String keyOf(NexCurrency currency) {
         String key = keysByCurrency.get(currency);
         if (key != null) return key;
-        // Fallback: attempt reverse lookup (should not be needed in normal flow)
+        // Fallback: attempt reverse lookup (sollte normal nicht nötig sein)
         for (Map.Entry<String, NexCurrency> e : currenciesByKey.entrySet()) {
             if (e.getValue() == currency) return e.getKey();
         }
-        // As last resort, return a lower-cased plain string of name (not ideal)
-        return currency.getName().toString().toLowerCase(Locale.ROOT);
+
+        // Ab hier: Currency wurde nie aus Dateien oder via registerExternalCurrencies registriert.
+        String namePlain = net.kyori.adventure.text.serializer.plain.PlainTextComponentSerializer
+                .plainText()
+                .serialize(currency.getName());
+        NexEconomy.nexusLogger.error(
+                "keyOf called for unknown NexCurrency instance (name='" + namePlain
+                        + "', hash=" + System.identityHashCode(currency) + "). "
+                        + "Currency IDs are ALWAYS derived from file names; "
+                        + "this instance was not loaded by NexEcoFactory."
+        );
+        throw new IllegalStateException("Unknown NexCurrency instance passed to keyOf (name='" + namePlain + "')");
     }
 
     /**
@@ -241,4 +248,18 @@ public class NexEcoFactory {
             throw new RuntimeException(e);
         }
     }
+
+    private String sanitizeKey(String raw) {
+        if (raw == null) raw = "";
+        String k = raw.trim().toLowerCase(Locale.ROOT);
+        k = k.replaceAll("[^a-z0-9_:-]", "_");
+        if (k.isEmpty()) {
+            k = "currency";
+        }
+        if (k.length() > 64) {
+            k = k.substring(0, 64);
+        }
+        return k;
+    }
+
 }

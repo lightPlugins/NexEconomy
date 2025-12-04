@@ -14,3 +14,13 @@ logging:
   debug:
     enable: false
     level: 3
+
+# ######################################################  #
+#                  CROSS-SERVER SETTINGS                  #
+# ######################################################  #
+# This name identifies this server in a multi-server /
+# cross-server environment. It is sent along with Redis
+# messages so that NexEconomy can ignore its own messages
+# and avoid critical echo loops.
+cross-server:
+  servername: 'survival'

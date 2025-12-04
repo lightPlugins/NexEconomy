@@ -1,12 +1,16 @@
 package io.nexstudios.economy;
 
 import io.nexstudios.economy.storage.InMemoryEcoService;
+import io.nexstudios.nexus.bukkit.redis.NexusRedisApi;
 import org.bukkit.event.EventHandler;
 import org.bukkit.event.Listener;
 import org.bukkit.event.player.PlayerJoinEvent;
 import org.bukkit.event.player.PlayerQuitEvent;
+
 /**
  * Loads accounts on join if not present in cache and flushes on quit.
+ * Additionally, when Redis is active, it notifies other servers so they can
+ * preload the player's accounts into their own caches.
  */
 public record EcoPlayerListener(InMemoryEcoService eco) implements Listener {
 
@@ -34,6 +38,14 @@ public record EcoPlayerListener(InMemoryEcoService eco) implements Listener {
                                         + " loaded=" + loaded + " created=" + created + "."
                         );
                     }
+
+                    // Notify other servers via Redis (if available and connected)
+                    if (NexusRedisApi.isServicePresent() && NexusRedisApi.isConnected()) {
+                        var sync = NexEconomy.getInstance().getEconomyRedisSync();
+                        if (sync != null) {
+                            sync.publishPlayerPreload(playerId);
+                        }
+                    }
                 }
         );
     }
@@ -41,7 +53,7 @@ public record EcoPlayerListener(InMemoryEcoService eco) implements Listener {
     @EventHandler
     public void onQuit(PlayerQuitEvent e) {
         var playerId = e.getPlayer().getUniqueId();
-        // DB-Save Async
+        // Async DB save
         org.bukkit.Bukkit.getScheduler().runTaskAsynchronously(
                 NexEconomy.getInstance(),
                 () -> eco.flushPlayerNow(playerId)

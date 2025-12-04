@@ -1,4 +1,5 @@
 package io.nexstudios.economy.commands;
+
 import io.nexstudios.economy.NexEconomy;
 import io.nexstudios.economy.currency.NexCurrency;
 import io.nexstudios.economy.storage.NexEcoResponse;
@@ -24,7 +25,10 @@ import java.util.Locale;
 import java.util.UUID;
 
 /**
- * Per-currency command; root alias wird zur Registrierzeit via %currency% Replacement gesetzt.
+ * Per-currency command; root alias is set via %currency% replacement at registration time.
+ * When Redis is enabled, commands may target cross-server players (by UUID/name).
+ * When Redis is disabled, modifying commands only allow players that are currently
+ * online on this server.
  */
 @CommandAlias("%currency")
 @Description("Economy commands for a specific currency")
@@ -57,7 +61,6 @@ public class CurrencyCommand extends BaseCommand {
         this.currency = newCurrency;
     }
 
-
     // balance (self)
     @Subcommand("balance")
     @CommandCompletion(" ") // no args
@@ -89,6 +92,12 @@ public class CurrencyCommand extends BaseCommand {
     public void balanceOther(CommandSender sender, OfflinePlayer target) {
         if (!hasPermission(sender, Permissions.CURRENCY_BALANCE_OTHER, Permissions.GLOBAL_BALANCE_OTHER)) {
             NexEconomy.getInstance().getMessageSender().send(sender, "general.no-permission");
+            return;
+        }
+
+        // When Redis is disabled, only allow balances for players that are online on this server.
+        if (!redisEnabled && !isLocalOnline(target)) {
+            NexEconomy.getInstance().getMessageSender().send(sender, "general.cross-server-error");
             return;
         }
 
@@ -135,8 +144,9 @@ public class CurrencyCommand extends BaseCommand {
                 TagResolver.resolver(
                         Placeholder.parsed("overall", formatAmount(totalBalance)),
                         Placeholder.parsed("currency", currencySymbol)
-                )
-                ,false);
+                ),
+                false
+        );
 
         // Content
         int position = 1;
@@ -155,15 +165,15 @@ public class CurrencyCommand extends BaseCommand {
                             Placeholder.parsed("name", playerName),
                             Placeholder.parsed("amount", formatAmount(account.balance())),
                             Placeholder.parsed("currency", symbol)
-                    )
-                    , false);
+                    ),
+                    false
+            );
             position++;
         }
 
         // Footer
         NexEconomy.getInstance().getMessageSender().send(sender, "currency.baltop.footer", false);
     }
-
 
     @Subcommand("set")
     @CommandCompletion("@ecoPlayers @ecoAmounts @ecoFlags")
@@ -175,13 +185,9 @@ public class CurrencyCommand extends BaseCommand {
             return;
         }
 
+        // If Redis is disabled, do not allow modifying players that are not currently online on this server.
         if (!redisEnabled && !isLocalOnline(target)) {
             NexEconomy.getInstance().getMessageSender().send(sender, "general.cross-server-error");
-            return;
-        }
-
-        if (!isLocalOnline(target)) {
-            NexEconomy.getInstance().getMessageSender().send(sender, "general.player-not-found");
             return;
         }
 
@@ -196,7 +202,7 @@ public class CurrencyCommand extends BaseCommand {
         txLogger.log(senderUuid(sender), key, "CMD_SET",
                 "target=" + safeName(target) + " amount=" + amount + " res=" + res.responseType() + " bal=" + res.balance());
 
-        if(isSilent(silentFlag) && sender instanceof ConsoleCommandSender) {
+        if (isSilent(silentFlag) && sender instanceof ConsoleCommandSender) {
             return;
         }
 
@@ -210,10 +216,22 @@ public class CurrencyCommand extends BaseCommand {
                 Placeholder.parsed("error", res.errorMessage() == null ? "" : res.errorMessage())
         );
 
-        if(res.isSuccess()) {
+        if (res.isSuccess()) {
             NexEconomy.getInstance().getMessageSender().send(sender, "currency.set", resolve);
-            if(!isSilent(silentFlag) && target.isOnline()) {
+            if (!isSilent(silentFlag) && target.isOnline()) {
                 NexEconomy.getInstance().getMessageSender().send(target.getPlayer(), "currency.set-target", resolve);
+            }
+
+            // Cross-server notification when Redis is enabled
+            if (redisEnabled && NexEconomy.getInstance().getEconomyRedisSync() != null) {
+                NexEconomy.getInstance().getEconomyRedisSync()
+                        .publishCurrencyNotification(
+                                target.getUniqueId(),
+                                key,
+                                amount,
+                                "SET",
+                                sender.getName()
+                        );
             }
         } else {
             NexEconomy.getInstance().getMessageSender().send(sender, "general.response-error", resolve);
@@ -231,13 +249,9 @@ public class CurrencyCommand extends BaseCommand {
             return;
         }
 
+        // If Redis is disabled, do not allow modifying players that are not currently online on this server.
         if (!redisEnabled && !isLocalOnline(target)) {
             NexEconomy.getInstance().getMessageSender().send(sender, "general.cross-server-error");
-            return;
-        }
-
-        if (!isLocalOnline(target)) {
-            NexEconomy.getInstance().getMessageSender().send(sender, "general.player-not-found");
             return;
         }
 
@@ -250,8 +264,8 @@ public class CurrencyCommand extends BaseCommand {
         NexEcoResponse res = eco.deposit(target, key, amount);
         txLogger.log(senderUuid(sender), key, "CMD_DEPOSIT",
                 "target=" + safeName(target) + " amount=" + amount + " res=" + res.responseType() + " bal=" + res.balance());
-        
-        if(isSilent(silentFlag) && sender instanceof ConsoleCommandSender) {
+
+        if (isSilent(silentFlag) && sender instanceof ConsoleCommandSender) {
             return;
         }
 
@@ -265,10 +279,22 @@ public class CurrencyCommand extends BaseCommand {
                 Placeholder.parsed("error", res.errorMessage() == null ? "" : res.errorMessage())
         );
 
-        if(res.isSuccess()) {
+        if (res.isSuccess()) {
             NexEconomy.getInstance().getMessageSender().send(sender, "currency.deposit", resolve);
-            if(!isSilent(silentFlag) && target.isOnline()) {
+            if (!isSilent(silentFlag) && target.isOnline()) {
                 NexEconomy.getInstance().getMessageSender().send(target.getPlayer(), "currency.deposit-other", resolve);
+            }
+
+            // Cross-server notification when Redis is enabled
+            if (redisEnabled && NexEconomy.getInstance().getEconomyRedisSync() != null) {
+                NexEconomy.getInstance().getEconomyRedisSync()
+                        .publishCurrencyNotification(
+                                target.getUniqueId(),
+                                key,
+                                amount,
+                                "DEPOSIT",
+                                sender.getName()
+                        );
             }
         } else {
             NexEconomy.getInstance().getMessageSender().send(sender, "general.response-error", resolve);
@@ -286,13 +312,9 @@ public class CurrencyCommand extends BaseCommand {
             return;
         }
 
+        // If Redis is disabled, do not allow modifying players that are not currently online on this server.
         if (!redisEnabled && !isLocalOnline(target)) {
             NexEconomy.getInstance().getMessageSender().send(sender, "general.cross-server-error");
-            return;
-        }
-
-        if (!isLocalOnline(target)) {
-            NexEconomy.getInstance().getMessageSender().send(sender, "general.player-not-found");
             return;
         }
 
@@ -306,7 +328,7 @@ public class CurrencyCommand extends BaseCommand {
         txLogger.log(senderUuid(sender), key, "CMD_WITHDRAW",
                 "target=" + safeName(target) + " amount=" + amount + " res=" + res.responseType() + " bal=" + res.balance());
 
-        if(isSilent(silentFlag) && sender instanceof ConsoleCommandSender) {
+        if (isSilent(silentFlag) && sender instanceof ConsoleCommandSender) {
             return;
         }
 
@@ -320,10 +342,22 @@ public class CurrencyCommand extends BaseCommand {
                 Placeholder.parsed("error", res.errorMessage() == null ? "" : res.errorMessage())
         );
 
-        if(res.isSuccess()) {
+        if (res.isSuccess()) {
             NexEconomy.getInstance().getMessageSender().send(sender, "currency.withdraw", resolve);
-            if(!isSilent(silentFlag) && target.isOnline()) {
+            if (!isSilent(silentFlag) && target.isOnline()) {
                 NexEconomy.getInstance().getMessageSender().send(target.getPlayer(), "currency.withdraw-target", resolve);
+            }
+
+            // Cross-server notification when Redis is enabled
+            if (redisEnabled && NexEconomy.getInstance().getEconomyRedisSync() != null) {
+                NexEconomy.getInstance().getEconomyRedisSync()
+                        .publishCurrencyNotification(
+                                target.getUniqueId(),
+                                key,
+                                amount,
+                                "WITHDRAW",
+                                sender.getName()
+                        );
             }
         } else {
             NexEconomy.getInstance().getMessageSender().send(sender, "general.response-error", resolve);

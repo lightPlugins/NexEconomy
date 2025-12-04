@@ -18,10 +18,18 @@ import java.util.concurrent.locks.Lock;
 import static io.nexstudios.economy.storage.NexEcoResponse.ResponseType.*;
 
 /**
- * Cache-first economy service with dirty tracking and batch DB flush.
+ * Cache-first economy service with dirty tracking, batch DB flush and optional cross-server syncing.
  * Deposits/withdrawals are applied only in memory; DB is updated periodically and on player quit.
  */
 public class InMemoryEcoService implements NexEcoService {
+
+    /**
+     * Optional hook that can broadcast local balance changes to a remote system (e.g. Redis).
+     * Implementations must be thread-safe.
+     */
+    public interface RemoteUpdateBroadcaster {
+        void broadcastBalanceUpdate(PlayerAccount account, BigDecimal delta, String operationType);
+    }
 
     private final Map<AccountKey, PlayerAccount> cache = new ConcurrentHashMap<>();
     private final CurrencyLookup currencyLookup;
@@ -29,6 +37,7 @@ public class InMemoryEcoService implements NexEcoService {
     private final EcoPersistencePort persistence;
     private final EcoLocks locks = new EcoLocks();
     private final TransactionLogger txLogger;
+    private RemoteUpdateBroadcaster remoteBroadcaster;
 
     private final Map<UUID, Set<String>> playerCurrencies = new ConcurrentHashMap<>();
 
@@ -45,11 +54,25 @@ public class InMemoryEcoService implements NexEcoService {
     public InMemoryEcoService(CurrencyLookup currencyLookup,
                               CurrencyKeyResolver keyResolver,
                               EcoPersistencePort persistence,
-                              TransactionLogger txLogger) {
+                              TransactionLogger txLogger,
+                              RemoteUpdateBroadcaster remoteBroadcaster) {
         this.currencyLookup = currencyLookup;
         this.keyResolver = keyResolver;
         this.persistence = persistence;
         this.txLogger = txLogger;
+        this.remoteBroadcaster = remoteBroadcaster;
+    }
+
+    /**
+     * Allows wiring the broadcaster after construction (e.g. once Redis sync helper is created).
+     * This method is not thread-safe and should only be called during plugin startup.
+     */
+    public void setRemoteUpdateBroadcaster(RemoteUpdateBroadcaster broadcaster) {
+        // This is intentionally not synchronized because it is only called during initialization.
+        // Once set, it should not be mutated again.
+        //noinspection AssignmentOrReturnOfFieldWithMutableType
+        // (Broadcaster implementations are expected to be immutable / thread-safe)
+        ((InMemoryEcoService) this).remoteBroadcaster = broadcaster;
     }
 
     // ----- Load/Flush hooks -----
@@ -135,6 +158,8 @@ public class InMemoryEcoService implements NexEcoService {
             try {
                 PlayerAccount acc = cache.get(ak);
                 if (acc == null || !acc.isDirty()) continue;
+
+                NexEconomy.nexusLogger.info("Currency key: " + acc.getCurrencyKey());
 
                 DbAccountSnapshot snap = new DbAccountSnapshot(
                         acc.getCurrencyKey(),
@@ -256,6 +281,7 @@ public class InMemoryEcoService implements NexEcoService {
             cache.put(ak, acc);
             playerCurrencies.computeIfAbsent(playerId, id -> new HashSet<>()).add(cKey);
             txLogger.log(playerId, cKey, "CREATE", "balance=" + clamped + " version=0");
+            // For newly created accounts we do not broadcast immediately; they will be visible on next balance change.
             return new NexEcoResponse(clamped, clamped, SUCCESS, null);
         } finally {
             lock.unlock();
@@ -311,8 +337,6 @@ public class InMemoryEcoService implements NexEcoService {
                 .toList();
     }
 
-
-
     @Override
     public boolean has(UUID playerId, String currencyKey, BigDecimal amount) {
         if (amount == null || amount.signum() <= 0) return true;
@@ -341,6 +365,7 @@ public class InMemoryEcoService implements NexEcoService {
                 return new NexEcoResponse(BigDecimal.ZERO, acc.getBalance(), NOT_NEGATIVE, "Amount must be positive");
             }
             BigDecimal scaled = EcoMath.scale(acc.getCurrency(), amount);
+            BigDecimal before = acc.getBalance();
 
             acc.setBalance(scaled);
             acc.setVersion(acc.getVersion() + 1);
@@ -349,6 +374,13 @@ public class InMemoryEcoService implements NexEcoService {
             playerCurrencies.computeIfAbsent(playerId, id -> new HashSet<>()).add(currencyKey);
 
             txLogger.log(playerId, currencyKey, "SET", "amount=" + scaled + " balance=" + scaled + " result=SUCCESS");
+
+            // Broadcast cross-server update if supported
+            if (remoteBroadcaster != null) {
+                BigDecimal delta = scaled.subtract(before);
+                remoteBroadcaster.broadcastBalanceUpdate(acc, delta, "SET");
+            }
+
             return new NexEcoResponse(scaled, scaled, SUCCESS, null);
         } finally {
             lock.unlock();
@@ -389,6 +421,12 @@ public class InMemoryEcoService implements NexEcoService {
             playerCurrencies.computeIfAbsent(playerId, id -> new HashSet<>()).add(currencyKey);
 
             txLogger.log(playerId, currencyKey, "DEPOSIT", "amount=" + applied + " balance=" + clamped + " result=SUCCESS");
+
+            // Broadcast cross-server update if supported
+            if (remoteBroadcaster != null) {
+                remoteBroadcaster.broadcastBalanceUpdate(acc, applied, "DEPOSIT");
+            }
+
             return new NexEcoResponse(applied, clamped, SUCCESS, null);
         } finally {
             lock.unlock();
@@ -426,6 +464,12 @@ public class InMemoryEcoService implements NexEcoService {
             playerCurrencies.computeIfAbsent(playerId, id -> new HashSet<>()).add(currencyKey);
 
             txLogger.log(playerId, currencyKey, "WITHDRAW", "amount=" + scaled + " balance=" + newBal + " result=SUCCESS");
+
+            // Broadcast cross-server update if supported
+            if (remoteBroadcaster != null) {
+                remoteBroadcaster.broadcastBalanceUpdate(acc, scaled, "WITHDRAW");
+            }
+
             return new NexEcoResponse(scaled, newBal, SUCCESS, null);
         } finally {
             lock.unlock();
@@ -453,7 +497,6 @@ public class InMemoryEcoService implements NexEcoService {
         }
         return updated;
     }
-
 
     public int importAllSnapshots(Map<UUID, Map<String, DbAccountSnapshot>> all) {
         if (all == null || all.isEmpty()) return 0;
@@ -527,7 +570,7 @@ public class InMemoryEcoService implements NexEcoService {
     public int resetPlayer(UUID playerId, Collection<NexCurrency> currencies) {
         Objects.requireNonNull(playerId, "playerId");
 
-        // 1) Cache & Tracking säubern
+        // 1) Clear cache and tracking for this player
         Set<String> keys = playerCurrencies.getOrDefault(playerId, Set.of());
         for (String cKey : keys) {
             AccountKey ak = new AccountKey(playerId, cKey);
@@ -541,7 +584,7 @@ public class InMemoryEcoService implements NexEcoService {
         }
         playerCurrencies.remove(playerId);
 
-        // 2) DB-Einträge dieses Spielers löschen
+        // 2) Delete all DB entries for this player
         try {
             persistence.deletePlayer(playerId).join();
         } catch (Exception ex) {
@@ -549,10 +592,10 @@ public class InMemoryEcoService implements NexEcoService {
             txLogger.logRaw("ERROR", "resetPlayer deletePlayer failed: player=" + playerId + " msg=" + ex.getMessage());
         }
 
-        // 3) Neue Accounts im Cache anlegen
+        // 3) Create fresh accounts in cache
         int created = ensureAccountsForPlayer(playerId, currencies);
 
-        // 4) Direkt in DB flushen
+        // 4) Flush immediately to DB
         if (created > 0) {
             flushPlayerNow(playerId);
         }
@@ -569,11 +612,11 @@ public class InMemoryEcoService implements NexEcoService {
      * @return number of newly created accounts
      */
     public int resetAllPlayers(Collection<NexCurrency> currencies) {
-        // 1) Cache und Tracking komplett leeren
+        // 1) Completely clear cache and tracking
         cache.clear();
         playerCurrencies.clear();
 
-        // 2) Alle DB-Einträge löschen
+        // 2) Delete all DB entries
         try {
             persistence.deleteAll().join();
         } catch (Exception ex) {
@@ -581,7 +624,7 @@ public class InMemoryEcoService implements NexEcoService {
             txLogger.logRaw("ERROR", "resetAllPlayers deleteAll failed: msg=" + ex.getMessage());
         }
 
-        // 3) Für alle aktuell online Spieler Accounts neu erzeugen und flushen
+        // 3) For all currently online players create new accounts and flush
         int totalCreated = 0;
         var onlinePlayers = org.bukkit.Bukkit.getOnlinePlayers();
         for (org.bukkit.entity.Player p : onlinePlayers) {
@@ -593,6 +636,93 @@ public class InMemoryEcoService implements NexEcoService {
             }
         }
         return totalCreated;
+    }
+
+    /**
+     * Applies a balance update that was received from a remote server (e.g. via Redis).
+     * This method never marks accounts as dirty, so other servers will not flush these
+     * values back to the database and accidentally overwrite the originating server.
+     *
+     * @param playerId        player UUID
+     * @param currencyKey     stable currency key (lower-cased)
+     * @param newBalance      new absolute balance
+     * @param version         version as declared by the remote server
+     * @param updatedAtMillis remote timestamp when the update was created
+     */
+    public void applyRemoteBalance(UUID playerId,
+                                   String currencyKey,
+                                   BigDecimal newBalance,
+                                   long version,
+                                   long updatedAtMillis) {
+
+        if (playerId == null || currencyKey == null || newBalance == null) {
+            return;
+        }
+
+        String cKey = currencyKey.toLowerCase(Locale.ROOT);
+        AccountKey ak = new AccountKey(playerId, cKey);
+        Lock lock = locks.lockFor(ak);
+        lock.lock();
+        try {
+            PlayerAccount existing = cache.get(ak);
+
+            if (existing != null) {
+                // Ignore stale updates
+                if (version <= existing.getVersion()) {
+                    return;
+                }
+                existing.setBalance(newBalance);
+                existing.setVersion(version);
+                existing.setDirty(false);
+                existing.setUpdatedAtMillis(updatedAtMillis);
+                playerCurrencies.computeIfAbsent(playerId, id -> new HashSet<>()).add(cKey);
+                return;
+            }
+
+            Optional<NexCurrency> oc = currencyLookup.findByKey(cKey);
+            if (oc.isEmpty()) {
+                // Currency does not exist on this server; nothing to apply.
+                return;
+            }
+
+            NexCurrency currency = oc.get();
+            PlayerAccount acc = new PlayerAccount(playerId, cKey, currency, newBalance);
+            acc.setVersion(Math.max(0, version));
+            acc.setDirty(false);
+            acc.setUpdatedAtMillis(updatedAtMillis);
+            cache.put(ak, acc);
+            playerCurrencies.computeIfAbsent(playerId, id -> new HashSet<>()).add(cKey);
+        } finally {
+            lock.unlock();
+        }
+    }
+
+    /**
+     * Clears all cached accounts and tracking info for a single player in response
+     * to a remote reset command. This method does not touch the database.
+     *
+     * @param playerId player UUID whose accounts should be removed from cache
+     */
+    public void applyRemoteResetPlayer(UUID playerId) {
+        if (playerId == null) return;
+
+        Set<String> keys = playerCurrencies.getOrDefault(playerId, Set.of());
+        for (String cKey : keys) {
+            AccountKey ak = new AccountKey(playerId, cKey);
+            Lock lock = locks.lockFor(ak);
+            lock.lock();
+            try {
+                cache.remove(ak);
+            } finally {
+                lock.unlock();
+            }
+        }
+        playerCurrencies.remove(playerId);
+    }
+
+    public void applyRemoteResetAll() {
+        cache.clear();
+        playerCurrencies.clear();
     }
 
     private int getImported(int imported, UUID playerId, String cKey, DbAccountSnapshot snap, NexCurrency currency, AccountKey ak) {

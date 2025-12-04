@@ -10,8 +10,10 @@ import io.nexstudios.economy.storage.persistence.sql.EcoSqlDialect;
 import io.nexstudios.economy.storage.persistence.sql.EcoSqlPersistence;
 import io.nexstudios.economy.storage.persistence.sql.SqlDialectResolver;
 import io.nexstudios.economy.storage.support.EcoFlushScheduler;
+import io.nexstudios.economy.storage.support.EconomyRedisSync;
 import io.nexstudios.economy.storage.support.TransactionLogger;
 import io.nexstudios.economy.provider.VaultProvider;
+import io.nexstudios.nexus.bukkit.NexusPlugin;
 import io.nexstudios.nexus.bukkit.database.api.NexusDatabaseService;
 import io.nexstudios.nexus.bukkit.files.NexusFile;
 import io.nexstudios.nexus.bukkit.files.NexusFileReader;
@@ -19,6 +21,7 @@ import io.nexstudios.nexus.bukkit.handler.MessageSender;
 import io.nexstudios.nexus.bukkit.language.NexusLanguage;
 import io.nexstudios.nexus.bukkit.placeholder.NexusPlaceholderRegistry;
 import io.nexstudios.nexus.bukkit.utils.NexusLogger;
+import io.nexstudios.nexus.bukkit.redis.NexusRedisApi;
 import io.nexstudios.nexus.libs.commands.PaperCommandManager;
 import lombok.Getter;
 import net.milkbowl.vault.economy.Economy;
@@ -59,6 +62,7 @@ public class NexEconomy extends JavaPlugin {
     private VaultProvider nexVaultProvider;
     private NexEcoFactory nexEcoFactory;
     private EcoPlayerListener playerListener;
+    private EconomyRedisSync economyRedisSync;
 
     private Map<String, CurrencyCommand> currencyCommandMap = new HashMap<>();
     private List<CurrencyCommand> registeredCurrencyCommands = new ArrayList<>();
@@ -94,10 +98,19 @@ public class NexEconomy extends JavaPlugin {
         // Build economy service (cache-first)
         ecoService = new InMemoryEcoService(
                 key -> nexEcoFactory.findByKey(key),
-                nexEcoFactory::keyOf,
+                currency -> nexEcoFactory.keyOf(currency), // statt nexEcoFactory::keyOf
                 ecoPersistence,
-                transactionLogger
+                transactionLogger,
+                null // temporary, will be wired after Redis sync is created
         );
+
+        // Initialize Redis-based cross-server sync if Nexus Redis service is available
+        initRedisSync();
+
+        // Now that Redis sync exists (or not), wire it into the eco service
+        if (economyRedisSync != null) {
+            ecoService.setRemoteUpdateBroadcaster(economyRedisSync);
+        }
 
         registerPlaceholders();
 
@@ -111,7 +124,6 @@ public class NexEconomy extends JavaPlugin {
         } catch (Exception ex) {
             nexusLogger.error("Startup warm-load failed: " + ex.getMessage());
         }
-
 
         // Start periodic flush (configurable later)
         flushScheduler = new EcoFlushScheduler(this, ecoService);
@@ -151,6 +163,12 @@ public class NexEconomy extends JavaPlugin {
                 nexusLogger.error("Eco: final flush failed: " + t.getMessage());
             }
         }
+
+        // Shut down Redis subscriptions if present
+        if (economyRedisSync != null) {
+            economyRedisSync.shutdown();
+        }
+
         // Unregister events
         HandlerList.unregisterAll(this);
         nexusLogger.info("Successfully disabled NexEconomy");
@@ -187,11 +205,12 @@ public class NexEconomy extends JavaPlugin {
             NexCurrency vaultCurrency = nexEcoFactory.getVaultCurrency();
             nexVaultProvider.updateCurrency(vaultCurrency);
 
-            boolean redisEnabled = settingsFile != null && settingsFile.getBoolean("economy.redis.enabled", false);
-
             // Detect new currencies
             Set<String> newCurrencies = new HashSet<>(newKeys);
             newCurrencies.removeAll(currencyCommandMap.keySet());
+
+            // Determine whether Redis is active (Nexus Redis service present and connected)
+            boolean redisActive = NexusRedisApi.isServicePresent() && NexusRedisApi.isConnected();
 
             // Update existing commands and register new ones
             int updated = 0;
@@ -215,7 +234,7 @@ public class NexEconomy extends JavaPlugin {
                     commandManager.getCommandReplacements().addReplacement("currency", joined);
 
                     var newCmd = new CurrencyCommand(
-                            currency, key, ecoService, commandManager, nexusLanguage, redisEnabled, transactionLogger
+                            currency, key, ecoService, commandManager, nexusLanguage, redisActive, transactionLogger
                     );
                     commandManager.registerCommand(newCmd);
                     currencyCommandMap.put(key, newCmd);
@@ -315,16 +334,33 @@ public class NexEconomy extends JavaPlugin {
         }
     }
 
-
     private void registerCommands() {
-        boolean redisEnabled = settingsFile != null && settingsFile.getBoolean("economy.redis.enabled", false);
+        // Determine whether Redis is active (Nexus Redis service present and connected)
+        boolean redisActive = NexusRedisApi.isServicePresent() && NexusRedisApi.isConnected();
 
         // Global completions (dynamic placeholders)
         commandManager.getCommandCompletions().registerCompletion("ecoPlayers",
-                c -> Bukkit.getOnlinePlayers().stream().map(Player::getName).toList());
+                c -> {
+                    // If Redis is not active, only provide local online players
+                    if (!redisActive) {
+                        return Bukkit.getOnlinePlayers().stream().map(Player::getName).toList();
+                    }
+
+                    // If Redis is active, allow targeting any known player (cross-server capable)
+                    Set<String> names = new HashSet<>();
+                    for (Player p : Bukkit.getOnlinePlayers()) {
+                        names.add(p.getName());
+                    }
+                    for (OfflinePlayer op : Bukkit.getOfflinePlayers()) {
+                        if (op.getName() != null) names.add(op.getName());
+                    }
+                    return new ArrayList<>(names);
+                });
+
         commandManager.getCommandCompletions().registerCompletion("ecoAmounts", c -> List.of("1", "10", "100"));
         commandManager.getCommandCompletions().registerCompletion("ecoFlags", c -> List.of("-s"));
         commandManager.getCommandCompletions().registerCompletion("ecoAllPlayers", c -> {
+            // For reset commands it is fine to operate on any known player, regardless of Redis
             Set<String> names = new HashSet<>();
             for (Player p : Bukkit.getOnlinePlayers()) {
                 names.add(p.getName());
@@ -348,7 +384,7 @@ public class NexEconomy extends JavaPlugin {
             commandManager.getCommandReplacements().addReplacement("currency", joined);
 
             var cmd = new CurrencyCommand(
-                    currency, key, ecoService, commandManager, nexusLanguage, redisEnabled, transactionLogger
+                    currency, key, ecoService, commandManager, nexusLanguage, redisActive, transactionLogger
             );
             commandManager.registerCommand(cmd);
 
@@ -394,7 +430,6 @@ public class NexEconomy extends JavaPlugin {
         // Join with '|', required by ACF replacement aliases
         return String.join("|", parts);
     }
-
 
     private void registerListeners() { }
 
@@ -513,4 +548,40 @@ public class NexEconomy extends JavaPlugin {
         }
     }
 
+    private void initRedisSync() {
+
+        if (!NexusPlugin.getInstance().isCrossServerEnabled()) {
+            nexusLogger.info("Nexus cross-server feature disabled. Cross-server economy sync remains disabled.");
+            return;
+        }
+
+        if (NexusPlugin.getInstance().getCrossServerName().equalsIgnoreCase("default")) {
+            nexusLogger.info(List.of(
+                    "Nexus cross-server feature disabled. Found default server-name parameter in settings.yml:",
+                    "You need to change the server-name parameter in settings.yml to your server name,",
+                    "which is also set in your Velocity config."
+            ));
+            return;
+        }
+
+        // Redis is completely disabled or not present on Nexus
+        if (!NexusRedisApi.isServicePresent()) {
+            nexusLogger.info("Nexus Redis service is not present. Cross-server economy sync remains disabled.");
+            return;
+        }
+
+        // Redis service is present but not connected yet
+        if (!NexusRedisApi.isConnected()) {
+            nexusLogger.warning("Nexus Redis service is present but not connected. Cross-server features are paused until connection is established.");
+            // Still create sync helper so that subscriptions are registered and will receive messages once Redis reconnects.
+        }
+
+        String serverId = NexusPlugin.getInstance().getCrossServerName();
+        if (serverId == null || serverId.isBlank()) {
+            serverId = Bukkit.getServer().getName();
+        }
+
+        economyRedisSync = new EconomyRedisSync(this, ecoService, serverId);
+        economyRedisSync.init();
+    }
 }
