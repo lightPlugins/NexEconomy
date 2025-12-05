@@ -1,5 +1,6 @@
-package io.nexstudios.economy;
+package io.nexstudios.economy.logic;
 
+import io.nexstudios.economy.NexEconomy;
 import io.nexstudios.economy.storage.InMemoryEcoService;
 import io.nexstudios.nexus.bukkit.redis.NexusRedisApi;
 import org.bukkit.event.EventHandler;

@@ -1,5 +1,5 @@
 general:
-  prefix: '<yellow>[<gold>NEXECONOMY<yellow>]</yellow>'
+  prefix: '<bold><gradient:yellow:white>NEXECONOMY</gradient></bold> <gray>»'
   no-permission: '<red>You do not have permission to perform this command.</red>'
   reload: '<gray>Configuration reloaded <yellow>successfully<gray>!'#
   wrong-amount: '<red>Please enter a valid amount.</red>'
@@ -35,3 +35,17 @@ currency:
     footer:
       - ' '
       - '<gray><strikethrough>-----</strikethrough><yellow>●<gray><strikethrough>-----</strikethrough> <gray><strikethrough>-----</strikethrough><yellow>●<gray>⏺<yellow>●<gray><strikethrough>-----</strikethrough> <gray><strikethrough>-----</strikethrough><yellow>●<gray><strikethrough>-----</strikethrough>'
+  payment:
+    pay-success: '<gray>You have paid <yellow><target> <gray><amount> <gray><currency>.'
+    pay-success-target: '<gray>You have received <yellow><amount> <gray><currency> from <yellow><player><gray>.'
+    pay-failed: '<red>You could not pay <yellow><target> <gray><amount> <gray><currency>.'
+    pay-cooldown: '<red>You cannot pay players while in cooldown. Please try again in <yellow><time> seconds.'
+    pay-yourself: '<red>You cannot pay yourself!'
+    pay-disabled: '<red>You cannot pay players with this currency!'
+    pay-min-amount: '<red>You cannot pay a value less than <yellow><min> <gray><currency>.'
+    pay-max-amount: '<red>You cannot pay a value greater than <yellow><max> <gray><currency>.'
+    pay-daily-limit-exceeded: '<red>Your daily send limit of <yellow><limit> <gray><currency> has been reached. You requested <yellow><requested> <gray><currency>, but only <yellow><paid> <gray><currency> could be sent.'
+    pay-daily-limit-receive: '<red>You have reached your daily limit of <yellow><amount> <gray><currency>. <red>You cannot receive any more currency from players today!'
+    pay-daily-limit-pay: '<red>You have reached your daily limit of <yellow><amount> <gray><currency>. <red>You cannot pay any more currency to players today!'
+    pay-daily-limit-target: '<red>Target has reached their daily limit of <yellow><amount> <gray><currency>. <red>You cannot pay them any more currency today!'
+    pay-daily-limit-reset: '<gray>Daily limit reset for <yellow><player>.'

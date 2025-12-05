@@ -3,6 +3,9 @@ package io.nexstudios.economy;
 import io.nexstudios.economy.commands.CurrencyCommand;
 import io.nexstudios.economy.commands.MainCommand;
 import io.nexstudios.economy.currency.NexCurrency;
+import io.nexstudios.economy.logic.EcoPlayerListener;
+import io.nexstudios.economy.logic.NexEcoFactory;
+import io.nexstudios.economy.logic.PaymentController;
 import io.nexstudios.economy.placeholder.NexEconomyPlaceholderProvider;
 import io.nexstudios.economy.storage.InMemoryEcoService;
 import io.nexstudios.economy.storage.persistence.EcoPersistencePort;
@@ -63,6 +66,7 @@ public class NexEconomy extends JavaPlugin {
     private NexEcoFactory nexEcoFactory;
     private EcoPlayerListener playerListener;
     private EconomyRedisSync economyRedisSync;
+    private PaymentController paymentController;
 
     private Map<String, CurrencyCommand> currencyCommandMap = new HashMap<>();
     private List<CurrencyCommand> registeredCurrencyCommands = new ArrayList<>();
@@ -111,6 +115,8 @@ public class NexEconomy extends JavaPlugin {
         if (economyRedisSync != null) {
             ecoService.setRemoteUpdateBroadcaster(economyRedisSync);
         }
+
+        paymentController = new PaymentController(this, ecoService, db.getDataSource(), transactionLogger, nexusLanguage);
 
         registerPlaceholders();
 
@@ -177,6 +183,11 @@ public class NexEconomy extends JavaPlugin {
     public void onReload() {
         loadNexusFiles();
         this.messageSender = new MessageSender(nexusLanguage);
+
+        // Reload payment controller profiles if it already exists
+        if (paymentController != null) {
+            paymentController.reloadConfig();
+        }
 
         // Rebuild factory with new currency configs
         if (nexEcoFactory != null) {

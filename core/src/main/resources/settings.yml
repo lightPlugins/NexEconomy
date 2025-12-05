@@ -16,11 +16,38 @@ logging:
     level: 3
 
 # ######################################################  #
-#                  CROSS-SERVER SETTINGS                  #
+#                        PAYMENTS                         #
 # ######################################################  #
-# This name identifies this server in a multi-server /
-# cross-server environment. It is sent along with Redis
-# messages so that NexEconomy can ignore its own messages
-# and avoid critical echo loops.
-cross-server:
-  servername: 'survival'
+# Here you can manage the player payments for each currency.
+payments:
+  - id: vault
+    conditions:
+      - id: permission
+        world: 'nexeconomy.command.pay.vault'
+        send-message: true
+        as-actionbar: false
+        message: '<dark_red><bold>ERROR</bold> <gray>» <red>You do not have permission to use Vault Payments.'
+    min-amount-per-transaction: 10
+    max-amount-per-transaction: 1000000
+    cooldown: 10
+    daily-limits:
+      enable: true
+      default:
+        max-send: 500000
+        max-receive: 1000000
+      group:
+        - max-send: 2500
+          max-receive: 5000
+          conditions:
+            - id: permission
+              permission: 'nexeconomy.command.pay.new-player'
+        - max-send: 500000
+          max-receive: 1000000
+          conditions:
+            - id: permission
+              permission: 'nexeconomy.command.pay.trusted-player'
+        - max-send: -1
+          max-receive: -1
+          conditions:
+            - id: permission
+              permission: 'nexeconomy.command.pay.mvp'

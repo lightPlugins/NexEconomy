@@ -35,4 +35,5 @@ start-balance: 120
 # If set to -1, there is no limit
 # If a player has more coins than this limit, he is unable to gain more “coins”
 max-balance: -1
+payable: true
 

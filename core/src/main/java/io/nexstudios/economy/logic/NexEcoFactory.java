@@ -1,5 +1,6 @@
-package io.nexstudios.economy;
+package io.nexstudios.economy.logic;
 
+import io.nexstudios.economy.NexEconomy;
 import io.nexstudios.economy.currency.NexCurrencyType;
 import io.nexstudios.economy.currency.NexCurrency;
 import io.nexstudios.nexus.bukkit.files.NexusFileReader;
@@ -32,6 +33,10 @@ public class NexEcoFactory {
         this.currencyFiles = currencyFiles;
         NexEconomy.nexusLogger.info("Loading currencies ...");
         loadCurrencies();
+    }
+
+    public String plain(Component component) {
+        return PlainTextComponentSerializer.plainText().serialize(component);
     }
 
     private void loadCurrencies() {

@@ -170,6 +170,37 @@ public class MainCommand extends BaseCommand {
         plugin.getMessageSender().send(sender, "general.sync-currencies.complete", resolver);
     }
 
+    @Subcommand("dailylimit reset")
+    @CommandCompletion("@ecoPlayers")
+    @Syntax("<player>")
+    @CommandPermission("nexeco.admin.dailylimit.reset")
+    @Description("Reset the stored daily send/receive limits for a player")
+    public void resetDailyLimit(CommandSender sender, String playerName) {
+        OfflinePlayer target = resolveKnownPlayerByName(playerName);
+        if (target == null) {
+            TagResolver resolver = TagResolver.resolver(
+                    Placeholder.parsed("player", playerName)
+            );
+            NexEconomy.getInstance().getMessageSender().send(sender, "general.player-not-found", resolver);
+            return;
+        } else {
+            target.getUniqueId();
+        }
+
+        UUID playerId = target.getUniqueId();
+        NexEconomy plugin = NexEconomy.getInstance();
+
+        // Run DB operation asynchronously
+        Bukkit.getScheduler().runTaskAsynchronously(plugin, () -> {
+            plugin.getPaymentController().resetDailyLimitsForPlayer(playerId);
+        });
+
+        TagResolver resolver = TagResolver.resolver(
+                Placeholder.parsed("player", target.getName() != null ? target.getName() : playerId.toString())
+        );
+        plugin.getMessageSender().send(sender, "currency.payment.pay-daily-limit-reset", resolver);
+    }
+
 
     @Nullable
     private OfflinePlayer resolveKnownPlayerByName(String name) {
