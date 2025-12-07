@@ -428,13 +428,11 @@ public class CurrencyCommand extends BaseCommand {
             return;
         }
 
-        // First, try to resolve the player as a locally online player (no Mojang API call).
+        // First, try to resolve the player as a locally online player
         Player onlineTarget = Bukkit.getPlayerExact(targetName);
 
         // For the payment logic we still need an OfflinePlayer.
-        // This can trigger a Mojang lookup for never-seen names, so we only do it when:
-        // - the player is currently online (Bukkit knows them locally), or
-        // - Redis is enabled and cross-server payments are allowed.
+        // This can trigger a Mojang lookup for never-seen names
         OfflinePlayer target = Objects.requireNonNullElseGet(onlineTarget, () -> Bukkit.getOfflinePlayer(targetName));
 
         // Explicit self-pay check before calling PaymentController:
@@ -450,7 +448,7 @@ public class CurrencyCommand extends BaseCommand {
                     .payAsync(player, target, currency, key, requestedAmount)
                     .join();
 
-            // Switch back to main thread for message sending and any Bukkit API calls.
+            // Switch back to main thread for message sending
             Bukkit.getScheduler().runTask(NexEconomy.getInstance(), () -> {
                 switch (res.error()) {
                     case NONE -> {
