@@ -1,8 +1,8 @@
 package io.nexstudios.economy.commands;
 
 import io.nexstudios.economy.NexEconomy;
-import io.nexstudios.economy.logic.PaymentController;
 import io.nexstudios.economy.currency.NexCurrency;
+import io.nexstudios.economy.logic.PaymentController;
 import io.nexstudios.economy.storage.NexEcoResponse;
 import io.nexstudios.economy.storage.NexEcoService;
 import io.nexstudios.economy.storage.support.EcoMath;
@@ -10,7 +10,13 @@ import io.nexstudios.economy.storage.support.TransactionLogger;
 import io.nexstudios.nexus.bukkit.language.NexusLanguage;
 import io.nexstudios.nexus.libs.commands.BaseCommand;
 import io.nexstudios.nexus.libs.commands.PaperCommandManager;
-import io.nexstudios.nexus.libs.commands.annotation.*;
+import io.nexstudios.nexus.libs.commands.annotation.CommandAlias;
+import io.nexstudios.nexus.libs.commands.annotation.CommandCompletion;
+import io.nexstudios.nexus.libs.commands.annotation.CommandPermission;
+import io.nexstudios.nexus.libs.commands.annotation.Description;
+import io.nexstudios.nexus.libs.commands.annotation.Optional;
+import io.nexstudios.nexus.libs.commands.annotation.Subcommand;
+import io.nexstudios.nexus.libs.commands.annotation.Syntax;
 import net.kyori.adventure.text.minimessage.tag.resolver.Placeholder;
 import net.kyori.adventure.text.minimessage.tag.resolver.TagResolver;
 import net.kyori.adventure.text.serializer.plain.PlainTextComponentSerializer;
@@ -437,9 +443,12 @@ public class CurrencyCommand extends BaseCommand {
             return;
         }
 
-        // Run the entire payment flow asynchronously to avoid blocking the main thread with DB access.
+        // Run the entire payment flow asynchronously to avoid blocking the main thread with DB access and conditions.
         Bukkit.getScheduler().runTaskAsynchronously(NexEconomy.getInstance(), () -> {
-            PaymentController.PaymentResult res = paymentController.pay(player, target, currency, key, requestedAmount);
+            // Use the fully async PaymentController API
+            PaymentController.PaymentResult res = paymentController
+                    .payAsync(player, target, currency, key, requestedAmount)
+                    .join();
 
             // Switch back to main thread for message sending and any Bukkit API calls.
             Bukkit.getScheduler().runTask(NexEconomy.getInstance(), () -> {

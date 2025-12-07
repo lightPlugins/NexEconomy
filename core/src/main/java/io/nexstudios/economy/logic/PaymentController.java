@@ -8,11 +8,11 @@ import io.nexstudios.economy.storage.persistence.sql.EcoDailyLimitsTable;
 import io.nexstudios.economy.storage.support.EcoMath;
 import io.nexstudios.economy.storage.support.TransactionLogger;
 import io.nexstudios.nexus.bukkit.NexusPlugin;
-import io.nexstudios.nexus.bukkit.redis.NexusRedisApi;
-import io.nexstudios.nexus.bukkit.redis.NexusRedisPayload;
-import io.nexstudios.nexus.bukkit.redis.NexusRedisMessage;
-import io.nexstudios.nexus.bukkit.redis.NexusRedisListener;
 import io.nexstudios.nexus.bukkit.language.NexusLanguage;
+import io.nexstudios.nexus.bukkit.redis.NexusRedisApi;
+import io.nexstudios.nexus.bukkit.redis.NexusRedisListener;
+import io.nexstudios.nexus.bukkit.redis.NexusRedisMessage;
+import io.nexstudios.nexus.bukkit.redis.NexusRedisPayload;
 import net.kyori.adventure.text.minimessage.tag.resolver.Placeholder;
 import net.kyori.adventure.text.minimessage.tag.resolver.TagResolver;
 import org.bukkit.OfflinePlayer;
@@ -25,24 +25,25 @@ import java.sql.*;
 import java.time.LocalDate;
 import java.time.ZoneOffset;
 import java.util.*;
+import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentHashMap;
 
 /**
  * Central controller for player-to-player payments across currencies.
- * <p>
+ *
  * Responsibilities:
  * - Load payment profiles from settings.yml (per-currency configuration).
  * - Enforce conditions, per-transaction min/max amounts and cooldowns.
  * - Enforce daily send/receive limits with persisted counters in the database.
  * - Perform the actual withdraw/deposit operations via NexEcoService.
  * - Coordinate cross-server notifications via Redis when available.
- * <p>
+ *
  * The controller is stateless with respect to long-term data:
  * - Daily limits are stored in a dedicated DB table (eco_daily_limits).
  * - Cooldowns are kept in memory only (per server).
- * <p>
- * The command layer (CurrencyCommand) only delegates to this controller and handles
- * which language keys to send based on the returned PaymentResult.
+ *
+ * The command layer (CurrencyCommand) delegates to this controller and is responsible
+ * for sending user-facing messages based on the returned PaymentResult.
  */
 public final class PaymentController {
 
@@ -169,206 +170,245 @@ public final class PaymentController {
     }
 
     /**
-     * Executes a player-to-player payment for a given currency and amount.
-     * This method is responsible for all validation and business logic; the caller
-     * is responsible for sending messages based on the returned result.
+     * Old synchronous API – kept for compatibility.
+     * Internally delegates to payAsync(...) and joins its result.
      */
     public PaymentResult pay(Player sender,
                              OfflinePlayer target,
                              NexCurrency currency,
                              String currencyKey,
                              BigDecimal rawAmount) {
+        try {
+            return payAsync(sender, target, currency, currencyKey, rawAmount).join();
+        } catch (Exception ex) {
+            Throwable cause = ex.getCause() != null ? ex.getCause() : ex;
+            NexEconomy.nexusLogger.error("PaymentController.pay (sync wrapper) failed: " + cause.getMessage());
+            txLogger.logRaw("ERROR", "PAY (sync wrapper) failed: " + cause.getMessage());
+            return PaymentResult.error(
+                    ErrorCode.INTERNAL_ERROR,
+                    cause.getMessage(),
+                    rawAmount,
+                    null,
+                    sender != null ? sender.getUniqueId() : null,
+                    target != null ? target.getUniqueId() : null
+            );
+        }
+    }
+
+    /**
+     * Fully asynchronous payment execution, including asynchronous condition evaluation.
+     * This method must never be called on the main thread directly; always call it
+     * from an async task (as done in CurrencyCommand).
+     */
+    public CompletableFuture<PaymentResult> payAsync(Player sender,
+                                                     OfflinePlayer target,
+                                                     NexCurrency currency,
+                                                     String currencyKey,
+                                                     BigDecimal rawAmount) {
 
         UUID senderId = sender.getUniqueId();
         UUID targetId = target != null ? target.getUniqueId() : null;
 
         try {
-            // Check if pay is configured for this currency
+            // Fast pre-validation without hitting async Conditions yet
             PaymentProfile profile = profiles.get(currencyKey.toLowerCase(Locale.ROOT));
             if (profile == null) {
-                return PaymentResult.error(
-                        ErrorCode.DISABLED_FOR_CURRENCY,
-                        "Payments are disabled for currency '" + currencyKey + "'.",
-                        rawAmount, null, senderId, targetId
+                return CompletableFuture.completedFuture(
+                        PaymentResult.error(
+                                ErrorCode.DISABLED_FOR_CURRENCY,
+                                "Payments are disabled for currency '" + currencyKey + "'.",
+                                rawAmount, null, senderId, targetId
+                        )
                 );
             }
 
-            // Basic validity checks
             if (target == null || senderId.equals(targetId)) {
-                return PaymentResult.error(
-                        ErrorCode.INVALID_AMOUNT,
-                        "Sender tried to pay themselves or target is null.",
-                        rawAmount, null, senderId, targetId
+                return CompletableFuture.completedFuture(
+                        PaymentResult.error(
+                                ErrorCode.INVALID_AMOUNT,
+                                "Sender tried to pay themselves or target is null.",
+                                rawAmount, null, senderId, targetId
+                        )
                 );
             }
 
-            // Cross-server availability: if Redis is not active or cross-server disabled,
-            // only allow payments to players that are currently online on this server.
             boolean redisActive = isRedisActive();
             if (!redisActive && (target.getPlayer() == null || !target.getPlayer().isOnline())) {
-                return PaymentResult.error(
-                        ErrorCode.INTERNAL_ERROR,
-                        "Cross-server disabled or Redis not active; target is not online on this server.",
-                        rawAmount, null, senderId, targetId
+                return CompletableFuture.completedFuture(
+                        PaymentResult.error(
+                                ErrorCode.INTERNAL_ERROR,
+                                "Cross-server disabled or Redis not active; target is not online on this server.",
+                                rawAmount, null, senderId, targetId
+                        )
                 );
             }
 
-            // Amount parsing and scaling
             BigDecimal amount = EcoMath.scale(currency, rawAmount);
             if (amount == null || amount.signum() <= 0) {
-                return PaymentResult.error(
-                        ErrorCode.INVALID_AMOUNT,
-                        "Amount is null or not positive.",
-                        rawAmount, null, senderId, targetId
+                return CompletableFuture.completedFuture(
+                        PaymentResult.error(
+                                ErrorCode.INVALID_AMOUNT,
+                                "Amount is null or not positive.",
+                                rawAmount, null, senderId, targetId
+                        )
                 );
             }
 
-            // Global conditions (permission etc.)
-            if (!profile.checkConditions(sender)) {
-                return PaymentResult.error(
-                        ErrorCode.CONDITIONS_FAILED,
-                        "Top-level payment conditions failed.",
-                        amount, null, senderId, targetId
-                );
-            }
+            // All expensive / async parts are combined here:
+            // - Top-level profile conditions for sender
+            // - Daily-limit group conditions for sender/target
+            CompletableFuture<Boolean> conditionsFuture = profile.checkConditionsAsync(sender);
+            CompletableFuture<DailyLimitEffective> senderLimitsFuture = profile.dailyLimits.resolveEffectiveLimitsAsync(sender);
+            CompletableFuture<DailyLimitEffective> targetLimitsFuture = profile.dailyLimits.resolveEffectiveLimitsAsync(target);
 
-            // Per-transaction min/max
-            if (amount.compareTo(profile.minPerTransaction) < 0) {
-                return PaymentResult.error(
-                        ErrorCode.BELOW_MIN,
-                        "Amount below per-transaction minimum.",
-                        amount, profile.minPerTransaction, senderId, targetId
-                );
-            }
-            if (amount.compareTo(profile.maxPerTransaction) > 0) {
-                return PaymentResult.error(
-                        ErrorCode.ABOVE_MAX,
-                        "Amount above per-transaction maximum.",
-                        amount, profile.maxPerTransaction, senderId, targetId
-                );
-            }
+            return conditionsFuture.thenCombineAsync(
+                    senderLimitsFuture.thenCombineAsync(targetLimitsFuture,
+                            (sLimits, tLimits) -> new DailyLimitPair(sLimits, tLimits)),
+                    (conditionsOk, limitPair) ->
+                            new CombinedPrecheckResult(conditionsOk, limitPair.senderLimits(), limitPair.targetLimits())
+            ).thenApplyAsync(pre -> {
+                if (!pre.conditionsOk()) {
+                    return PaymentResult.error(
+                            ErrorCode.CONDITIONS_FAILED,
+                            "Top-level payment conditions failed.",
+                            amount, null, senderId, targetId
+                    );
+                }
 
-            // Cooldown
-            long remainingCooldown = getRemainingCooldownSeconds(profile, senderId);
-            if (remainingCooldown > 0L) {
-                return PaymentResult.error(
-                        ErrorCode.COOLDOWN,
-                        "Payment cooldown not yet expired for this sender & currency.",
-                        amount,
-                        BigDecimal.valueOf(remainingCooldown), // remaining seconds
-                        senderId,
-                        targetId
-                );
-            }
+                // Per-transaction min/max
+                if (amount.compareTo(profile.minPerTransaction) < 0) {
+                    return PaymentResult.error(
+                            ErrorCode.BELOW_MIN,
+                            "Amount below per-transaction minimum.",
+                            amount, profile.minPerTransaction, senderId, targetId
+                    );
+                }
+                if (amount.compareTo(profile.maxPerTransaction) > 0) {
+                    return PaymentResult.error(
+                            ErrorCode.ABOVE_MAX,
+                            "Amount above per-transaction maximum.",
+                            amount, profile.maxPerTransaction, senderId, targetId
+                    );
+                }
 
-            // Daily limits (DB-based)
-            int dayUtc = getCurrentDayUtc();
-            DailyLimitEffective senderLimits = profile.dailyLimits.resolveEffectiveLimits(sender);
-            DailyLimitEffective targetLimits = profile.dailyLimits.resolveEffectiveLimits(target);
+                long remainingCooldown = getRemainingCooldownSeconds(profile, senderId);
+                if (remainingCooldown > 0L) {
+                    return PaymentResult.error(
+                            ErrorCode.COOLDOWN,
+                            "Payment cooldown not yet expired for this sender & currency.",
+                            amount,
+                            BigDecimal.valueOf(remainingCooldown),
+                            senderId,
+                            targetId
+                    );
+                }
 
-            DailyTotals senderTotals = loadDailyTotals(senderId, currencyKey, dayUtc);
-            DailyTotals targetTotals = loadDailyTotals(targetId, currencyKey, dayUtc);
+                // Daily limits based on DB totals (sync, but we are in async thread)
+                int dayUtc = getCurrentDayUtc();
+                DailyTotals senderTotals = loadDailyTotals(senderId, currencyKey, dayUtc);
+                DailyTotals targetTotals = loadDailyTotals(targetId, currencyKey, dayUtc);
 
-            // Compute remaining send/receive capacity for this day
-            BigDecimal remainingSend = senderLimits.remainingSend(senderTotals.sent);
-            BigDecimal remainingReceive = targetLimits.remainingReceive(targetTotals.received);
+                DailyLimitEffective senderLimits = pre.senderLimits();
+                DailyLimitEffective targetLimits = pre.targetLimits();
 
-            BigDecimal effectiveAmount = amount;
+                BigDecimal remainingSend = senderLimits.remainingSend(senderTotals.sent);
+                BigDecimal remainingReceive = targetLimits.remainingReceive(targetTotals.received);
 
-            if (remainingSend != null) {
-                effectiveAmount = effectiveAmount.min(remainingSend.max(BigDecimal.ZERO));
-            }
-            if (remainingReceive != null) {
-                effectiveAmount = effectiveAmount.min(remainingReceive.max(BigDecimal.ZERO));
-            }
+                BigDecimal effectiveAmount = amount;
 
-            // No capacity left at all -> hard daily-limit error (as before)
-            if (effectiveAmount.compareTo(BigDecimal.ZERO) <= 0) {
-                // Decide which side caused the block for the error code and limit
-                if (remainingSend != null && remainingSend.signum() <= 0) {
+                if (remainingSend != null) {
+                    effectiveAmount = effectiveAmount.min(remainingSend.max(BigDecimal.ZERO));
+                }
+                if (remainingReceive != null) {
+                    effectiveAmount = effectiveAmount.min(remainingReceive.max(BigDecimal.ZERO));
+                }
+
+                // No capacity left at all -> daily limit enforced
+                if (effectiveAmount.compareTo(BigDecimal.ZERO) <= 0) {
+                    if (remainingSend != null && remainingSend.signum() <= 0) {
+                        return PaymentResult.error(
+                                ErrorCode.DAILY_LIMIT_SENDER,
+                                "Sender exceeded daily send limit.",
+                                amount, senderLimits.maxSend, senderId, targetId
+                        );
+                    }
+                    if (remainingReceive != null && remainingReceive.signum() <= 0) {
+                        return PaymentResult.error(
+                                ErrorCode.DAILY_LIMIT_TARGET,
+                                "Target exceeded daily receive limit.",
+                                amount, targetLimits.maxReceive, senderId, targetId
+                        );
+                    }
                     return PaymentResult.error(
                             ErrorCode.DAILY_LIMIT_SENDER,
-                            "Sender exceeded daily send limit.",
+                            "Daily limit exceeded (no remaining capacity).",
                             amount, senderLimits.maxSend, senderId, targetId
                     );
                 }
-                if (remainingReceive != null && remainingReceive.signum() <= 0) {
+
+                boolean partial = effectiveAmount.compareTo(amount) < 0;
+
+                if (!eco.has(senderId, currencyKey, effectiveAmount)) {
                     return PaymentResult.error(
-                            ErrorCode.DAILY_LIMIT_TARGET,
-                            "Target exceeded daily receive limit.",
-                            amount, targetLimits.maxReceive, senderId, targetId
+                            ErrorCode.NOT_ENOUGH_BALANCE,
+                            "Sender does not have enough balance.",
+                            effectiveAmount, null, senderId, targetId
                     );
                 }
-                // Fallback
-                return PaymentResult.error(
-                        ErrorCode.DAILY_LIMIT_SENDER,
-                        "Daily limit exceeded (no remaining capacity).",
-                        amount, senderLimits.maxSend, senderId, targetId
-                );
-            }
 
-            boolean partial = effectiveAmount.compareTo(amount) < 0;
+                // Economic operations (still synchronous, but on async thread)
+                NexEcoResponse withdrawRes = eco.withdraw(senderId, currencyKey, effectiveAmount);
+                if (!withdrawRes.isSuccess()) {
+                    return PaymentResult.error(
+                            ErrorCode.INTERNAL_ERROR,
+                            "Withdraw failed: " + withdrawRes.responseType() + " (" + withdrawRes.errorMessage() + ")",
+                            effectiveAmount, null, senderId, targetId
+                    );
+                }
 
-            // Check sender balance against effective amount
-            if (!eco.has(senderId, currencyKey, effectiveAmount)) {
-                return PaymentResult.error(
-                        ErrorCode.NOT_ENOUGH_BALANCE,
-                        "Sender does not have enough balance.",
-                        effectiveAmount, null, senderId, targetId
-                );
-            }
+                NexEcoResponse depositRes = eco.deposit(targetId, currencyKey, effectiveAmount);
+                if (!depositRes.isSuccess()) {
+                    // Best-effort rollback
+                    eco.deposit(senderId, currencyKey, effectiveAmount);
+                    return PaymentResult.error(
+                            ErrorCode.INTERNAL_ERROR,
+                            "Deposit failed: " + depositRes.responseType() + " (" + depositRes.errorMessage() + ")",
+                            effectiveAmount, null, senderId, targetId
+                    );
+                }
 
-            // Execute withdraw-deposit pair using effectiveAmount
-            NexEcoResponse withdrawRes = eco.withdraw(senderId, currencyKey, effectiveAmount);
-            if (!withdrawRes.isSuccess()) {
-                return PaymentResult.error(
-                        ErrorCode.INTERNAL_ERROR,
-                        "Withdraw failed: " + withdrawRes.responseType() + " (" + withdrawRes.errorMessage() + ")",
-                        effectiveAmount, null, senderId, targetId
-                );
-            }
+                // Update cooldown
+                touchCooldown(profile, senderId);
 
-            NexEcoResponse depositRes = eco.deposit(targetId, currencyKey, effectiveAmount);
-            if (!depositRes.isSuccess()) {
-                // Attempt rollback for safety
-                eco.deposit(senderId, currencyKey, effectiveAmount);
-                return PaymentResult.error(
-                        ErrorCode.INTERNAL_ERROR,
-                        "Deposit failed: " + depositRes.responseType() + " (" + depositRes.errorMessage() + ")",
-                        effectiveAmount, null, senderId, targetId
-                );
-            }
+                // Persist daily totals
+                addToDailyTotals(senderId, currencyKey, dayUtc, effectiveAmount, BigDecimal.ZERO);
+                addToDailyTotals(targetId, currencyKey, dayUtc, BigDecimal.ZERO, effectiveAmount);
 
-            // Update cooldown in-memory
-            touchCooldown(profile, senderId);
+                // Logging
+                txLogger.log(senderId, currencyKey, "PAY",
+                        "target=" + targetId + " amount=" + effectiveAmount
+                                + " senderBalance=" + withdrawRes.balance()
+                                + " targetBalance=" + depositRes.balance()
+                                + " result=SUCCESS"
+                                + (partial ? " (PARTIAL, requested=" + amount + ")" : ""));
 
-            // Persist daily totals atomically (sender.sent += effectiveAmount, target.received += effectiveAmount)
-            addToDailyTotals(senderId, currencyKey, dayUtc, effectiveAmount, BigDecimal.ZERO);
-            addToDailyTotals(targetId, currencyKey, dayUtc, BigDecimal.ZERO, effectiveAmount);
+                // Redis event (informational)
+                publishRedisPayment(senderId, targetId, currencyKey, effectiveAmount);
 
-            // Log transaction
-            txLogger.log(senderId, currencyKey, "PAY",
-                    "target=" + targetId + " amount=" + effectiveAmount
-                            + " senderBalance=" + withdrawRes.balance()
-                            + " targetBalance=" + depositRes.balance()
-                            + " result=SUCCESS"
-                            + (partial ? " (PARTIAL, requested=" + amount + ")" : ""));
-
-            // Optionally publish a custom Redis payment event (informational only)
-            publishRedisPayment(senderId, targetId, currencyKey, effectiveAmount);
-
-            // For partial sends we return the effective amount and the sender's daily limit as minOrMaxLimit
-            BigDecimal limit = (partial && senderLimits.enabled() ? senderLimits.maxSend() : null);
-            return new PaymentResult(true, ErrorCode.NONE, null, effectiveAmount, limit, senderId, targetId);
+                BigDecimal limit = (partial && senderLimits.enabled() ? senderLimits.maxSend() : null);
+                return new PaymentResult(true, ErrorCode.NONE, null, effectiveAmount, limit, senderId, targetId);
+            });
         } catch (Exception ex) {
-            NexEconomy.nexusLogger.error("PaymentController.pay failed: " + ex.getMessage());
-            txLogger.logRaw("ERROR", "PAY failed: " + ex.getMessage());
-            return PaymentResult.error(
-                    ErrorCode.INTERNAL_ERROR,
-                    ex.getMessage(),
-                    rawAmount, null,
-                    sender.getUniqueId(),
-                    target != null ? target.getUniqueId() : null
+            NexEconomy.nexusLogger.error("PaymentController.payAsync failed: " + ex.getMessage());
+            txLogger.logRaw("ERROR", "PAY async failed: " + ex.getMessage());
+            return CompletableFuture.completedFuture(
+                    PaymentResult.error(
+                            ErrorCode.INTERNAL_ERROR,
+                            ex.getMessage(),
+                            rawAmount, null,
+                            sender.getUniqueId(),
+                            target != null ? target.getUniqueId() : null
+                    )
             );
         }
     }
@@ -532,11 +572,9 @@ public final class PaymentController {
             return;
         }
 
-        // Listener is only used for future extension; for now we do not handle
-        // any remote payment events explicitly, because daily limits are
-        // reconciled via the database and balances via EconomyRedisSync.
+        // Listener currently reserved for possible future cross-server payment notifications.
         NexusRedisListener listener = (channel, message) -> {
-            // Reserved for future cross-server payment notifications if needed.
+            // No-op for now.
         };
 
         NexusRedisApi.subscribe(redisChannelPayments, listener);
@@ -612,85 +650,141 @@ public final class PaymentController {
 
     private record DailyTotals(BigDecimal sent, BigDecimal received) { }
 
-    private record PaymentProfile(String currencyKey, List<Map<String, Object>> conditions, long cooldownSeconds,
-                                  BigDecimal minPerTransaction, BigDecimal maxPerTransaction, DailyLimits dailyLimits) {
+    private record PaymentProfile(String currencyKey,
+                                  List<Map<String, Object>> conditions,
+                                  long cooldownSeconds,
+                                  BigDecimal minPerTransaction,
+                                  BigDecimal maxPerTransaction,
+                                  DailyLimits dailyLimits) {
 
-        boolean checkConditions(Player player) {
-                if (conditions == null || conditions.isEmpty()) return true;
-                return NexusPlugin.getInstance()
-                        .getConditionFactory()
-                        .checkConditions(player, player.getLocation(), conditions);
+        /**
+         * Asynchronously evaluates top-level conditions for the sender.
+         */
+        CompletableFuture<Boolean> checkConditionsAsync(Player player) {
+            if (conditions == null || conditions.isEmpty()) {
+                return CompletableFuture.completedFuture(true);
             }
+
+            return NexusPlugin.getInstance()
+                    .getConditionFactory()
+                    .newBuilder()
+                    .player(player)
+                    .location(player.getLocation())
+                    .conditions(conditions)
+                    .evaluateAsync();
+        }
+    }
+
+    /**
+     * Encapsulates configuration of daily limits from settings.yml:
+     * - enable flag
+     * - default max-send / max-receive
+     * - optional groups with additional conditions overriding defaults
+     */
+    private record DailyLimits(boolean enabled,
+                               BigDecimal defaultMaxSend,
+                               BigDecimal defaultMaxReceive,
+                               List<Group> groups) {
+
+        @SuppressWarnings("unchecked")
+        static DailyLimits fromConfig(Map<String, Object> paymentMap) {
+            Object dailyObj = paymentMap.get("daily-limits");
+            if (!(dailyObj instanceof Map<?, ?> outer)) {
+                return new DailyLimits(false, BigDecimal.valueOf(-1), BigDecimal.valueOf(-1), List.of());
+            }
+            Map<String, Object> daily = (Map<String, Object>) (Map<?, ?>) outer;
+            boolean enable = Boolean.TRUE.equals(daily.get("enable"));
+
+            BigDecimal defSend = getBigDecimal(daily, "default.max-send", BigDecimal.valueOf(-1));
+            BigDecimal defReceive = getBigDecimal(daily, "default.max-receive", BigDecimal.valueOf(-1));
+
+            List<Group> groups = new ArrayList<>();
+            Object gObj = daily.get("group");
+            if (gObj instanceof List<?> rawGroups) {
+                for (Object ro : rawGroups) {
+                    if (!(ro instanceof Map<?, ?> gm)) continue;
+                    Map<String, Object> m = (Map<String, Object>) (Map<?, ?>) gm;
+                    BigDecimal gSend = getBigDecimal(m, "max-send", defSend);
+                    BigDecimal gReceive = getBigDecimal(m, "max-receive", defReceive);
+
+                    List<Map<String, Object>> conds = List.of();
+                    Object condObj = m.get("conditions");
+                    if (condObj instanceof List<?> rawConds && !rawConds.isEmpty()) {
+                        conds = (List<Map<String, Object>>) (List<?>) rawConds;
+                    }
+                    groups.add(new Group(gSend, gReceive, conds));
+                }
+            }
+
+            return new DailyLimits(enable, defSend, defReceive, List.copyOf(groups));
         }
 
         /**
-         * Encapsulates configuration of daily limits from settings.yml:
-         * - enable flag
-         * - default max-send / max-receive
-         * - optional groups with additional conditions overriding defaults
+         * Asynchronously resolves the effective daily limits for a given player.
+         * If the player is not online on this server, group-based conditions cannot be evaluated
+         * and the default limits are used.
          */
-        private record DailyLimits(boolean enabled, BigDecimal defaultMaxSend, BigDecimal defaultMaxReceive,
-                                   List<Group> groups) {
+        CompletableFuture<DailyLimitEffective> resolveEffectiveLimitsAsync(OfflinePlayer player) {
+            if (!enabled || player == null) {
+                return CompletableFuture.completedFuture(
+                        new DailyLimitEffective(false, BigDecimal.valueOf(-1), BigDecimal.valueOf(-1))
+                );
+            }
 
-        @SuppressWarnings("unchecked")
-            static DailyLimits fromConfig(Map<String, Object> paymentMap) {
-                Object dailyObj = paymentMap.get("daily-limits");
-                if (!(dailyObj instanceof Map<?, ?> outer)) {
-                    return new DailyLimits(false, BigDecimal.valueOf(-1), BigDecimal.valueOf(-1), List.of());
-                }
-                Map<String, Object> daily = (Map<String, Object>) (Map<?, ?>) outer;
-                boolean enable = Boolean.TRUE.equals(daily.get("enable"));
+            Player bukkitPlayer = player.getPlayer();
+            if (bukkitPlayer == null) {
+                // Player is not online on this server; fall back to default limits.
+                return CompletableFuture.completedFuture(
+                        new DailyLimitEffective(true, defaultMaxSend, defaultMaxReceive)
+                );
+            }
 
-                BigDecimal defSend = getBigDecimal(daily, "default.max-send", BigDecimal.valueOf(-1));
-                BigDecimal defReceive = getBigDecimal(daily, "default.max-receive", BigDecimal.valueOf(-1));
+            if (groups == null || groups.isEmpty()) {
+                return CompletableFuture.completedFuture(
+                        new DailyLimitEffective(true, defaultMaxSend, defaultMaxReceive)
+                );
+            }
 
-                List<Group> groups = new ArrayList<>();
-                Object gObj = daily.get("group");
-                if (gObj instanceof List<?> rawGroups) {
-                    for (Object ro : rawGroups) {
-                        if (!(ro instanceof Map<?, ?> gm)) continue;
-                        Map<String, Object> m = (Map<String, Object>) (Map<?, ?>) gm;
-                        BigDecimal gSend = getBigDecimal(m, "max-send", defSend);
-                        BigDecimal gReceive = getBigDecimal(m, "max-receive", defReceive);
+            // Process groups sequentially: first group whose conditions evaluate to true wins.
+            CompletableFuture<DailyLimitEffective> future = CompletableFuture.completedFuture(null);
 
-                        List<Map<String, Object>> conds = List.of();
-                        Object condObj = m.get("conditions");
-                        if (condObj instanceof List<?> rawConds && !rawConds.isEmpty()) {
-                            conds = (List<Map<String, Object>>) (List<?>) rawConds;
-                        }
-                        groups.add(new Group(gSend, gReceive, conds));
+            for (Group g : groups) {
+                future = future.thenCompose(current -> {
+                    if (current != null) {
+                        // A previous group already matched; carry it through.
+                        return CompletableFuture.completedFuture(current);
                     }
-                }
 
-                return new DailyLimits(enable, defSend, defReceive, List.copyOf(groups));
-            }
-
-            DailyLimitEffective resolveEffectiveLimits(OfflinePlayer player) {
-                if (!enabled || player == null) {
-                    return new DailyLimitEffective(false, BigDecimal.valueOf(-1), BigDecimal.valueOf(-1));
-                }
-                // First matching group (by conditions) overrides defaults
-                if (groups != null) {
-                    for (Group g : groups) {
-                        if (g.conditions == null || g.conditions.isEmpty()) continue;
-                        boolean ok = NexusPlugin.getInstance()
-                                .getConditionFactory()
-                                .checkConditions(player.getPlayer(),
-                                        player.getPlayer() != null ? player.getPlayer().getLocation() : null,
-                                        g.conditions);
-                        if (ok) {
-                            return new DailyLimitEffective(true, g.maxSend, g.maxReceive);
-                        }
+                    if (g.conditions == null || g.conditions.isEmpty()) {
+                        return CompletableFuture.completedFuture(null);
                     }
-                }
-                return new DailyLimitEffective(true, defaultMaxSend, defaultMaxReceive);
+
+                    return NexusPlugin.getInstance()
+                            .getConditionFactory()
+                            .newBuilder()
+                            .player(bukkitPlayer)
+                            .location(bukkitPlayer.getLocation())
+                            .conditions(g.conditions)
+                            .evaluateAsync()
+                            .thenApply(ok -> ok
+                                    ? new DailyLimitEffective(true, g.maxSend, g.maxReceive)
+                                    : null);
+                });
             }
 
-            private record Group(BigDecimal maxSend,
-                                 BigDecimal maxReceive,
-                                 List<Map<String, Object>> conditions) {
-            }
+            // If no group matched, use default limits.
+            return future.thenApply(result ->
+                    result != null
+                            ? result
+                            : new DailyLimitEffective(true, defaultMaxSend, defaultMaxReceive)
+            );
         }
+
+        private record Group(BigDecimal maxSend,
+                             BigDecimal maxReceive,
+                             List<Map<String, Object>> conditions) {
+        }
+    }
 
     private record DailyLimitEffective(boolean enabled,
                                        BigDecimal maxSend,
@@ -723,6 +817,12 @@ public final class PaymentController {
             return maxReceive.subtract(currentReceived);
         }
     }
+
+    private record DailyLimitPair(DailyLimitEffective senderLimits, DailyLimitEffective targetLimits) { }
+
+    private record CombinedPrecheckResult(boolean conditionsOk,
+                                          DailyLimitEffective senderLimits,
+                                          DailyLimitEffective targetLimits) { }
 
     // ------------------- Message helpers -------------------
 
