@@ -399,44 +399,15 @@ public class CurrencyCommand extends BaseCommand {
             return;
         }
 
-        // Check if the given name is part of the same set used for @ecoPlayers completion.
-        boolean targetAllowed;
-
-        if (!redisEnabled) {
-            // Without Redis: only local online players are considered valid.
-            targetAllowed = Bukkit.getOnlinePlayers().stream()
-                    .anyMatch(p -> p.getName() != null && p.getName().equalsIgnoreCase(targetName));
-        } else {
-            // With Redis: any known player (online or offline) is allowed.
-            targetAllowed = Bukkit.getOnlinePlayers().stream()
-                    .anyMatch(p -> p.getName() != null && p.getName().equalsIgnoreCase(targetName));
-
-            if (!targetAllowed) {
-                for (OfflinePlayer op : Bukkit.getOfflinePlayers()) {
-                    if (op.getName() != null && op.getName().equalsIgnoreCase(targetName)) {
-                        targetAllowed = true;
-                        break;
-                    }
-                }
-            }
-        }
-
-        if (!targetAllowed) {
+        // Cross-server payments disabled: only allow local online targets
+        Player onlineTarget = Bukkit.getPlayerExact(targetName);
+        if (onlineTarget == null || !onlineTarget.isOnline()) {
             TagResolver resolver = TagResolver.resolver(Placeholder.parsed("player", targetName));
-            // Name is not in the @ecoPlayers universe -> treat as "player not found".
             NexEconomy.getInstance().getMessageSender().send(sender, "general.player-not-found", resolver);
             return;
         }
 
-        // First, try to resolve the player as a locally online player
-        Player onlineTarget = Bukkit.getPlayerExact(targetName);
-
-        // For the payment logic we still need an OfflinePlayer.
-        // This can trigger a Mojang lookup for never-seen names
-        OfflinePlayer target = Objects.requireNonNullElseGet(onlineTarget, () -> Bukkit.getOfflinePlayer(targetName));
-
-        // Explicit self-pay check before calling PaymentController:
-        if (target.getUniqueId().equals(player.getUniqueId())) {
+        if (onlineTarget.getUniqueId().equals(player.getUniqueId())) {
             NexEconomy.getInstance().getMessageSender().send(sender, "currency.payment.pay-yourself");
             return;
         }
@@ -445,7 +416,7 @@ public class CurrencyCommand extends BaseCommand {
         Bukkit.getScheduler().runTaskAsynchronously(NexEconomy.getInstance(), () -> {
             // Use the fully async PaymentController API
             PaymentController.PaymentResult res = paymentController
-                    .payAsync(player, target, currency, key, requestedAmount)
+                    .payAsync(player, onlineTarget, currency, key, requestedAmount)
                     .join();
 
             // Switch back to main thread for message sending
@@ -458,7 +429,7 @@ public class CurrencyCommand extends BaseCommand {
                         if (partial) {
                             BigDecimal limit = res.minOrMaxLimit() != null ? res.minOrMaxLimit() : paidAmount;
                             TagResolver resolver = TagResolver.resolver(
-                                    Placeholder.parsed("target", safeName(target)),
+                                    Placeholder.parsed("target", safeName(onlineTarget)),
                                     Placeholder.parsed("requested", formatAmount(requestedAmount)),
                                     Placeholder.parsed("paid", formatAmount(paidAmount)),
                                     Placeholder.parsed("limit", formatAmount(limit)),
@@ -468,20 +439,20 @@ public class CurrencyCommand extends BaseCommand {
                                     .send(sender, "currency.payment.pay-daily-limit-exceeded", resolver);
                         } else {
                             // Normal full-amount success
-                            TagResolver senderResolver = buildSuccessResolver(target, paidAmount);
+                            TagResolver senderResolver = buildSuccessResolver(onlineTarget, paidAmount);
                             NexEconomy.getInstance().getMessageSender()
                                     .send(sender, "currency.payment.pay-success", senderResolver);
                         }
 
                         // Message for the target (receiver) always uses the actually paid amount
-                        if (target.isOnline()) {
+                        if (onlineTarget.isOnline()) {
                             TagResolver receiverResolver = TagResolver.resolver(
                                     Placeholder.parsed("player", player.getName()),
                                     Placeholder.parsed("amount", formatAmount(paidAmount)),
                                     Placeholder.parsed("currency", formatCurrencySymbol(paidAmount))
                             );
                             NexEconomy.getInstance().getMessageSender()
-                                    .send(target.getPlayer(), "currency.payment.pay-success-target", receiverResolver);
+                                    .send(onlineTarget.getPlayer(), "currency.payment.pay-success-target", receiverResolver);
                         }
                     }
                     case DISABLED_FOR_CURRENCY -> NexEconomy.getInstance().getMessageSender()

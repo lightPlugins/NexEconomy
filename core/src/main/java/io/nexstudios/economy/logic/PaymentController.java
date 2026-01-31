@@ -110,7 +110,8 @@ public final class PaymentController {
 
         ensureDailyTable();
         reloadConfig();
-        initRedisListener();
+        // Cross Server Payments
+        // initRedisListener();
     }
 
     /**
@@ -231,13 +232,26 @@ public final class PaymentController {
                         )
                 );
             }
-
-            boolean redisActive = isRedisActive();
-            if (!redisActive && (target.getPlayer() == null || !target.getPlayer().isOnline())) {
+            // TODO: Cross-Server Payments
+            // currently disabled
+//            boolean redisActive = isRedisActive();
+//            if (!redisActive && (target.getPlayer() == null || !target.getPlayer().isOnline())) {
+//                return CompletableFuture.completedFuture(
+//                        PaymentResult.error(
+//                                ErrorCode.INTERNAL_ERROR,
+//                                "Cross-server disabled or Redis not active; target is not online on this server.",
+//                                rawAmount, null, senderId, targetId
+//                        )
+//                );
+//            }
+            // Alternative methode to check player is on the same server
+            // Currently NO Cross-Server payments!!! see top
+            // Cross-server payments disabled: target must be online on THIS server
+            if (target.getPlayer() == null || !target.getPlayer().isOnline()) {
                 return CompletableFuture.completedFuture(
                         PaymentResult.error(
                                 ErrorCode.INTERNAL_ERROR,
-                                "Cross-server disabled or Redis not active; target is not online on this server.",
+                                "Target is not online on this server.",
                                 rawAmount, null, senderId, targetId
                         )
                 );
@@ -393,7 +407,8 @@ public final class PaymentController {
                                 + (partial ? " (PARTIAL, requested=" + amount + ")" : ""));
 
                 // Redis event (informational)
-                publishRedisPayment(senderId, targetId, currencyKey, effectiveAmount);
+                // TODO: currently disabled
+                // publishRedisPayment(senderId, targetId, currencyKey, effectiveAmount);
 
                 BigDecimal limit = (partial && senderLimits.enabled() ? senderLimits.maxSend() : null);
                 return new PaymentResult(true, ErrorCode.NONE, null, effectiveAmount, limit, senderId, targetId);
