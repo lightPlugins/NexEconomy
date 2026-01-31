@@ -583,8 +583,9 @@ public class NexEconomy extends JavaPlugin {
 
         // Redis service is present but not connected yet
         if (!NexusRedisApi.isConnected()) {
-            nexusLogger.warning("Nexus Redis service is present but not connected. Cross-server features are paused until connection is established.");
-            // Still create sync helper so that subscriptions are registered and will receive messages once Redis reconnects.
+            nexusLogger.error("Nexus Redis service is present but not connected. Cross-server features are paused until connection is established.");
+            // return, because redis is necessary for cross-server sync!!
+            return;
         }
 
         String serverId = NexusPlugin.getInstance().getCrossServerName();

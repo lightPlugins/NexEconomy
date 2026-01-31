@@ -159,7 +159,7 @@ public class InMemoryEcoService implements NexEcoService {
                 PlayerAccount acc = cache.get(ak);
                 if (acc == null || !acc.isDirty()) continue;
 
-                NexEconomy.nexusLogger.info("Currency key: " + acc.getCurrencyKey());
+                NexEconomy.nexusLogger.debug("Currency key: " + acc.getCurrencyKey(), 1);
 
                 DbAccountSnapshot snap = new DbAccountSnapshot(
                         acc.getCurrencyKey(),
