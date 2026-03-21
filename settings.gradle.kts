@@ -1,2 +1,2 @@
 rootProject.name = "NexEconomy"
-include("core")
+include("bukkit")

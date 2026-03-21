@@ -1,0 +1,8 @@
+name: NexEconomy
+main: io.nexstudios.nexeconomy.NexEconomyPlugin
+version: v1.0.0
+api-version: "1.21"
+author: NexStudios
+depend:
+  - 'NexLogic'
+libraries: []
