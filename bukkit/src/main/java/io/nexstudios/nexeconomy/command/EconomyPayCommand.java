@@ -2,9 +2,13 @@ package io.nexstudios.nexeconomy.command;
 
 import io.nexstudios.commandservice.service.commands.annotations.Command;
 import io.nexstudios.commandservice.service.commands.annotations.CommandRoot;
+import io.nexstudios.commandservice.service.commands.annotations.Suggest;
+import io.nexstudios.commandservice.service.commands.annotations.SuggestPlayers;
 import io.nexstudios.commandservice.service.commands.source.NexPaperCommandSource;
 import io.nexstudios.languageservice.service.component.ComponentService;
 import io.nexstudios.languageservice.service.language.LanguageService;
+import io.nexstudios.nexeconomy.command.suggestions.AmountSuggestion;
+import io.nexstudios.nexeconomy.command.suggestions.CurrencySuggestion;
 import io.nexstudios.serviceregistry.di.Dependencies;
 import io.nexstudios.serviceregistry.di.Service;
 import io.nexstudios.serviceregistry.di.ServiceAccessor;
@@ -28,8 +32,13 @@ public class EconomyPayCommand implements Service {
     this.languageService = accessor.getService(LanguageService.class);
   }
 
-  @Command(value = "reload", permission = "nexeconomy.admin")
-  public int pay(NexPaperCommandSource source) {
+  @Command(value = "<currency> <target> <amount>", permission = "nexeconomy.admin")
+  public int pay(
+      NexPaperCommandSource source,
+      @Suggest(CurrencySuggestion.class) String currency,
+      @SuggestPlayers Player target,
+      @Suggest(AmountSuggestion.class) String amount
+  ) {
     Player player = (Player) source.sender();
     if(player == null) return 0;
 

@@ -7,6 +7,8 @@ plugins {
 dependencies {
     paperweight.paperDevBundle("1.21.11-R0.1-SNAPSHOT")
 
+    compileOnly("jakarta.persistence:jakarta.persistence-api:3.1.0")
+
     compileOnly("io.nexstudios:framework-paper:v1.0.2")
     compileOnly("io.nexstudios.itemservice:bukkit:v1.0.0")
     compileOnly("io.nexstudios.menuservice:bukkit:v1.0.1")

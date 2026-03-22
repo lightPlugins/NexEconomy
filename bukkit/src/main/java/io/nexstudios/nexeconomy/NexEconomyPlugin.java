@@ -14,6 +14,7 @@ import io.nexstudios.nexlogic.bukkit.services.effects.logging.BukkitLoggerServic
 import io.nexstudios.nexlogic.common.services.logging.LoggerService;
 import io.nexstudios.serviceregistry.di.ServiceAccessor;
 import io.nexstudios.serviceregistry.di.ServiceModule;
+import lombok.Getter;
 import org.bukkit.Bukkit;
 import org.bukkit.plugin.Plugin;
 import org.jetbrains.annotations.NotNull;
@@ -22,6 +23,7 @@ import java.util.List;
 
 public class NexEconomyPlugin extends NexPaperPlugin {
 
+  @Getter
   private static ServiceAccessor nexLogicService;
 
   @Override
@@ -46,13 +48,13 @@ public class NexEconomyPlugin extends NexPaperPlugin {
 
   @Override
   protected void load() {
-    getLogger().info("NexRegen is loading...");
+    getLogger().info("NexEconomy is loading...");
   }
 
 
   @Override
   protected void start() {
-    getLogger().info("NexRegen is starting...");
+    getLogger().info("NexEconomy is starting...");
     initNexLogic();
     // init language files
     services().getService(LanguageService.class).reload();
@@ -76,7 +78,7 @@ public class NexEconomyPlugin extends NexPaperPlugin {
   private void initNexLogic() {
     getLogger().info("Hooking into NexLogic...");
     Plugin plugin = Bukkit.getPluginManager().getPlugin("NexLogic");
-    if (plugin == null || !plugin.isEnabled()) {
+    if (plugin == null) {
       throw new IllegalStateException("Could not find NexLogic plugin! Please install it!");
     }
 
