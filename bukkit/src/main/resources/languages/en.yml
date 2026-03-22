@@ -48,4 +48,4 @@ currency:
     pay-daily-limit-receive: '<red>You have reached your daily limit of <yellow><amount> <gray><currency>. <red>You cannot receive any more currency from players today!'
     pay-daily-limit-pay: '<red>You have reached your daily limit of <yellow><amount> <gray><currency>. <red>You cannot pay any more currency to players today!'
     pay-daily-limit-target: '<red>Target has reached their daily limit of <yellow><amount> <gray><currency>. <red>You cannot pay them any more currency today!'
-    pay-daily-limit-reset: '<gray>Daily limit reset for <yellow><player>.''
+    pay-daily-limit-reset: '<gray>Daily limit reset for <yellow><player>.'

@@ -17,7 +17,6 @@ fraction-digits: 0
 # virtual -> Virtual currency (no direct integration)
 #
 # IMPORTANT:
-# - This section needs a server restart to work!
 # - Use “Vault” only one time per a server!
 currency-type: vault # virtual, vault
 # The starting balance of the currency (if a player joins the server)

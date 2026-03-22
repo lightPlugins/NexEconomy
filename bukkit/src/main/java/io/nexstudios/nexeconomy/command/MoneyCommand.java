@@ -1,0 +1,345 @@
+package io.nexstudios.nexeconomy.command;
+
+import io.nexstudios.commandservice.service.commands.annotations.*;
+import io.nexstudios.commandservice.service.commands.source.NexPaperCommandSource;
+import io.nexstudios.framework.paper.services.plugin.PaperPluginService;
+import io.nexstudios.languageservice.service.component.ComponentService;
+import io.nexstudios.nexeconomy.command.suggestions.AmountSuggestion;
+import io.nexstudios.nexeconomy.command.suggestions.CurrencySuggestion;
+import io.nexstudios.nexeconomy.command.suggestions.PlayerSuggestion;
+import io.nexstudios.nexeconomy.service.definition.AmountNotation;
+import io.nexstudios.nexeconomy.service.definition.CurrencyDefinition;
+import io.nexstudios.nexeconomy.service.economy.repo.EconomyRepository;
+import io.nexstudios.nexeconomy.service.economy.EconomyService;
+import io.nexstudios.nexeconomy.service.definition.MantissaAmount;
+import io.nexstudios.serviceregistry.di.Dependencies;
+import io.nexstudios.serviceregistry.di.Service;
+import io.nexstudios.serviceregistry.di.ServiceAccessor;
+import net.kyori.adventure.text.minimessage.tag.resolver.Placeholder;
+import net.kyori.adventure.text.minimessage.tag.resolver.TagResolver;
+import org.bukkit.Bukkit;
+import org.bukkit.OfflinePlayer;
+import org.bukkit.entity.Player;
+import org.bukkit.plugin.Plugin;
+
+import java.math.BigDecimal;
+
+@CommandRoot(
+    name = "currency", aliases = {"money", "eco"},
+    description = "Money commands"
+)
+@Dependencies({
+    ComponentService.class,
+    EconomyService.class,
+    EconomyRepository.class
+})
+public final class MoneyCommand implements Service {
+
+  private final ComponentService componentService;
+  private final EconomyService economy;
+  private final EconomyRepository repo;
+  private final Plugin plugin;
+
+  public MoneyCommand(ServiceAccessor accessor) {
+    this.componentService = accessor.getService(ComponentService.class);
+    this.economy = accessor.getService(EconomyService.class);
+    this.repo = accessor.getService(EconomyRepository.class);
+    this.plugin = accessor.getService(PaperPluginService.class).plugin();
+  }
+
+  @Command(value = "", permission = "nexeconomy.use")
+  public int root(NexPaperCommandSource source) {
+    return balance(source);
+  }
+
+  @Command(value = "balance", permission = "nexeconomy.use")
+  public int balance(NexPaperCommandSource source) {
+    Player player = (Player) source.sender();
+    if (player == null) return 0;
+
+    String cur = economy.defaultCurrencyIdOrNull();
+    if (cur == null) {
+      player.sendMessage(componentService.builder(player, "general.response-error", "NotDefined", true)
+          .resolver(TagResolver.resolver(Placeholder.parsed("error", "No currency configured")))
+          .build());
+      return 0;
+    }
+
+    return balanceCurrency(source, cur);
+  }
+
+  @Command(value = "balance <currency>", permission = "nexeconomy.use")
+  public int balanceCurrency(
+      NexPaperCommandSource source,
+      @Arg("currency") @Suggest(CurrencySuggestion.class) String currency
+  ) {
+    Player player = (Player) source.sender();
+    if (player == null) return 0;
+
+    CurrencyDefinition def = economy.requireCurrency(currency);
+    if (def == null) {
+      player.sendMessage(componentService.builder(player, "general.response-error", "NotDefined", true)
+          .resolver(TagResolver.resolver(Placeholder.parsed("error", "Unknown currency")))
+          .build());
+      return 0;
+    }
+
+    economy.balance(player, def.id()).thenAccept(amount -> {
+      String shown = formatHuman(amount, def);
+      player.sendMessage(componentService.builder(player, "currency.balance", "NotDefined", true)
+          .resolver(TagResolver.resolver(
+              Placeholder.parsed("amount", shown),
+              Placeholder.parsed("currency", def.symbolPlural())
+          ))
+          .build());
+    }).exceptionally(ex -> {
+      player.sendMessage(componentService.builder(player, "general.response-error", "NotDefined", true)
+          .resolver(TagResolver.resolver(Placeholder.parsed("error", ex.getMessage() == null ? "Unknown" : ex.getMessage())))
+          .build());
+      return null;
+    });
+
+    return 1;
+  }
+
+  @Command(value = "balance <currency> <target>", permission = "nexeconomy.admin")
+  public int balanceOtherCurrency(
+      NexPaperCommandSource source,
+      @Arg("currency") @Suggest(CurrencySuggestion.class) String currency,
+      @Arg("target") @Suggest(PlayerSuggestion.class) String target
+  ) {
+    Player player = (Player) source.sender();
+    Player targetPlayer = Bukkit.getPlayerExact(target);
+    if (player == null) return 0;
+    if (targetPlayer == null || !targetPlayer.isOnline()) return 0;
+
+    CurrencyDefinition def = economy.requireCurrency(currency);
+    if (def == null) {
+      player.sendMessage(componentService.builder(player, "general.response-error", "NotDefined", true)
+          .resolver(TagResolver.resolver(Placeholder.parsed("error", "Unknown currency")))
+          .build());
+      return 0;
+    }
+
+    economy.balance(targetPlayer, def.id()).thenAccept(amount -> {
+      String shown = formatHuman(amount, def);
+      player.sendMessage(componentService.builder(player, "currency.balance-other", "NotDefined", true)
+          .resolver(TagResolver.resolver(
+              Placeholder.parsed("target", targetPlayer.getName()),
+              Placeholder.parsed("amount", shown),
+              Placeholder.parsed("currency", def.symbolPlural())
+          ))
+          .build());
+    }).exceptionally(ex -> {
+      player.sendMessage(componentService.builder(player, "general.response-error", "NotDefined", true)
+          .resolver(TagResolver.resolver(Placeholder.parsed("error", ex.getMessage() == null ? "Unknown" : ex.getMessage())))
+          .build());
+      return null;
+    });
+
+    return 1;
+  }
+
+  @Command(value = "top <currency>", permission = "nexeconomy.use")
+  public int top(
+      NexPaperCommandSource source,
+      @Arg("currency") @Suggest(CurrencySuggestion.class) String currency
+  ) {
+    Player player = (Player) source.sender();
+    if (player == null) return 0;
+
+    CurrencyDefinition def = economy.requireCurrency(currency);
+    if (def == null) {
+      player.sendMessage(componentService.builder(player, "general.response-error", "NotDefined", true)
+          .resolver(TagResolver.resolver(Placeholder.parsed("error", "Unknown currency")))
+          .build());
+      return 0;
+    }
+
+    repo.topBalances(def.id(), 10).thenAccept(rows -> {
+      String overall = rows.isEmpty()
+          ? "0"
+          : AmountNotation.formatShort(rows.getFirst().amount(), def.fractionDigits());
+
+      Bukkit.getScheduler().runTask(plugin, () -> {
+        player.sendMessage(componentService.builder(player, "currency.baltop.header", "NotDefined", true)
+            .resolver(TagResolver.resolver(
+                Placeholder.parsed("overall", overall),
+                Placeholder.parsed("currency", def.symbolPlural())
+            ))
+            .build());
+
+        int i = 1;
+        for (EconomyRepository.TopBalanceRow row : rows) {
+          OfflinePlayer off = Bukkit.getOfflinePlayer(row.uuid());
+          String name = off.getName() == null ? row.uuid().toString() : off.getName();
+
+          String shown = AmountNotation.formatShort(row.amount(), def.fractionDigits());
+
+          player.sendMessage(componentService.builder(player, "currency.baltop.content", "NotDefined", true)
+              .resolver(TagResolver.resolver(
+                  Placeholder.parsed("number", String.valueOf(i)),
+                  Placeholder.parsed("name", name),
+                  Placeholder.parsed("amount", shown),
+                  Placeholder.parsed("currency", def.symbolPlural())
+              ))
+              .build());
+          i++;
+        }
+
+        player.sendMessage(componentService.builder(player, "currency.baltop.footer", "NotDefined", true).build());
+      });
+    }).exceptionally(ex -> {
+      player.sendMessage(componentService.builder(player, "general.response-error", "NotDefined", true)
+          .resolver(TagResolver.resolver(Placeholder.parsed("error", ex.getMessage() == null ? "Unknown" : ex.getMessage())))
+          .build());
+      return null;
+    });
+
+    return 1;
+  }
+
+  @Command(value = "set <currency> <target> <amount>", permission = "nexeconomy.admin")
+  public int set(
+      NexPaperCommandSource source,
+      @Arg("currency") @Suggest(CurrencySuggestion.class) String currency,
+      @Arg("target") @Suggest(PlayerSuggestion.class) String target,
+      @Arg("amount") @Suggest(AmountSuggestion.class) String amount
+  ) {
+    Player player = (Player) source.sender();
+    Player targetPlayer = Bukkit.getPlayerExact(target);
+    if (player == null) return 0;
+    if (targetPlayer == null || !targetPlayer.isOnline()) return 0;
+
+    CurrencyDefinition def = economy.requireCurrency(currency);
+    MantissaAmount parsed = AmountNotation.parseToMantissaAmount(amount);
+    if (def == null || parsed == null) return 0;
+
+    economy.set(targetPlayer, def.id(), parsed).thenAccept(ok -> {
+      if (!ok) return;
+
+      String shown = AmountNotation.formatShort(parsed, def.fractionDigits());
+      player.sendMessage(componentService.builder(player, "currency.set", "NotDefined", true)
+          .resolver(TagResolver.resolver(
+              Placeholder.parsed("target", targetPlayer.getName()),
+              Placeholder.parsed("amount", shown),
+              Placeholder.parsed("currency", def.symbolPlural())
+          ))
+          .build());
+
+      targetPlayer.sendMessage(componentService.builder(targetPlayer, "currency.set-other", "NotDefined", true)
+          .resolver(TagResolver.resolver(
+              Placeholder.parsed("player", player.getName()),
+              Placeholder.parsed("amount", shown),
+              Placeholder.parsed("currency", def.symbolPlural())
+          ))
+          .build());
+    });
+
+    return 1;
+  }
+
+  @Command(value = "add <currency> <target> <amount>", permission = "nexeconomy.admin")
+  public int add(
+      NexPaperCommandSource source,
+      @Arg("currency") @Suggest(CurrencySuggestion.class) String currency,
+      @Arg("target") @Suggest(PlayerSuggestion.class) String target,
+      @Arg("amount") @Suggest(AmountSuggestion.class) String amount
+  ) {
+    Player player = (Player) source.sender();
+    Player targetPlayer = Bukkit.getPlayerExact(target);
+    if (player == null) return 0;
+    if (targetPlayer == null || !targetPlayer.isOnline()) return 0;
+
+    CurrencyDefinition def = economy.requireCurrency(currency);
+    MantissaAmount parsed = AmountNotation.parseToMantissaAmount(amount);
+    if (def == null || parsed == null || parsed.isNegative() || parsed.compareTo(MantissaAmount.zero()) == 0) return 0;
+
+    economy.add(targetPlayer, def.id(), parsed).thenAccept(ok -> {
+      if (!ok) return;
+
+      String shown = AmountNotation.formatShort(parsed, def.fractionDigits());
+      player.sendMessage(componentService.builder(player, "currency.deposit", "NotDefined", true)
+          .resolver(TagResolver.resolver(
+              Placeholder.parsed("target", targetPlayer.getName()),
+              Placeholder.parsed("amount", shown),
+              Placeholder.parsed("currency", def.symbolPlural())
+          ))
+          .build());
+
+      targetPlayer.sendMessage(componentService.builder(targetPlayer, "currency.deposit-other", "NotDefined", true)
+          .resolver(TagResolver.resolver(
+              Placeholder.parsed("target", player.getName()),
+              Placeholder.parsed("amount", shown),
+              Placeholder.parsed("currency", def.symbolPlural())
+          ))
+          .build());
+    });
+
+    return 1;
+  }
+
+  @Command(value = "remove <currency> <target> <amount>", permission = "nexeconomy.admin")
+  public int remove(
+      NexPaperCommandSource source,
+      @Arg("currency") @Suggest(CurrencySuggestion.class) String currency,
+      @Arg("target") @Suggest(PlayerSuggestion.class) String target,
+      @Arg("amount") @Suggest(AmountSuggestion.class) String amount
+  ) {
+    Player player = (Player) source.sender();
+    Player targetPlayer = Bukkit.getPlayerExact(target);
+    if (player == null) return 0;
+    if (targetPlayer == null || !targetPlayer.isOnline()) return 0;
+
+    CurrencyDefinition def = economy.requireCurrency(currency);
+    MantissaAmount parsed = AmountNotation.parseToMantissaAmount(amount);
+    if (def == null || parsed == null || parsed.isNegative() || parsed.compareTo(MantissaAmount.zero()) == 0) return 0;
+
+    economy.remove(targetPlayer, def.id(), parsed).thenAccept(ok -> {
+      String shown = AmountNotation.formatShort(parsed, def.fractionDigits());
+
+      if (!ok) {
+        player.sendMessage(componentService.builder(player, "currency.payment.pay-failed", "NotDefined", true)
+            .resolver(TagResolver.resolver(
+                Placeholder.parsed("target", targetPlayer.getName()),
+                Placeholder.parsed("amount", shown),
+                Placeholder.parsed("currency", def.symbolPlural())
+            ))
+            .build());
+        return;
+      }
+
+      player.sendMessage(componentService.builder(player, "currency.withdraw", "NotDefined", true)
+          .resolver(TagResolver.resolver(
+              Placeholder.parsed("target", targetPlayer.getName()),
+              Placeholder.parsed("amount", shown),
+              Placeholder.parsed("currency", def.symbolPlural())
+          ))
+          .build());
+
+      targetPlayer.sendMessage(componentService.builder(targetPlayer, "currency.withdraw-other", "NotDefined", true)
+          .resolver(TagResolver.resolver(
+              Placeholder.parsed("player", player.getName()),
+              Placeholder.parsed("amount", shown),
+              Placeholder.parsed("currency", def.symbolPlural())
+          ))
+          .build());
+    });
+
+    return 1;
+  }
+
+  private static BigDecimal parseAmount(String raw) {
+    if (raw == null) return null;
+    try {
+      return new BigDecimal(raw.trim());
+    } catch (Exception ignored) {
+      return null;
+    }
+  }
+
+  private static String formatHuman(MantissaAmount amount, CurrencyDefinition def) {
+    if (def == null) return "0";
+    return AmountNotation.formatShort(amount, def.fractionDigits());
+  }
+}

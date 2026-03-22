@@ -9,6 +9,8 @@ import io.nexstudios.languageservice.LanguageServiceModule;
 import io.nexstudios.languageservice.service.language.LanguageService;
 import io.nexstudios.nexeconomy.command.EconomyPayCommand;
 import io.nexstudios.nexeconomy.command.EconomyReloadCommand;
+import io.nexstudios.nexeconomy.command.MoneyCommand;
+import io.nexstudios.nexeconomy.modules.EconomyCoreModule;
 import io.nexstudios.nexlogic.bukkit.NexLogicPlugin;
 import io.nexstudios.nexlogic.bukkit.services.effects.logging.BukkitLoggerService;
 import io.nexstudios.nexlogic.common.services.logging.LoggerService;
@@ -29,6 +31,8 @@ public class NexEconomyPlugin extends NexPaperPlugin {
   @Override
   protected void configureServices(@NotNull ServiceAccessor services) {
 
+    initNexLogic();
+
     // install ConfigService
     services.install(new ConfigServiceModule(getDataPath(), getClassLoader()));
     // install LanguageService (require ConfigService loaded)
@@ -41,7 +45,9 @@ public class NexEconomyPlugin extends NexPaperPlugin {
     services.register(LoggerService.class, BukkitLoggerService.class);
 
     // install internal ServiceModules
-    List<ServiceModule> modules = List.of();
+    List<ServiceModule> modules = List.of(
+        new EconomyCoreModule()
+    );
     services.installAll(modules);
 
   }
@@ -51,18 +57,19 @@ public class NexEconomyPlugin extends NexPaperPlugin {
     getLogger().info("NexEconomy is loading...");
   }
 
-
   @Override
   protected void start() {
     getLogger().info("NexEconomy is starting...");
-    initNexLogic();
+
     // init language files
     services().getService(LanguageService.class).reload();
+
     // register commands
     services().getService(CommandService.class).registerAll(
         List.of(
             EconomyPayCommand.class,
-            EconomyReloadCommand.class
+            EconomyReloadCommand.class,
+            MoneyCommand.class
         )
     );
 
@@ -71,9 +78,8 @@ public class NexEconomyPlugin extends NexPaperPlugin {
 
   @Override
   protected void stop() {
-    getLogger().info("NexRegen stopped.");
+    getLogger().info("NexEconomy stopped.");
   }
-
 
   private void initNexLogic() {
     getLogger().info("Hooking into NexLogic...");
@@ -89,6 +95,4 @@ public class NexEconomyPlugin extends NexPaperPlugin {
     nexLogicService = nexLogic.services();
     getLogger().info("Successfully hooked into NexLogic!");
   }
-
-
 }

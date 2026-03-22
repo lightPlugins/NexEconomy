@@ -15,9 +15,13 @@ public class AmountSuggestion implements SuggestionProvider {
       "50",
       "100",
       "1500",
-      "5000"
+      "5k",
+      "10m",
+      "2b",
+      "10t",
+      "16aa",
+      "50bf"
   );
-
 
   @Override
   public CompletableFuture<Suggestions> suggest(CommandContext<CommandSourceStack> ctx, SuggestionsBuilder builder) {

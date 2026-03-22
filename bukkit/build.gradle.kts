@@ -18,6 +18,10 @@ dependencies {
 
     compileOnly("io.nexstudios.nexlogic:nexlogic-bukkit:v1.0.0")
 
+    compileOnly("com.github.MilkBowl:VaultAPI:1.7") {
+        exclude(group = "org.bukkit", module = "bukkit")
+    }
+
 }
 tasks.jar {
     enabled = false
