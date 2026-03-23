@@ -7,12 +7,15 @@ import io.nexstudios.framework.paper.NexPaperPlugin;
 import io.nexstudios.itemservice.bukkit.ItemServiceModule;
 import io.nexstudios.languageservice.LanguageServiceModule;
 import io.nexstudios.languageservice.service.language.LanguageService;
-import io.nexstudios.nexeconomy.command.EconomyPayCommand;
-import io.nexstudios.nexeconomy.command.EconomyReloadCommand;
-import io.nexstudios.nexeconomy.command.MoneyCommand;
+import io.nexstudios.nexeconomy.command.*;
 import io.nexstudios.nexeconomy.modules.EconomyCoreModule;
+import io.nexstudios.nexeconomy.provider.VaultEconomyBridgeService;
+import io.nexstudios.nexeconomy.service.economy.EconomyFlushService;
+import io.nexstudios.nexeconomy.service.economy.EconomyRedisSyncService;
+import io.nexstudios.nexeconomy.service.economy.listener.EconomyPlayerListener;
 import io.nexstudios.nexlogic.bukkit.NexLogicPlugin;
 import io.nexstudios.nexlogic.bukkit.services.effects.logging.BukkitLoggerService;
+import io.nexstudios.nexlogic.bukkit.services.hooks.towny.TownyService;
 import io.nexstudios.nexlogic.common.services.logging.LoggerService;
 import io.nexstudios.serviceregistry.di.ServiceAccessor;
 import io.nexstudios.serviceregistry.di.ServiceModule;
@@ -21,7 +24,10 @@ import org.bukkit.Bukkit;
 import org.bukkit.plugin.Plugin;
 import org.jetbrains.annotations.NotNull;
 
+import java.time.Duration;
 import java.util.List;
+import java.util.UUID;
+import java.util.concurrent.TimeUnit;
 
 public class NexEconomyPlugin extends NexPaperPlugin {
 
@@ -30,8 +36,6 @@ public class NexEconomyPlugin extends NexPaperPlugin {
 
   @Override
   protected void configureServices(@NotNull ServiceAccessor services) {
-
-    initNexLogic();
 
     // install ConfigService
     services.install(new ConfigServiceModule(getDataPath(), getClassLoader()));
@@ -44,22 +48,30 @@ public class NexEconomyPlugin extends NexPaperPlugin {
 
     services.register(LoggerService.class, BukkitLoggerService.class);
 
-    // install internal ServiceModules
+    initNexLogic();
+    // install internal ServiceModule
     List<ServiceModule> modules = List.of(
         new EconomyCoreModule()
     );
-    services.installAll(modules);
+    services().installAll(modules);
 
   }
 
   @Override
   protected void load() {
     getLogger().info("NexEconomy is loading...");
+    services().getService(VaultEconomyBridgeService.class);
   }
 
   @Override
   protected void start() {
     getLogger().info("NexEconomy is starting...");
+
+    // start background services that require an enabled plugin
+    services().getService(EconomyFlushService.class).start();
+
+    TownyService test = nexLogicService.findService(TownyService.class).orElse(null);
+    getLogger().info("Towny test result: " + (test != null));
 
     // init language files
     services().getService(LanguageService.class).reload();
@@ -69,8 +81,16 @@ public class NexEconomyPlugin extends NexPaperPlugin {
         List.of(
             EconomyPayCommand.class,
             EconomyReloadCommand.class,
-            MoneyCommand.class
+            MoneyCommand.class,
+            EconomyMigrationCommand.class,
+            EconomyStatusCommand.class
         )
+    );
+
+    services().getService(EconomyRedisSyncService.class).start();
+
+    registerListeners(
+        new EconomyPlayerListener(services())
     );
 
     getLogger().info("NexEconomy successfully started.");
@@ -78,7 +98,19 @@ public class NexEconomyPlugin extends NexPaperPlugin {
 
   @Override
   protected void stop() {
-    getLogger().info("NexEconomy stopped.");
+    getLogger().info("NexEconomy Shutting down...");
+    EconomyFlushService flush = services().getService(EconomyFlushService.class);
+
+    flush.stop();
+
+    try {
+      getLogger().info("Waiting for final economy flush to finish...");
+      flush.flushAllDirtyAndWait().orTimeout(Duration.ofSeconds(15).toSeconds(), TimeUnit.SECONDS).join();
+    } catch (Exception e) {
+      getLogger().warning("Final economy flush did not finish before shutdown: " + (e.getMessage() == null ? e.getClass().getSimpleName() : e.getMessage()));
+    }
+
+    getLogger().info("Successfully stopped NexEconomy. See you next time! :)");
   }
 
   private void initNexLogic() {

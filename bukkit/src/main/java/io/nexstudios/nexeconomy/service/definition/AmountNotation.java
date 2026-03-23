@@ -12,9 +12,42 @@ public final class AmountNotation {
 
   private AmountNotation() {}
 
-  public static MantissaAmount parseToMantissaAmount(String raw) {
-    if (raw == null) return null;
+  /**
+   * Virtual: erlaubt große Suffixe inkl. aa..zz.
+   * Optional kannst du hier später "ab t bis zz" streng machen.
+   */
+  public static MantissaAmount parseVirtualMantissaAmount(String raw) {
+    Parsed p = parse(raw);
+    if (p == null) return null;
 
+    int exp3 = suffixToExp3Virtual(p.suffix());
+    if (exp3 == Integer.MIN_VALUE) return null;
+
+    // "Virtuell von t-zz": wenn Suffix gesetzt ist, muss es mindestens 't' sein.
+    // (kein k/m/b für virtuell; wenn du k/m/b auch virtuell willst, entferne diesen Block)
+    if (!p.suffix().isEmpty() && exp3 < 4) return null;
+
+    return MantissaAmount.of(p.value(), exp3);
+  }
+
+  /**
+   * Vault: nur human BigDecimal, Suffix nur k/m/b/t (kein aa..zz).
+   */
+  public static BigDecimal parseVaultHuman(String raw) {
+    Parsed p = parse(raw);
+    if (p == null) return null;
+
+    int exp3 = suffixToExp3Vault(p.suffix());
+    if (exp3 == Integer.MIN_VALUE) return null;
+
+    // value * 1000^exp3 ist exakt als movePointRight(3*exp3)
+    return p.value().movePointRight(3 * exp3);
+  }
+
+  private record Parsed(BigDecimal value, String suffix) {}
+
+  private static Parsed parse(String raw) {
+    if (raw == null) return null;
     Matcher m = PATTERN.matcher(raw);
     if (!m.matches()) return null;
 
@@ -26,10 +59,7 @@ public final class AmountNotation {
     }
 
     String suffix = m.group(2) == null ? "" : m.group(2).trim().toLowerCase(Locale.ROOT);
-    int exp3 = suffixToExp3(suffix);
-    if (exp3 == Integer.MIN_VALUE) return null;
-
-    return MantissaAmount.of(value, exp3);
+    return new Parsed(value, suffix);
   }
 
   public static String formatShort(MantissaAmount amount, int fractionDigits) {
@@ -37,37 +67,46 @@ public final class AmountNotation {
     if (fractionDigits < 0) fractionDigits = 0;
     if (fractionDigits > 8) fractionDigits = 8;
 
-    // If exp3 is negative, do not attach suffixes.
-    // Render the full approximate numeric value as a plain decimal string.
-    if (amount.exp3() < 0) {
-      return formatApproxPlain(amount, fractionDigits);
+    BigDecimal human = amount.toHuman();
+    boolean neg = human.compareTo(BigDecimal.ZERO) < 0;
+    BigDecimal abs = neg ? human.negate() : human;
+
+    if (abs.compareTo(BigDecimal.ZERO) == 0) return "0";
+
+    int exp3 = 0;
+    BigDecimal thousand = new BigDecimal("1000");
+    while (abs.compareTo(thousand) >= 0) {
+      abs = abs.divide(thousand, 32, RoundingMode.DOWN);
+      exp3++;
+      if (exp3 > 680) break;
     }
 
-    String suffix = exp3ToSuffix(amount.exp3());
+    String suffix = exp3ToSuffix(exp3);
 
-    BigDecimal shown = amount.mantissa() == null ? BigDecimal.ZERO : amount.mantissa();
-    shown = shown.setScale(fractionDigits, RoundingMode.DOWN).stripTrailingZeros();
-
+    BigDecimal shown = abs.setScale(fractionDigits, RoundingMode.DOWN);
     String number = shown.toPlainString();
-    return suffix.isEmpty() ? number : number + suffix;
+
+    String out = suffix.isEmpty() ? number : number + suffix;
+    return neg ? "-" + out : out;
   }
 
-  private static String formatApproxPlain(MantissaAmount amount, int fractionDigits) {
-    double approx = amount.toDoubleApprox();
-    if (Double.isNaN(approx) || Double.isInfinite(approx)) {
-      return "0";
-    }
-
-    BigDecimal bd = BigDecimal.valueOf(approx).setScale(fractionDigits, RoundingMode.DOWN).stripTrailingZeros();
-    return bd.toPlainString();
-  }
-
-  private static int suffixToExp3(String suffix) {
+  private static int suffixToExp3Vault(String suffix) {
     if (suffix == null || suffix.isBlank()) return 0;
     return switch (suffix) {
       case "k" -> 1;
       case "m" -> 2;
       case "b" -> 3;
+      case "t" -> 4;
+      default -> Integer.MIN_VALUE; // keine 2-letter Suffixe bei Vault
+    };
+  }
+
+  private static int suffixToExp3Virtual(String suffix) {
+    if (suffix == null || suffix.isBlank()) return 0;
+    return switch (suffix) {
+      // case "k" -> 1;
+      // case "m" -> 2;
+      // case "b" -> 3;
       case "t" -> 4;
       default -> {
         if (suffix.length() == 2 && isLowerAlpha(suffix.charAt(0)) && isLowerAlpha(suffix.charAt(1))) {

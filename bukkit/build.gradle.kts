@@ -18,13 +18,20 @@ dependencies {
 
     compileOnly("io.nexstudios.nexlogic:nexlogic-bukkit:v1.0.0")
 
-    compileOnly("com.github.MilkBowl:VaultAPI:1.7") {
+    compileOnly("net.milkbowl.vault:VaultUnlockedAPI:2.16") {
         exclude(group = "org.bukkit", module = "bukkit")
     }
+
+    testImplementation("org.junit.jupiter:junit-jupiter:5.11.4")
+    testRuntimeOnly("org.junit.platform:junit-platform-launcher")
 
 }
 tasks.jar {
     enabled = false
+}
+
+tasks.test {
+    useJUnitPlatform()
 }
 
 

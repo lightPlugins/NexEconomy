@@ -1,6 +1,7 @@
 package io.nexstudios.nexeconomy.service.registry;
 
 import io.nexstudios.framework.paper.services.plugin.PaperPluginService;
+import io.nexstudios.nexeconomy.service.definition.AmountNotation;
 import io.nexstudios.nexeconomy.service.definition.CurrencyDefinition;
 import io.nexstudios.nexeconomy.service.definition.CurrencyType;
 import io.nexstudios.nexlogic.common.services.logging.LoggerService;
@@ -64,7 +65,7 @@ public final class CurrencyRegistryService implements Service {
           clampFractionDigits(yml.getInt("fraction-digits", 0)),
           type,
           readBigDecimal(yml, "start-balance", BigDecimal.ZERO),
-          readBigDecimal(yml, "max-balance", BigDecimal.valueOf(-1)),
+          readMaxBalanceHuman(yml, "max-balance", type, BigDecimal.valueOf(-1)),
           yml.getBoolean("payable", true)
       );
 
@@ -107,8 +108,6 @@ public final class CurrencyRegistryService implements Service {
       return;
     }
 
-    // Copy only the default vault.yml if it doesn't exist yet.
-    // Users can add more currencies by dropping yml files into the folder.
     File defaultVault = new File(dir, "vault.yml");
     if (defaultVault.exists()) return;
 
@@ -135,6 +134,32 @@ public final class CurrencyRegistryService implements Service {
     } catch (Exception ignored) {
       return def;
     }
+  }
+
+  private static BigDecimal readMaxBalanceHuman(YamlConfiguration yml, String path, CurrencyType type, BigDecimal def) {
+    Object raw = yml.get(path);
+    if (raw == null) return def;
+
+    // Allow numeric or suffix notation like "90b" / "90zz"
+    String s = String.valueOf(raw).trim();
+    if (s.isBlank()) return def;
+
+    try {
+      BigDecimal numeric = new BigDecimal(s);
+      return numeric;
+    } catch (Exception ignored) {
+      // fall through to notation parsing
+    }
+
+    if ("-1".equals(s)) return BigDecimal.valueOf(-1);
+
+    if (type == CurrencyType.VAULT) {
+      BigDecimal human = AmountNotation.parseVaultHuman(s);
+      return human == null ? def : human;
+    }
+
+    var mantissa = AmountNotation.parseVirtualMantissaAmount(s);
+    return mantissa == null ? def : mantissa.toHuman();
   }
 
   private static String toCurrencyId(String fileName) {

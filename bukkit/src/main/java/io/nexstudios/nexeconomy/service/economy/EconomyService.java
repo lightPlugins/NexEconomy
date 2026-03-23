@@ -1,6 +1,7 @@
 package io.nexstudios.nexeconomy.service.economy;
 
 import io.nexstudios.nexeconomy.service.definition.CurrencyDefinition;
+import io.nexstudios.nexeconomy.service.definition.CurrencyType;
 import io.nexstudios.nexeconomy.service.economy.repo.EconomyPlayer;
 import io.nexstudios.nexeconomy.service.registry.CurrencyRegistryService;
 import io.nexstudios.nexeconomy.service.definition.MantissaAmount;
@@ -11,6 +12,8 @@ import io.nexstudios.serviceregistry.di.ServiceAccessor;
 import org.bukkit.entity.Player;
 import org.jetbrains.annotations.NotNull;
 
+import java.math.BigDecimal;
+import java.math.RoundingMode;
 import java.util.Locale;
 import java.util.concurrent.CompletableFuture;
 
@@ -21,6 +24,8 @@ import java.util.concurrent.CompletableFuture;
     EconomyFlushService.class
 })
 public final class EconomyService implements Service {
+
+  private static final BigDecimal VAULT_DOUBLE_SAFE_INTEGER_LIMIT = new BigDecimal("9000000000000000");
 
   private final LoggerService logger;
   private final CurrencyRegistryService currencies;
@@ -48,11 +53,12 @@ public final class EconomyService implements Service {
     String cur = normalize(currencyId);
     if (cur.isBlank()) return CompletableFuture.failedFuture(new IllegalArgumentException("currency is blank"));
 
-    MantissaAmount value = MantissaAmount.normalize(amount);
+    CurrencyDefinition def = currencies.currency(cur);
+    MantissaAmount value = normalizeForCurrency(def, amount);
 
     return cache.loadOrCreateOnline(target).thenApply(econ -> {
       econ.getOrCreate(cur, MantissaAmount.zero()).set(value);
-      flush.flushPlayerDirty(econ);
+      flush.requestFlush(econ);
       return true;
     });
   }
@@ -61,11 +67,22 @@ public final class EconomyService implements Service {
     String cur = normalize(currencyId);
     if (cur.isBlank()) return CompletableFuture.failedFuture(new IllegalArgumentException("currency is blank"));
 
-    MantissaAmount d = MantissaAmount.normalize(delta);
+    CurrencyDefinition def = currencies.currency(cur);
+    MantissaAmount d = normalizeForCurrency(def, delta);
 
     return cache.loadOrCreateOnline(target).thenApply(econ -> {
-      econ.getOrCreate(cur, MantissaAmount.zero()).add(d);
-      flush.flushPlayerDirty(econ);
+      EconomyPlayer.BalanceEntry entry = econ.getOrCreate(cur, MantissaAmount.zero());
+
+      // Vault
+      if (def != null && def.type() == CurrencyType.VAULT) {
+        BigDecimal nextHuman = entry.amount() == null ? BigDecimal.ZERO : entry.amount().toHuman();
+        nextHuman = nextHuman.add(d.toHuman());
+        entry.set(MantissaAmount.of(clampVaultHuman(def, nextHuman), 0));
+      } else {
+        entry.add(d);
+      }
+
+      flush.requestFlush(econ);
       return true;
     });
   }
@@ -74,7 +91,8 @@ public final class EconomyService implements Service {
     String cur = normalize(currencyId);
     if (cur.isBlank()) return CompletableFuture.failedFuture(new IllegalArgumentException("currency is blank"));
 
-    MantissaAmount d = MantissaAmount.normalize(delta);
+    CurrencyDefinition def = currencies.currency(cur);
+    MantissaAmount d = normalizeForCurrency(def, delta);
 
     return cache.loadOrCreateOnline(target).thenApply(econ -> {
       EconomyPlayer.BalanceEntry entry = econ.getOrCreate(cur, MantissaAmount.zero());
@@ -82,10 +100,52 @@ public final class EconomyService implements Service {
 
       if (current.compareTo(d) < 0) return false;
 
-      entry.subtract(d);
-      flush.flushPlayerDirty(econ);
+      if (def != null && def.type() == CurrencyType.VAULT) {
+        BigDecimal nextHuman = current.toHuman().subtract(d.toHuman());
+        entry.set(MantissaAmount.of(scaleVaultHuman(def, nextHuman), 0));
+      } else {
+        entry.subtract(d);
+      }
+
+      flush.requestFlush(econ);
       return true;
     });
+  }
+
+  private static MantissaAmount normalizeForCurrency(CurrencyDefinition def, MantissaAmount a) {
+    if (a == null) return MantissaAmount.zero();
+    MantissaAmount n = MantissaAmount.normalize(a);
+
+    if (def != null && def.type() == CurrencyType.VAULT) {
+      BigDecimal human = n.toHuman();
+      human = scaleVaultHuman(def, human);
+      human = clampVaultHuman(def, human);
+      return MantissaAmount.of(human, 0); // Vault immer exp3=0 (kein aa/ab/zz)
+    }
+
+    return n;
+  }
+
+  private static BigDecimal scaleVaultHuman(CurrencyDefinition def, BigDecimal human) {
+    if (human == null) return BigDecimal.ZERO;
+    int fd = def == null ? 0 : def.fractionDigits();
+    if (fd < 0) fd = 0;
+    if (fd > 8) fd = 8;
+    return human.setScale(fd, RoundingMode.DOWN);
+  }
+
+  private static BigDecimal clampVaultHuman(CurrencyDefinition def, BigDecimal human) {
+    if (human == null) return BigDecimal.ZERO;
+
+    int fd = def == null ? 0 : def.fractionDigits();
+    if (fd < 0) fd = 0;
+    if (fd > 8) fd = 8;
+
+    BigDecimal cap = VAULT_DOUBLE_SAFE_INTEGER_LIMIT.movePointLeft(fd); // 9e15 / 10^fd
+
+    if (human.compareTo(cap) > 0) return cap;
+    if (human.compareTo(cap.negate()) < 0) return cap.negate();
+    return human;
   }
 
   public CurrencyDefinition requireCurrency(String currencyId) {

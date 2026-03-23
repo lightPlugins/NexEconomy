@@ -1,0 +1,4 @@
+# Configuration for the "Vault Bridge" module, which integrates with external plugins or services.
+vault-bridge:
+  # Enables or disables the Vault Bridge functionality.
+  enabled: true

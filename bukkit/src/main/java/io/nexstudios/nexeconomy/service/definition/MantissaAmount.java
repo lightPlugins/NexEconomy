@@ -1,14 +1,11 @@
 package io.nexstudios.nexeconomy.service.definition;
 
 import java.math.BigDecimal;
-import java.math.RoundingMode;
+import java.util.Objects;
 
 public record MantissaAmount(BigDecimal mantissa, int exp3) {
 
-  private static final MantissaAmount ZERO = new MantissaAmount(
-      BigDecimal.ZERO.setScale(2, RoundingMode.DOWN),
-      0
-  );
+  private static final MantissaAmount ZERO = new MantissaAmount(BigDecimal.ZERO, 0);
 
   public static MantissaAmount zero() {
     return ZERO;
@@ -16,31 +13,76 @@ public record MantissaAmount(BigDecimal mantissa, int exp3) {
 
   public static MantissaAmount of(BigDecimal mantissa, int exp3) {
     if (mantissa == null) return zero();
+    if (mantissa.compareTo(BigDecimal.ZERO) == 0) return zero();
     return normalize(new MantissaAmount(mantissa, exp3));
+  }
+
+  public static MantissaAmount parseStorage(String mantissaText, int exp3) {
+    if (mantissaText == null || mantissaText.isBlank()) return zero();
+    try {
+      return of(new BigDecimal(mantissaText.trim()), exp3);
+    } catch (Exception ignored) {
+      return zero();
+    }
   }
 
   public static MantissaAmount normalize(MantissaAmount a) {
     if (a == null || a.mantissa == null) return zero();
+    if (a.mantissa.compareTo(BigDecimal.ZERO) == 0) return zero();
 
-    BigDecimal m = a.mantissa.setScale(2, RoundingMode.DOWN);
+    BigDecimal m = a.mantissa.stripTrailingZeros();
     int e = a.exp3;
 
+    // bring into a stable representation where possible:
+    // try to keep |mantissa| in [1, 1000) by shifting in steps of 3 decimals (exact).
+    BigDecimal abs = m.abs();
+    BigDecimal thousand = new BigDecimal("1000");
+
+    while (abs.compareTo(thousand) >= 0) {
+      m = m.movePointLeft(3);
+      e++;
+      abs = abs.movePointLeft(3);
+      // hard safety bound to keep suffix range sane
+      if (e > 680) break;
+    }
+
+    while (abs.compareTo(BigDecimal.ONE) < 0) {
+      m = m.movePointRight(3);
+      e--;
+      abs = abs.movePointRight(3);
+
+      // if we ever hit zero, stop
+      if (m.compareTo(BigDecimal.ZERO) == 0) return zero();
+      if (e < -680) break;
+    }
+
+    // avoid "-0"
     if (m.compareTo(BigDecimal.ZERO) == 0) return zero();
 
-    BigDecimal thousand = new BigDecimal("1000.00");
-
-    while (m.compareTo(thousand) >= 0) {
-      m = m.divide(thousand, 2, RoundingMode.DOWN);
-      e++;
-    }
-
-    while (m.compareTo(BigDecimal.ONE) < 0) {
-      m = m.multiply(thousand).setScale(2, RoundingMode.DOWN);
-      e--;
-      if (m.compareTo(BigDecimal.ZERO) == 0) return zero();
-    }
-
     return new MantissaAmount(m, e);
+  }
+
+  /**
+   * Realwert als "human" BigDecimal: mantissa * 1000^exp3 (exakt, da 1000 = 10^3).
+   */
+  public BigDecimal toHuman() {
+    if (mantissa == null) return BigDecimal.ZERO;
+    if (mantissa.compareTo(BigDecimal.ZERO) == 0) return BigDecimal.ZERO;
+    if (exp3 == 0) return mantissa;
+    int shift = Math.multiplyExact(exp3, 3);
+    return mantissa.movePointRight(shift);
+  }
+
+  /**
+   * DB/storage representation: same as current (already normalized).
+   */
+  public record Storage(String mantissaText, int exp3) {}
+
+  public Storage toStorage() {
+    MantissaAmount n = normalize(this);
+    BigDecimal m = n.mantissa == null ? BigDecimal.ZERO : n.mantissa;
+    String text = m.stripTrailingZeros().toPlainString();
+    return new Storage(text, n.exp3);
   }
 
   public boolean isNegative() {
@@ -48,77 +90,66 @@ public record MantissaAmount(BigDecimal mantissa, int exp3) {
   }
 
   public int compareTo(MantissaAmount other) {
-    MantissaAmount o = other == null ? zero() : other;
-    MantissaAmount a = this.mantissa == null ? zero() : this;
+    MantissaAmount b = other == null ? zero() : other;
+    MantissaAmount a = normalize(this);
+    b = normalize(b);
 
-    if (a.mantissa.compareTo(BigDecimal.ZERO) == 0 && o.mantissa.compareTo(BigDecimal.ZERO) == 0) return 0;
+    if (a.mantissa == null || a.mantissa.compareTo(BigDecimal.ZERO) == 0) {
+      return (b.mantissa == null || b.mantissa.compareTo(BigDecimal.ZERO) == 0) ? 0 : -b.mantissa.signum();
+    }
+    if (b.mantissa == null || b.mantissa.compareTo(BigDecimal.ZERO) == 0) {
+      return a.mantissa.signum();
+    }
 
-    int targetExp = Math.max(a.exp3, o.exp3);
-    BigDecimal aa = scaleToExp(a, targetExp);
-    BigDecimal bb = scaleToExp(o, targetExp);
-    return aa.compareTo(bb);
+    // align to the larger exp3 (keeps numbers small; exact because we shift by 3 decimals)
+    int base = Math.max(a.exp3, b.exp3);
+
+    BigDecimal am = shiftToExp3(a.mantissa, a.exp3, base);
+    BigDecimal bm = shiftToExp3(b.mantissa, b.exp3, base);
+
+    return am.compareTo(bm);
   }
 
   public double toDoubleApprox() {
-    MantissaAmount a = this.mantissa == null ? zero() : this;
-    if (a.mantissa.compareTo(BigDecimal.ZERO) == 0) return 0D;
-
-    double m = a.mantissa.doubleValue();
-    double factor = Math.pow(1000D, a.exp3);
-    double out = m * factor;
-
-    if (Double.isNaN(out)) return 0D;
-    if (Double.isInfinite(out)) return out > 0 ? Double.MAX_VALUE : -Double.MAX_VALUE;
-    return out;
+    return toHuman().doubleValue();
   }
 
   public MantissaAmount add(MantissaAmount other) {
-    if (other == null) return this;
-    if (this.mantissa.compareTo(BigDecimal.ZERO) == 0) return other;
-    if (other.mantissa.compareTo(BigDecimal.ZERO) == 0) return this;
+    if (other == null || other.mantissa == null || other.mantissa.compareTo(BigDecimal.ZERO) == 0) return normalize(this);
 
-    int targetExp = Math.max(this.exp3, other.exp3);
+    MantissaAmount a = normalize(this);
+    MantissaAmount b = normalize(other);
 
-    BigDecimal a = scaleToExp(this, targetExp);
-    BigDecimal b = scaleToExp(other, targetExp);
+    int base = Math.max(a.exp3, b.exp3);
 
-    return normalize(new MantissaAmount(a.add(b), targetExp));
+    BigDecimal am = shiftToExp3(a.mantissa, a.exp3, base);
+    BigDecimal bm = shiftToExp3(b.mantissa, b.exp3, base);
+
+    return normalize(new MantissaAmount(am.add(bm), base));
   }
 
   public MantissaAmount subtract(MantissaAmount other) {
-    if (other == null) return this;
-    if (other.mantissa.compareTo(BigDecimal.ZERO) == 0) return this;
+    if (other == null || other.mantissa == null || other.mantissa.compareTo(BigDecimal.ZERO) == 0) return normalize(this);
 
-    int targetExp = Math.max(this.exp3, other.exp3);
+    MantissaAmount a = normalize(this);
+    MantissaAmount b = normalize(other);
 
-    BigDecimal a = scaleToExp(this, targetExp);
-    BigDecimal b = scaleToExp(other, targetExp);
+    int base = Math.max(a.exp3, b.exp3);
 
-    return normalize(new MantissaAmount(a.subtract(b), targetExp));
+    BigDecimal am = shiftToExp3(a.mantissa, a.exp3, base);
+    BigDecimal bm = shiftToExp3(b.mantissa, b.exp3, base);
+
+    return normalize(new MantissaAmount(am.subtract(bm), base));
   }
 
-  private static BigDecimal scaleToExp(MantissaAmount src, int targetExp3) {
-    int diff = src.exp3 - targetExp3;
-    BigDecimal m = src.mantissa;
+  private static BigDecimal shiftToExp3(BigDecimal mantissa, int fromExp3, int toExp3) {
+    Objects.requireNonNull(mantissa, "mantissa");
+    if (fromExp3 == toExp3) return mantissa;
 
-    if (diff < -20) return BigDecimal.ZERO.setScale(2, RoundingMode.DOWN);
-
-    BigDecimal thousand = new BigDecimal("1000.00");
-
-    if (diff == 0) return m.setScale(2, RoundingMode.DOWN);
-
-    if (diff > 0) {
-      for (int i = 0; i < diff; i++) {
-        m = m.multiply(thousand).setScale(2, RoundingMode.DOWN);
-      }
-      return m;
-    }
-
-    int steps = -diff;
-    for (int i = 0; i < steps; i++) {
-      m = m.divide(thousand, 2, RoundingMode.DOWN);
-      if (m.compareTo(BigDecimal.ZERO) == 0) return BigDecimal.ZERO.setScale(2, RoundingMode.DOWN);
-    }
-    return m.setScale(2, RoundingMode.DOWN);
+    int diff = Math.subtractExact(fromExp3, toExp3);
+    // mantissa(fromExp3) == mantissa(toExp3) * 1000^(to-from)
+    // => mantissa(toExp3) = mantissa(fromExp3) * 1000^(from-to)
+    int shift = Math.multiplyExact(diff, 3);
+    return mantissa.movePointRight(shift);
   }
 }

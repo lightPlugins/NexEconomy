@@ -9,9 +9,11 @@ import io.nexstudios.nexeconomy.command.suggestions.CurrencySuggestion;
 import io.nexstudios.nexeconomy.command.suggestions.PlayerSuggestion;
 import io.nexstudios.nexeconomy.service.definition.AmountNotation;
 import io.nexstudios.nexeconomy.service.definition.CurrencyDefinition;
+import io.nexstudios.nexeconomy.service.definition.CurrencyType;
 import io.nexstudios.nexeconomy.service.economy.repo.EconomyRepository;
 import io.nexstudios.nexeconomy.service.economy.EconomyService;
 import io.nexstudios.nexeconomy.service.definition.MantissaAmount;
+import io.nexstudios.nexlogic.bukkit.services.entity.EconomyBalanceEntity;
 import io.nexstudios.serviceregistry.di.Dependencies;
 import io.nexstudios.serviceregistry.di.Service;
 import io.nexstudios.serviceregistry.di.ServiceAccessor;
@@ -156,18 +158,22 @@ public final class MoneyCommand implements Service {
       return 0;
     }
 
-    repo.topBalances(def.id(), 10).thenAccept(rows -> {
+    repo.topBalances(def.id(), 10, EconomyBalanceEntity.EconomyAccountType.PLAYER).thenAccept(rows -> {
       String overall = rows.isEmpty()
           ? "0"
           : AmountNotation.formatShort(rows.getFirst().amount(), def.fractionDigits());
 
       Bukkit.getScheduler().runTask(plugin, () -> {
-        player.sendMessage(componentService.builder(player, "currency.baltop.header", "NotDefined", true)
-            .resolver(TagResolver.resolver(
+        componentService.getComponents(
+            player,
+            "currency.baltop.header",
+            "NotDefined",
+            TagResolver.resolver(
                 Placeholder.parsed("overall", overall),
                 Placeholder.parsed("currency", def.symbolPlural())
-            ))
-            .build());
+            ),
+            false
+        ).forEach(player::sendMessage);
 
         int i = 1;
         for (EconomyRepository.TopBalanceRow row : rows) {
@@ -176,7 +182,7 @@ public final class MoneyCommand implements Service {
 
           String shown = AmountNotation.formatShort(row.amount(), def.fractionDigits());
 
-          player.sendMessage(componentService.builder(player, "currency.baltop.content", "NotDefined", true)
+          player.sendMessage(componentService.builder(player, "currency.baltop.content", "NotDefined", false)
               .resolver(TagResolver.resolver(
                   Placeholder.parsed("number", String.valueOf(i)),
                   Placeholder.parsed("name", name),
@@ -187,7 +193,8 @@ public final class MoneyCommand implements Service {
           i++;
         }
 
-        player.sendMessage(componentService.builder(player, "currency.baltop.footer", "NotDefined", true).build());
+        componentService.getComponents(player, "currency.baltop.footer", "NotDefined", false)
+            .forEach(player::sendMessage);
       });
     }).exceptionally(ex -> {
       player.sendMessage(componentService.builder(player, "general.response-error", "NotDefined", true)
@@ -212,7 +219,15 @@ public final class MoneyCommand implements Service {
     if (targetPlayer == null || !targetPlayer.isOnline()) return 0;
 
     CurrencyDefinition def = economy.requireCurrency(currency);
-    MantissaAmount parsed = AmountNotation.parseToMantissaAmount(amount);
+
+    MantissaAmount parsed;
+    if (def != null && def.type() == CurrencyType.VAULT) {
+      BigDecimal human = AmountNotation.parseVaultHuman(amount);
+      parsed = human == null ? null : MantissaAmount.of(human, 0);
+    } else {
+      parsed = AmountNotation.parseVirtualMantissaAmount(amount);
+    }
+
     if (def == null || parsed == null) return 0;
 
     economy.set(targetPlayer, def.id(), parsed).thenAccept(ok -> {
@@ -252,33 +267,101 @@ public final class MoneyCommand implements Service {
     if (targetPlayer == null || !targetPlayer.isOnline()) return 0;
 
     CurrencyDefinition def = economy.requireCurrency(currency);
-    MantissaAmount parsed = AmountNotation.parseToMantissaAmount(amount);
+
+    MantissaAmount parsed;
+    if (def != null && def.type() == CurrencyType.VAULT) {
+      BigDecimal human = AmountNotation.parseVaultHuman(amount);
+      parsed = human == null ? null : MantissaAmount.of(human, 0);
+    } else {
+      parsed = AmountNotation.parseVirtualMantissaAmount(amount);
+    }
+
     if (def == null || parsed == null || parsed.isNegative() || parsed.compareTo(MantissaAmount.zero()) == 0) return 0;
 
-    economy.add(targetPlayer, def.id(), parsed).thenAccept(ok -> {
-      if (!ok) return;
+    // Max-Balance enforcement: only add remaining until max is reached
+    economy.balance(targetPlayer, def.id()).thenCompose(current -> {
+      MantissaAmount allowed = capDeltaToMax(def, current, parsed);
+      if (allowed.compareTo(MantissaAmount.zero()) == 0) {
+        String maxShown = formatHuman(MantissaAmount.of(def.maxBalance(), 0), def);
+        player.sendMessage(componentService.builder(player, "currency.max-balance.reached-admin", "NotDefined", true)
+            .resolver(TagResolver.resolver(
+                Placeholder.parsed("target", targetPlayer.getName()),
+                Placeholder.parsed("currency", def.symbolPlural()),
+                Placeholder.parsed("max", maxShown)
+            ))
+            .build());
+        return java.util.concurrent.CompletableFuture.completedFuture(false);
+      }
 
-      String shown = AmountNotation.formatShort(parsed, def.fractionDigits());
-      player.sendMessage(componentService.builder(player, "currency.deposit", "NotDefined", true)
-          .resolver(TagResolver.resolver(
-              Placeholder.parsed("target", targetPlayer.getName()),
-              Placeholder.parsed("amount", shown),
-              Placeholder.parsed("currency", def.symbolPlural())
-          ))
-          .build());
+      return economy.add(targetPlayer, def.id(), allowed).thenApply(ok -> {
+        if (!ok) return false;
 
-      targetPlayer.sendMessage(componentService.builder(targetPlayer, "currency.deposit-other", "NotDefined", true)
-          .resolver(TagResolver.resolver(
-              Placeholder.parsed("target", player.getName()),
-              Placeholder.parsed("amount", shown),
-              Placeholder.parsed("currency", def.symbolPlural())
-          ))
-          .build());
+        String requestedShown = AmountNotation.formatShort(parsed, def.fractionDigits());
+        String addedShown = AmountNotation.formatShort(allowed, def.fractionDigits());
+
+        if (allowed.compareTo(parsed) < 0) {
+          String maxShown = formatHuman(MantissaAmount.of(def.maxBalance(), 0), def);
+          player.sendMessage(componentService.builder(player, "currency.max-balance.capped-admin", "NotDefined", true)
+              .resolver(TagResolver.resolver(
+                  Placeholder.parsed("target", targetPlayer.getName()),
+                  Placeholder.parsed("currency", def.symbolPlural()),
+                  Placeholder.parsed("requested", requestedShown),
+                  Placeholder.parsed("added", addedShown),
+                  Placeholder.parsed("max", maxShown)
+              ))
+              .build());
+
+          targetPlayer.sendMessage(componentService.builder(targetPlayer, "currency.max-balance.capped-target", "NotDefined", true)
+              .resolver(TagResolver.resolver(
+                  Placeholder.parsed("player", player.getName()),
+                  Placeholder.parsed("currency", def.symbolPlural()),
+                  Placeholder.parsed("requested", requestedShown),
+                  Placeholder.parsed("added", addedShown),
+                  Placeholder.parsed("max", maxShown)
+              ))
+              .build());
+          return true;
+        }
+
+        player.sendMessage(componentService.builder(player, "currency.deposit", "NotDefined", true)
+            .resolver(TagResolver.resolver(
+                Placeholder.parsed("target", targetPlayer.getName()),
+                Placeholder.parsed("amount", addedShown),
+                Placeholder.parsed("currency", def.symbolPlural())
+            ))
+            .build());
+
+        targetPlayer.sendMessage(componentService.builder(targetPlayer, "currency.deposit-other", "NotDefined", true)
+            .resolver(TagResolver.resolver(
+                Placeholder.parsed("target", player.getName()),
+                Placeholder.parsed("amount", addedShown),
+                Placeholder.parsed("currency", def.symbolPlural())
+            ))
+            .build());
+        return true;
+      });
     });
 
     return 1;
   }
 
+  private static MantissaAmount capDeltaToMax(CurrencyDefinition def, MantissaAmount current, MantissaAmount requested) {
+    if (def == null) return requested;
+    BigDecimal max = def.maxBalance();
+    if (max == null) return requested;
+    if (max.compareTo(BigDecimal.ZERO) < 0) return requested; // -1 => unlimited
+
+    BigDecimal curHuman = (current == null ? MantissaAmount.zero() : current).toHuman();
+    BigDecimal reqHuman = (requested == null ? MantissaAmount.zero() : requested).toHuman();
+
+    BigDecimal remaining = max.subtract(curHuman);
+    if (remaining.compareTo(BigDecimal.ZERO) <= 0) return MantissaAmount.zero();
+
+    BigDecimal allowedHuman = reqHuman.min(remaining);
+    if (allowedHuman.compareTo(BigDecimal.ZERO) <= 0) return MantissaAmount.zero();
+
+    return MantissaAmount.of(allowedHuman, 0);
+  }
   @Command(value = "remove <currency> <target> <amount>", permission = "nexeconomy.admin")
   public int remove(
       NexPaperCommandSource source,
@@ -292,7 +375,15 @@ public final class MoneyCommand implements Service {
     if (targetPlayer == null || !targetPlayer.isOnline()) return 0;
 
     CurrencyDefinition def = economy.requireCurrency(currency);
-    MantissaAmount parsed = AmountNotation.parseToMantissaAmount(amount);
+
+    MantissaAmount parsed;
+    if (def != null && def.type() == CurrencyType.VAULT) {
+      BigDecimal human = AmountNotation.parseVaultHuman(amount);
+      parsed = human == null ? null : MantissaAmount.of(human, 0);
+    } else {
+      parsed = AmountNotation.parseVirtualMantissaAmount(amount);
+    }
+
     if (def == null || parsed == null || parsed.isNegative() || parsed.compareTo(MantissaAmount.zero()) == 0) return 0;
 
     economy.remove(targetPlayer, def.id(), parsed).thenAccept(ok -> {

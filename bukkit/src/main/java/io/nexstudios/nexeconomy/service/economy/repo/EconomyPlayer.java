@@ -60,23 +60,23 @@ public final class EconomyPlayer {
       return dirty;
     }
 
-    public void set(MantissaAmount newValue) {
+    public synchronized void set(MantissaAmount newValue) {
       this.amount = newValue == null ? MantissaAmount.zero() : newValue;
       this.version.incrementAndGet();
       this.dirty = true;
     }
 
-    public void add(MantissaAmount delta) {
+    public synchronized void add(MantissaAmount delta) {
       MantissaAmount next = (this.amount == null ? MantissaAmount.zero() : this.amount).add(delta);
       set(next);
     }
 
-    public void subtract(MantissaAmount delta) {
+    public synchronized void subtract(MantissaAmount delta) {
       MantissaAmount next = (this.amount == null ? MantissaAmount.zero() : this.amount).subtract(delta);
       set(next);
     }
 
-    public void clearDirtyIfVersionMatches(long expectedVersion) {
+    public synchronized void clearDirtyIfVersionMatches(long expectedVersion) {
       if (version.get() == expectedVersion) {
         dirty = false;
       }

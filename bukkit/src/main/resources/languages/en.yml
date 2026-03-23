@@ -1,5 +1,5 @@
 general:
-  prefix: '<bold><gradient:yellow:white>NEXECONOMY</gradient></bold> <gray>»'
+  prefix: '<bold><yellow>ɴᴇxᴇᴄᴏɴᴏᴍʏ</bold> <dark_gray>|'
   no-permission: '<red>You do not have permission to perform this command.</red>'
   reload: '<gray>Configuration reloaded <yellow>successfully<gray>!'#
   wrong-amount: '<red>Please enter a valid amount.</red>'
@@ -14,15 +14,55 @@ general:
   reset-target: '<red>Your economy data has been reset.'
   sync-currencies: '<gray>Synchronizing currencies across servers...'
   sync-complete: '<gray>Synchronization of <yellow><amount> <gray>currencies complete.'
+migration:
+  list: '<gray>Available migration importers: <yellow><importers><gray>.'
+  no-vault-currency: '<red>Migration failed: no Vault currency configured (currency-type: vault).</red>'
+  start: '<gray>Starting Vault migration into currency <yellow><currency><gray>...'
+  start-dryrun: '<gray>Starting Vault migration (dry-run) into currency <yellow><currency><gray>...'
+  start-overwrite: '<gray>Starting Vault migration into currency <yellow><currency><gray> (overwrite enabled)...'
+  failed: '<red>Migration failed: <dark_red><error></dark_red></red>'
+  cache-refresh-start: '<gray>Refreshing economy cache for online players...'
+  cache-refresh-complete: '<gray>Cache refresh complete for <yellow><amount><gray> online players.'
+  result:
+    - '<gray>Migration completed:'
+    - '<dark_gray>● <gray>importer: <yellow><importer>'
+    - '<dark_gray>● <gray>target currency: <yellow><currency>'
+    - '<dark_gray>● <gray>dry-run: <yellow><dryrun>'
+    - '<dark_gray>● <gray>processed: <yellow><processed>'
+    - '<dark_gray>● <gray>written: <yellow><written>'
+    - '<dark_gray>● <gray>skipped: <yellow><skipped>'
+    - '<dark_gray>● <gray>failed: <yellow><failed>'
+    - '<dark_gray>● <gray>total imported (human): <yellow><total>'
+status:
+  start: '<gray>Collecting economy status...'
+  header:
+    - '<gray><strikethrough>-----</strikethrough><yellow>●<gray><strikethrough>-----</strikethrough> <yellow><bold>Status</bold> <gray><strikethrough>-----</strikethrough><yellow>●<gray><strikethrough>-----</strikethrough>'
+  db: '<dark_gray>● <gray>Database: <yellow><state> <dark_gray>(took: <yellow><took>ms<dark_gray>) <gray>error: <dark_red><error>'
+  redis: '<dark_gray>● <gray>Redis: <yellow>enabled=<enabled> <gray>connected=<connected> <dark_gray>(took: <yellow><took>ms<dark_gray>) <gray>msg: <yellow><message>'
+  currencies:
+    header:
+      - '<gray> '
+      - '<yellow><bold>Currencies</bold>'
+    row: '<dark_gray>● <gray><currency>: <yellow><accounts> <gray>accounts <dark_gray>(took: <yellow><took>ms<dark_gray>)'
+  footer:
+    - '<gray> '
+    - '<gray><strikethrough>------------------------------</strikethrough>'
 currency:
   balance: '<gray>You have <yellow><amount> <gray><currency>.'
-  balance-other: '<gray>Player <yellow><target> has <yellow><amount> <gray><currency>.'
+  balance-other: '<gray>Player <yellow><target> <gray>has <yellow><amount> <gray><currency>.'
   set: '<gray>You have set the balance of <yellow><target><gray> to <yellow><amount> <gray><currency>.'
   set-other: '<gray>The player <yellow><player> <gray>has set your balance to <yellow><amount> <gray><currency>.'
   deposit: '<gray>You have deposited <yellow><amount> <gray><currency> to <yellow><target><gray>.'
   deposit-other: '<gray>You received <yellow><amount> <gray><currency> from <yellow><target><gray>.'
   withdraw: '<gray>You have withdrawn <yellow><amount> <gray><currency> from <yellow><target><gray>.'
   withdraw-other: '<gray>Player <yellow><player> <gray>has withdrawn <yellow><amount> <gray><currency> from you.'
+  max-balance:
+    reached-admin: '<red><target> has already reached the max balance for <gray><currency><red> (max: <yellow><max><red>).'
+    capped-admin: '<gray>Max balance reached: requested <yellow><requested> <gray><currency>, added only <yellow><added> <gray><currency> (max: <yellow><max><gray>) to <yellow><target><gray>.'
+    capped-target: '<gray>Your received amount was capped: requested <yellow><requested> <gray><currency>, received <yellow><added> <gray><currency> (max: <yellow><max><gray>) from <yellow><player><gray>.'
+    pay-blocked: '<red><target> cannot receive more <gray><currency><red> (max: <yellow><max><red>).'
+    pay-capped: '<gray>Max balance cap: requested <yellow><requested> <gray><currency>, paid only <yellow><paid> <gray><currency> to <yellow><target><gray> (max: <yellow><max><gray>).'
+    pay-capped-target: '<gray>Your received payment was capped: requested <yellow><requested> <gray><currency>, received <yellow><paid> <gray><currency> from <yellow><player><gray> (max: <yellow><max><gray>).'
   baltop:
     header:
       - '<gray><strikethrough>-----</strikethrough><yellow>●<gray><strikethrough>-----</strikethrough> <yellow><bold><italic>NEX<gray>Economy <reset><gray><strikethrough>-----</strikethrough><yellow>●<gray><strikethrough>-----</strikethrough>'
