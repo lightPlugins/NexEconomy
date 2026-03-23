@@ -1,7 +1,6 @@
 package io.nexstudios.nexeconomy.provider;
 
 import io.nexstudios.framework.paper.services.plugin.PaperPluginService;
-import io.nexstudios.nexeconomy.NexEconomyPlugin;
 import io.nexstudios.nexeconomy.provider.context.PreparedVaultOperation;
 import io.nexstudios.nexeconomy.provider.context.VaultOperationContext;
 import io.nexstudios.nexeconomy.service.definition.CurrencyDefinition;
@@ -11,14 +10,11 @@ import io.nexstudios.nexeconomy.service.economy.EconomyPlayerCacheService;
 import io.nexstudios.nexeconomy.service.economy.repo.EconomyPlayer;
 import io.nexstudios.nexeconomy.service.economy.repo.EconomyRepository;
 import io.nexstudios.nexeconomy.service.registry.CurrencyRegistryService;
-import io.nexstudios.nexlogic.bukkit.services.entity.EconomyBalanceEntity;
-import io.nexstudios.nexlogic.bukkit.services.hooks.towny.TownyService;
 import io.nexstudios.serviceregistry.di.Dependencies;
 import io.nexstudios.serviceregistry.di.Service;
 import lombok.extern.slf4j.Slf4j;
 import net.milkbowl.vault.economy.Economy;
 import net.milkbowl.vault.economy.EconomyResponse;
-import org.bukkit.Bukkit;
 import org.bukkit.OfflinePlayer;
 import org.bukkit.entity.Player;
 
@@ -46,12 +42,6 @@ public final class VaultEconomyProvider implements Economy, Service {
     this.cache = cache;
     this.flush = flush;
     this.repo = repo;
-  }
-
-  private TownyService townyServiceOrNull() {
-    var nexLogic = NexEconomyPlugin.getNexLogicService();
-    if (nexLogic == null) return null;
-    return nexLogic.findService(TownyService.class).orElse(null);
   }
 
   @Override
@@ -111,19 +101,17 @@ public final class VaultEconomyProvider implements Economy, Service {
 
     UUID uuid = player.getUniqueId();
 
-    // online cache path (fast)
     EconomyPlayer cached = cache.getOnline(uuid);
     if (cached != null) {
       EconomyPlayer.BalanceEntry entry = cached.entry(vaultId);
-      MantissaAmount amount = entry == null ? MantissaAmount.zero() : entry.amount();
-      return amount == null ? 0D : amount.toDoubleApprox();
+      MantissaAmount a = entry == null ? MantissaAmount.zero() : entry.amount();
+      return a == null ? 0D : a.toDoubleApprox();
     }
 
-    // offline DB path
     try {
       var map = repo.loadBalances(uuid, Set.of(vaultId)).join();
-      MantissaAmount amount = map.get(vaultId);
-      return amount == null ? 0D : amount.toDoubleApprox();
+      MantissaAmount a = map.get(vaultId);
+      return a == null ? 0D : a.toDoubleApprox();
     } catch (Exception ex) {
       return 0D;
     }
@@ -142,24 +130,24 @@ public final class VaultEconomyProvider implements Economy, Service {
     String vaultId = vaultId();
     if (vaultId == null) return false;
 
+    UUID uuid = player.getUniqueId();
+
     int fd = fractionalDigits();
     BigDecimal neededHuman = BigDecimal.valueOf(amount).setScale(fd, RoundingMode.DOWN);
     MantissaAmount needed = MantissaAmount.of(neededHuman, 0);
 
-    UUID uuid = player.getUniqueId();
-
     EconomyPlayer cached = cache.getOnline(uuid);
     if (cached != null) {
       EconomyPlayer.BalanceEntry entry = cached.entry(vaultId);
-      MantissaAmount current = entry == null || entry.amount() == null ? MantissaAmount.zero() : entry.amount();
-      return current.compareTo(needed) >= 0;
+      MantissaAmount cur = entry == null || entry.amount() == null ? MantissaAmount.zero() : entry.amount();
+      return cur.compareTo(needed) >= 0;
     }
 
     try {
       var map = repo.loadBalances(uuid, Set.of(vaultId)).join();
-      MantissaAmount current = map.get(vaultId);
-      if (current == null) current = MantissaAmount.zero();
-      return current.compareTo(needed) >= 0;
+      MantissaAmount cur = map.get(vaultId);
+      if (cur == null) cur = MantissaAmount.zero();
+      return cur.compareTo(needed) >= 0;
     } catch (Exception ex) {
       return false;
     }
@@ -177,30 +165,7 @@ public final class VaultEconomyProvider implements Economy, Service {
 
     VaultOperationContext ctx = prepared.vaultOperationContext();
 
-    // Towny: direkt DB-basiert (kein debounce flush), damit Folgetransaktionen sofort den Stand sehen
-    if (isTownyAccount(player)) {
-      try {
-        UUID uuid = player.getUniqueId();
-        String vaultId = ctx.vaultId();
-
-        var existing = repo.loadBalances(uuid, Set.of(vaultId), EconomyBalanceEntity.EconomyAccountType.TOWNY).join();
-        MantissaAmount current = existing.get(vaultId);
-        if (current == null) current = MantissaAmount.zero();
-
-        if (current.compareTo(ctx.delta()) < 0) {
-          return new EconomyResponse(0, current.toDoubleApprox(), EconomyResponse.ResponseType.FAILURE, "insufficient funds");
-        }
-
-        MantissaAmount next = current.subtract(ctx.delta());
-        repo.upsertBulk(uuid, Map.of(vaultId, next), EconomyBalanceEntity.EconomyAccountType.TOWNY).join();
-
-        return new EconomyResponse(ctx.requestedHuman().doubleValue(), next.toDoubleApprox(), EconomyResponse.ResponseType.SUCCESS, null);
-      } catch (Exception ex) {
-        return new EconomyResponse(0, 0, EconomyResponse.ResponseType.FAILURE, "db error");
-      }
-    }
-
-    // If cached online: keep old behavior (cache + flush)
+    // online cached -> RAM + Flush
     if (cache.getOnline(player.getUniqueId()) != null) {
       MantissaAmount current = ctx.entry().amount() == null ? MantissaAmount.zero() : ctx.entry().amount();
       if (current.compareTo(ctx.delta()) < 0) {
@@ -208,15 +173,12 @@ public final class VaultEconomyProvider implements Economy, Service {
       }
 
       ctx.entry().subtract(ctx.delta());
-
-      if (flush != null) {
-        flush.requestFlush(ctx.econ());
-      }
+      if (flush != null) flush.requestFlush(ctx.econ());
 
       return new EconomyResponse(ctx.requestedHuman().doubleValue(), getBalance(player), EconomyResponse.ResponseType.SUCCESS, null);
     }
 
-    // Offline real-player: DB-backed immediate write
+    // offline player -> DB sofort
     try {
       String vaultId = ctx.vaultId();
       UUID uuid = player.getUniqueId();
@@ -250,37 +212,14 @@ public final class VaultEconomyProvider implements Economy, Service {
 
     VaultOperationContext ctx = prepared.vaultOperationContext();
 
-    // Towny: direkt DB-basiert (kein debounce flush)
-    if (isTownyAccount(player)) {
-      try {
-        UUID uuid = player.getUniqueId();
-        String vaultId = ctx.vaultId();
-
-        var existing = repo.loadBalances(uuid, Set.of(vaultId), EconomyBalanceEntity.EconomyAccountType.TOWNY).join();
-        MantissaAmount current = existing.get(vaultId);
-        if (current == null) current = MantissaAmount.zero();
-
-        MantissaAmount next = current.add(ctx.delta());
-        repo.upsertBulk(uuid, Map.of(vaultId, next), EconomyBalanceEntity.EconomyAccountType.TOWNY).join();
-
-        return new EconomyResponse(ctx.requestedHuman().doubleValue(), next.toDoubleApprox(), EconomyResponse.ResponseType.SUCCESS, null);
-      } catch (Exception ex) {
-        return new EconomyResponse(0, 0, EconomyResponse.ResponseType.FAILURE, "db error");
-      }
-    }
-
-    // If cached online: keep old behavior (cache + flush)
+    // online cached -> RAM + Flush
     if (cache.getOnline(player.getUniqueId()) != null) {
       ctx.entry().add(ctx.delta());
-
-      if (flush != null) {
-        flush.requestFlush(ctx.econ());
-      }
-
+      if (flush != null) flush.requestFlush(ctx.econ());
       return new EconomyResponse(ctx.requestedHuman().doubleValue(), getBalance(player), EconomyResponse.ResponseType.SUCCESS, null);
     }
 
-    // Offline real-player: DB-backed immediate write
+    // offline player -> DB sofort
     try {
       String vaultId = ctx.vaultId();
       UUID uuid = player.getUniqueId();
@@ -303,7 +242,7 @@ public final class VaultEconomyProvider implements Economy, Service {
     return depositPlayer(player, amount);
   }
 
-  // --- Bank not supported yet (future extension point) ---
+  // --- Bank not supported ---
   @Override public boolean hasBankSupport() { return false; }
   @Override public EconomyResponse createBank(String name, String player) { return notSupported(); }
   @Override public EconomyResponse createBank(String name, OfflinePlayer player) { return notSupported(); }
@@ -320,29 +259,13 @@ public final class VaultEconomyProvider implements Economy, Service {
 
   @Override
   public boolean createPlayerAccount(OfflinePlayer player) {
-    if (player == null) {
-      return false;
-    }
-
-    UUID uuid = player.getUniqueId();
-
-    if (isTownyAccount(player)) {
-      EconomyPlayer econ = cache.loadOrCreateTowny(uuid).join();
-      if (flush != null && econ != null) {
-        flush.requestFlushTowny(econ);
-      }
-      return true;
-    }
+    if (player == null) return false;
 
     Player online = player.getPlayer();
-    if (online == null || !online.isOnline()) {
-      return false;
-    }
+    if (online == null || !online.isOnline()) return false;
 
     EconomyPlayer econ = cache.loadOrCreateOnline(online).join();
-    if (flush != null && econ != null) {
-      flush.requestFlush(econ);
-    }
+    if (flush != null && econ != null) flush.requestFlush(econ);
     return true;
   }
 
@@ -371,7 +294,6 @@ public final class VaultEconomyProvider implements Economy, Service {
 
     EconomyPlayer econ = resolveEconForOfflinePlayer(player);
     if (econ == null) {
-      // For real offline players we don't need an in-memory econ object; but keep the old error message for safety.
       return PreparedVaultOperation.error(new EconomyResponse(0, 0, EconomyResponse.ResponseType.FAILURE, "account not available"));
     }
 
@@ -385,31 +307,12 @@ public final class VaultEconomyProvider implements Economy, Service {
 
   private EconomyPlayer resolveEconForOfflinePlayer(OfflinePlayer player) {
     if (player == null) return null;
-
-    if (isTownyAccount(player)) {
-      return cache.loadOrCreateTowny(player.getUniqueId()).join();
-    }
-
-    // For real players: if online cached, use cache; otherwise create a minimal object
-    // (actual DB read/write happens in deposit/withdraw offline path above).
     UUID uuid = player.getUniqueId();
+
     EconomyPlayer cached = cache.getOnline(uuid);
     if (cached != null) return cached;
 
     return new EconomyPlayer(uuid);
-  }
-
-  private boolean isTownyAccount(OfflinePlayer p) {
-    if (p == null) return false;
-
-    String name = p.getName();
-    if (name == null || name.isBlank()) return false;
-
-    TownyService towny = townyServiceOrNull();
-    if (towny == null) return false;
-
-    UUID townyUuid = towny.getTownUUID(name).orElse(null);
-    return townyUuid != null;
   }
 
   private String vaultId() {
@@ -421,65 +324,17 @@ public final class VaultEconomyProvider implements Economy, Service {
     return id == null ? null : currencies.currency(id);
   }
 
-  // --- Legacy string-based overloads: explicitly unsupported (Towny does NOT use them anymore) ---
-
-  @Override
-  public boolean hasAccount(String playerName) {
-    return false;
-  }
-
-  @Override
-  public boolean hasAccount(String playerName, String worldName) {
-    return false;
-  }
-
-  @Override
-  public double getBalance(String playerName) {
-    return 0D;
-  }
-
-  @Override
-  public double getBalance(String playerName, String world) {
-    return 0D;
-  }
-
-  @Override
-  public boolean has(String playerName, double amount) {
-    return false;
-  }
-
-  @Override
-  public boolean has(String playerName, String worldName, double amount) {
-    return false;
-  }
-
-  @Override
-  public EconomyResponse withdrawPlayer(String playerName, double amount) {
-    return notSupported();
-  }
-
-  @Override
-  public EconomyResponse withdrawPlayer(String playerName, String worldName, double amount) {
-    return notSupported();
-  }
-
-  @Override
-  public EconomyResponse depositPlayer(String playerName, double amount) {
-    return notSupported();
-  }
-
-  @Override
-  public EconomyResponse depositPlayer(String playerName, String worldName, double amount) {
-    return notSupported();
-  }
-
-  @Override
-  public boolean createPlayerAccount(String playerName) {
-    return false;
-  }
-
-  @Override
-  public boolean createPlayerAccount(String playerName, String worldName) {
-    return false;
-  }
+  // Legacy string-based overloads: unsupported
+  @Override public boolean hasAccount(String playerName) { return false; }
+  @Override public boolean hasAccount(String playerName, String worldName) { return false; }
+  @Override public double getBalance(String playerName) { return 0D; }
+  @Override public double getBalance(String playerName, String world) { return 0D; }
+  @Override public boolean has(String playerName, double amount) { return false; }
+  @Override public boolean has(String playerName, String worldName, double amount) { return false; }
+  @Override public EconomyResponse withdrawPlayer(String playerName, double amount) { return notSupported(); }
+  @Override public EconomyResponse withdrawPlayer(String playerName, String worldName, double amount) { return notSupported(); }
+  @Override public EconomyResponse depositPlayer(String playerName, double amount) { return notSupported(); }
+  @Override public EconomyResponse depositPlayer(String playerName, String worldName, double amount) { return notSupported(); }
+  @Override public boolean createPlayerAccount(String playerName) { return false; }
+  @Override public boolean createPlayerAccount(String playerName, String worldName) { return false; }
 }

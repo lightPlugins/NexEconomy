@@ -9,7 +9,6 @@ import io.nexstudios.nexlogic.common.services.logging.LoggerService;
 import io.nexstudios.serviceregistry.di.Dependencies;
 import io.nexstudios.serviceregistry.di.Service;
 import io.nexstudios.serviceregistry.di.ServiceAccessor;
-import net.milkbowl.vault.economy.Economy;
 import org.bukkit.Bukkit;
 import org.bukkit.plugin.Plugin;
 import org.bukkit.plugin.ServicePriority;
@@ -29,7 +28,6 @@ import java.nio.file.Path;
 })
 public final class VaultEconomyBridgeService implements Service {
 
-  private final ServiceAccessor accessor;
   private final LoggerService logger;
   private final Plugin plugin;
   private final CurrencyRegistryService currencies;
@@ -39,7 +37,6 @@ public final class VaultEconomyBridgeService implements Service {
   private final FileConfiguration settings;
 
   public VaultEconomyBridgeService(ServiceAccessor accessor) {
-    this.accessor = accessor;
     this.logger = accessor.getService(LoggerService.class);
     this.plugin = accessor.getService(PaperPluginService.class).plugin();
     this.currencies = accessor.getService(CurrencyRegistryService.class);
@@ -73,8 +70,10 @@ public final class VaultEconomyBridgeService implements Service {
     }
 
     VaultEconomyProvider provider = new VaultEconomyProvider(currencies, cache, flush, repo);
-    Bukkit.getServicesManager().register(Economy.class, provider, plugin, ServicePriority.Highest);
+    VaultUnlockedEconomyProvider providerUnlocked = new VaultUnlockedEconomyProvider(currencies, cache, flush, repo);
+    Bukkit.getServicesManager().register(net.milkbowl.vault.economy.Economy.class, provider, plugin, ServicePriority.Highest);
+    Bukkit.getServicesManager().register(net.milkbowl.vault2.economy.Economy.class, providerUnlocked, plugin, ServicePriority.Highest);
 
-    logger.logger().info("Registered Vault Economy provider (currency=" + vaultCurrencyId + ", priority=Highest).");
+    logger.logger().info("Registered Vault and VaultUnlocked Economy provider (currency=" + vaultCurrencyId + ", priority=Highest).");
   }
 }

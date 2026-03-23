@@ -59,10 +59,33 @@ public final class EconomyRepository implements Service {
     });
   }
 
-  /**
-   * Atomar: lädt den Datensatz (per PESSIMISTIC_WRITE), wendet delta an und schreibt zurück.
-   * Liefert den neuen Kontostand zurück.
-   */
+  public CompletableFuture<Boolean> hasBalanceRow(
+      UUID uuid,
+      String currencyIdLower,
+      EconomyBalanceEntity.EconomyAccountType accountType
+  ) {
+    if (uuid == null) return CompletableFuture.failedFuture(new IllegalArgumentException("uuid is null"));
+    String cur = normalizeCurrency(currencyIdLower);
+    if (cur.isBlank()) return CompletableFuture.completedFuture(false);
+
+    EconomyBalanceEntity.EconomyAccountType type = accountType == null
+        ? EconomyBalanceEntity.EconomyAccountType.PLAYER
+        : accountType;
+
+    return dbAsync.executeAsyncInTransaction(em -> {
+      Long count = em.createQuery(
+              "select count(b) from EconomyBalanceEntity b where b.playerUuid = :uuid and b.currency = :cur and b.accountType = :type",
+              Long.class
+          )
+          .setParameter("uuid", uuid)
+          .setParameter("cur", cur)
+          .setParameter("type", type)
+          .getSingleResult();
+
+      return count != null && count > 0;
+    });
+  }
+
   public CompletableFuture<MantissaAmount> applyDelta(
       UUID uuid,
       String currencyIdLower,
