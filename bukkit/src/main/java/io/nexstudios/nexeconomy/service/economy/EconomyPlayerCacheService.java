@@ -126,7 +126,7 @@ public final class EconomyPlayerCacheService implements Service {
           }
 
           CurrencyDefinition def = currencies.currency(id);
-          MantissaAmount start = startAmount(def);
+          MantissaAmount start = MantissaAmount.zero();
           econ.getOrCreate(id, start).set(start);
         }
 

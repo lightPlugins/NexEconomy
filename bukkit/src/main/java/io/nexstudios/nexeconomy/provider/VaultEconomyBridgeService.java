@@ -14,6 +14,7 @@ import org.bukkit.Bukkit;
 import org.bukkit.plugin.Plugin;
 import org.bukkit.plugin.ServicePriority;
 import io.nexstudios.nexeconomy.service.economy.EconomyFlushService;
+import io.nexstudios.nexeconomy.service.economy.repo.EconomyRepository;
 
 import java.nio.file.Path;
 
@@ -23,6 +24,7 @@ import java.nio.file.Path;
     CurrencyRegistryService.class,
     EconomyPlayerCacheService.class,
     EconomyFlushService.class,
+    EconomyRepository.class,
     FileReaderService.class
 })
 public final class VaultEconomyBridgeService implements Service {
@@ -33,6 +35,7 @@ public final class VaultEconomyBridgeService implements Service {
   private final CurrencyRegistryService currencies;
   private final EconomyPlayerCacheService cache;
   private final EconomyFlushService flush;
+  private final EconomyRepository repo;
   private final FileConfiguration settings;
 
   public VaultEconomyBridgeService(ServiceAccessor accessor) {
@@ -42,6 +45,7 @@ public final class VaultEconomyBridgeService implements Service {
     this.currencies = accessor.getService(CurrencyRegistryService.class);
     this.cache = accessor.getService(EconomyPlayerCacheService.class);
     this.flush = accessor.getService(EconomyFlushService.class);
+    this.repo = accessor.getService(EconomyRepository.class);
 
     FileReaderService fileReaderService = accessor.getService(FileReaderService.class);
     this.settings = fileReaderService.load(Path.of("settings.yml"), "settings.yml", true);
@@ -68,7 +72,7 @@ public final class VaultEconomyBridgeService implements Service {
       return;
     }
 
-    VaultEconomyProvider provider = new VaultEconomyProvider(currencies, cache, flush);
+    VaultEconomyProvider provider = new VaultEconomyProvider(currencies, cache, flush, repo);
     Bukkit.getServicesManager().register(Economy.class, provider, plugin, ServicePriority.Highest);
 
     logger.logger().info("Registered Vault Economy provider (currency=" + vaultCurrencyId + ", priority=Highest).");

@@ -5,6 +5,8 @@ import io.nexstudios.nexeconomy.service.definition.CurrencyType;
 import io.nexstudios.nexeconomy.service.economy.repo.EconomyPlayer;
 import io.nexstudios.nexeconomy.service.registry.CurrencyRegistryService;
 import io.nexstudios.nexeconomy.service.definition.MantissaAmount;
+import io.nexstudios.nexeconomy.service.economy.repo.EconomyRepository;
+import io.nexstudios.nexlogic.bukkit.services.entity.EconomyBalanceEntity;
 import io.nexstudios.nexlogic.common.services.logging.LoggerService;
 import io.nexstudios.serviceregistry.di.Dependencies;
 import io.nexstudios.serviceregistry.di.Service;
@@ -15,13 +17,15 @@ import org.jetbrains.annotations.NotNull;
 import java.math.BigDecimal;
 import java.math.RoundingMode;
 import java.util.Locale;
+import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
 
 @Dependencies({
     LoggerService.class,
     CurrencyRegistryService.class,
     EconomyPlayerCacheService.class,
-    EconomyFlushService.class
+    EconomyFlushService.class,
+    EconomyRepository.class
 })
 public final class EconomyService implements Service {
 
@@ -31,12 +35,76 @@ public final class EconomyService implements Service {
   private final CurrencyRegistryService currencies;
   private final EconomyPlayerCacheService cache;
   private final EconomyFlushService flush;
+  private final EconomyRepository repo;
 
   public EconomyService(ServiceAccessor accessor) {
     this.logger = accessor.getService(LoggerService.class);
     this.currencies = accessor.getService(CurrencyRegistryService.class);
     this.cache = accessor.getService(EconomyPlayerCacheService.class);
     this.flush = accessor.getService(EconomyFlushService.class);
+    this.repo = accessor.getService(EconomyRepository.class);
+  }
+
+  /**
+   * Offline-fähig (auch für virtuelle Währungen): arbeitet direkt auf der DB via UUID.
+   */
+  public CompletableFuture<MantissaAmount> balance(@NotNull UUID playerId, @NotNull String currencyId) {
+    String cur = normalize(currencyId);
+    if (cur.isBlank()) return CompletableFuture.failedFuture(new IllegalArgumentException("currency is blank"));
+    return repo.loadSingleBalance(playerId, cur, EconomyBalanceEntity.EconomyAccountType.PLAYER);
+  }
+
+  /**
+   * Offline-fähig add: schreibt direkt in die DB.
+   */
+  public CompletableFuture<MantissaAmount> add(@NotNull UUID playerId, @NotNull String currencyId, @NotNull MantissaAmount delta) {
+    String cur = normalize(currencyId);
+    if (cur.isBlank()) return CompletableFuture.failedFuture(new IllegalArgumentException("currency is blank"));
+
+    CurrencyDefinition def = currencies.currency(cur);
+    MantissaAmount d = normalizeForCurrency(def, delta);
+
+    return repo.applyDelta(
+        playerId,
+        cur,
+        d,
+        EconomyBalanceEntity.EconomyAccountType.PLAYER
+    );
+  }
+
+  /**
+   * Offline-fähig remove: prüft vorher den DB-Stand und bucht dann ab.
+   */
+  public CompletableFuture<Boolean> remove(@NotNull UUID playerId, @NotNull String currencyId, @NotNull MantissaAmount delta) {
+    String cur = normalize(currencyId);
+    if (cur.isBlank()) return CompletableFuture.failedFuture(new IllegalArgumentException("currency is blank"));
+
+    CurrencyDefinition def = currencies.currency(cur);
+    MantissaAmount d = normalizeForCurrency(def, delta);
+    if (d.isNegative() || d.compareTo(MantissaAmount.zero()) == 0) {
+      return CompletableFuture.completedFuture(false);
+    }
+
+    return repo.loadSingleBalance(
+        playerId,
+        cur,
+        EconomyBalanceEntity.EconomyAccountType.PLAYER
+    ).thenCompose(current -> {
+      MantissaAmount c = current == null ? MantissaAmount.zero() : current;
+      if (c.compareTo(d) < 0) return CompletableFuture.completedFuture(false);
+
+      MantissaAmount negative = MantissaAmount.of(d.toHuman().negate(), 0);
+      if (def == null || def.type() == CurrencyType.VIRTUAL) {
+        negative = MantissaAmount.normalize(d).subtract(d.add(d)); // bleibt negativ ohne Human-Rundung
+      }
+
+      return repo.applyDelta(
+          playerId,
+          cur,
+          negative,
+          EconomyBalanceEntity.EconomyAccountType.PLAYER
+      ).thenApply(ignored -> true);
+    });
   }
 
   public CompletableFuture<MantissaAmount> balance(@NotNull Player player, @NotNull String currencyId) {
