@@ -193,7 +193,7 @@ public final class EconomyLeaderboardService implements Service {
   }
 
   private static int clamp(int value) {
-    if (value < EconomyLeaderboardService.MIN_TTL_SECONDS) return EconomyLeaderboardService.MIN_TTL_SECONDS;
-    return Math.min(value, EconomyLeaderboardService.MAX_TTL_SECONDS);
+    if (value < MIN_TTL_SECONDS) return MIN_TTL_SECONDS;
+    return Math.min(value, MAX_TTL_SECONDS);
   }
 }
