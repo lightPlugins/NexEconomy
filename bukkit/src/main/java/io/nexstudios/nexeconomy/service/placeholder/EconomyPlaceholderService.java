@@ -5,7 +5,7 @@ import io.nexstudios.nexeconomy.definition.AmountNotation;
 import io.nexstudios.nexeconomy.definition.CurrencyDefinition;
 import io.nexstudios.nexeconomy.definition.MantissaAmount;
 import io.nexstudios.nexeconomy.service.economy.EconomyPlayerCacheService;
-import io.nexstudios.nexeconomy.service.economy.repo.EconomyRepository;
+import io.nexstudios.nexeconomy.service.economy.leaderboard.EconomyLeaderboardService;
 import io.nexstudios.nexeconomy.service.registry.CurrencyRegistryService;
 import io.nexstudios.nexlogic.bukkit.services.effects.context.BukkitContextKeys;
 import io.nexstudios.nexlogic.common.placeholder.PlaceholderResolveContext;
@@ -22,16 +22,16 @@ import java.math.BigDecimal;
 import java.time.Duration;
 import java.util.Locale;
 import java.util.Map;
+import java.util.Optional;
+import java.util.OptionalInt;
 import java.util.UUID;
-import java.util.concurrent.ConcurrentHashMap;
-import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.function.Function;
 
 @Dependencies({
     LoggerService.class,
     CurrencyRegistryService.class,
     EconomyPlayerCacheService.class,
-    EconomyRepository.class
+    EconomyLeaderboardService.class
 })
 public final class EconomyPlaceholderService implements Service, AutoCloseable {
 
@@ -41,19 +41,15 @@ public final class EconomyPlaceholderService implements Service, AutoCloseable {
   private final LoggerService logger;
   private final CurrencyRegistryService currencies;
   private final EconomyPlayerCacheService cache;
-  private final EconomyRepository repo;
+  private final EconomyLeaderboardService leaderboard;
 
   private final PlaceholderService placeholders;
-
-  private final ConcurrentHashMap<String, TopSnapshot> topCache = new ConcurrentHashMap<>();
-  // TODO: Add key to settings.yml
-  private final Duration topTtl = Duration.ofSeconds(10); // db refresh time is 10 seconds, maybe adjust it later, but first let us test it
 
   public EconomyPlaceholderService(ServiceAccessor accessor) {
     this.logger = accessor.getService(LoggerService.class);
     this.currencies = accessor.getService(CurrencyRegistryService.class);
     this.cache = accessor.getService(EconomyPlayerCacheService.class);
-    this.repo = accessor.getService(EconomyRepository.class);
+    this.leaderboard = accessor.getService(EconomyLeaderboardService.class);
 
     this.placeholders = resolvePlaceholderServiceOrThrow();
 
@@ -62,7 +58,6 @@ public final class EconomyPlaceholderService implements Service, AutoCloseable {
 
   public void reload() {
     unregisterAll();
-    topCache.clear();
     registerAll();
   }
 
@@ -81,21 +76,21 @@ public final class EconomyPlaceholderService implements Service, AutoCloseable {
     // Player-context placeholders
     register(cur + "_amount_raw", ctx -> {
       Player p = tryResolvePlayer(ctx);
-      if (p == null) return "NoPlayerFound";
+      if (p == null) return "";
       MantissaAmount a = readOnlineAmount(p.getUniqueId(), cur);
       return toRawHumanString(a);
     }, Duration.ofMillis(250));
 
     register(cur + "_amount", ctx -> {
       Player p = tryResolvePlayer(ctx);
-      if (p == null) return "NoPlayerFound";
+      if (p == null) return "";
       MantissaAmount a = readOnlineAmount(p.getUniqueId(), cur);
       return AmountNotation.formatShort(a, def.fractionDigits());
     }, Duration.ofMillis(250));
 
     register(cur + "_format", ctx -> {
       Player p = tryResolvePlayer(ctx);
-      if (p == null) return "NoPlayerFound";
+      if (p == null) return "";
       MantissaAmount a = readOnlineAmount(p.getUniqueId(), cur);
 
       String amountShown = AmountNotation.formatShort(a, def.fractionDigits());
@@ -107,76 +102,84 @@ public final class EconomyPlaceholderService implements Service, AutoCloseable {
           "symbol", symbol,
           "currency", def.symbolPlural()
       ));
-    }, Duration.ofMillis(250)); //250 ms ttl time (maybe adjust it later, but first test it)
+    }, Duration.ofMillis(250));
 
     // Non-player placeholders
     register(cur + "_symbol_singular", ctx -> def.symbolSingular(), Duration.ofSeconds(2000));
     register(cur + "_symbol_plural", ctx -> def.symbolPlural(), Duration.ofSeconds(2000));
     register(cur + "_name", ctx -> def.name(), Duration.ofSeconds(10));
 
-    // Top placeholders 1..10
+    // Top placeholders 1..10 (no NexLogic cache; leaderboard service handles TTL)
     for (int i = 1; i <= 10; i++) {
       final int place = i;
-      register(cur + "_top_" + place, ctx -> resolveTopPlaceholder(def, place), Duration.ZERO);
+      register(cur + "_top_" + place, ctx -> resolveTopPlace(def, place), Duration.ZERO);
     }
+
+    // New: %nexeconomy:<currency>_top_player% (player context)
+    register(cur + "_top_player", ctx -> resolveTopPlayer(def, ctx), Duration.ZERO);
   }
 
-  private String resolveTopPlaceholder(CurrencyDefinition def, int place) {
-    String cur = normalize(def.id());
-    if (cur.isBlank()) return "";
+  private String resolveTopPlace(CurrencyDefinition def, int place) {
+    if (def == null) return "";
     if (place < 1 || place > 10) return "";
 
-    TopSnapshot snap = topCache.computeIfAbsent(cur, k -> TopSnapshot.empty(topTtl));
+    String cur = normalize(def.id());
+    if (cur.isBlank()) return "";
 
-    if (snap.isExpired()) {
-      if (snap.refreshing.compareAndSet(false, true)) {
-        repo.topBalances(cur, 10).whenComplete((rows, err) -> {
-          try {
-            if (err != null) {
-              logger.logger().warning("Failed to load top balances for currency=" + cur + ": " + err.getMessage());
-              return;
-            }
-
-            String[] formatted = new String[10];
-
-            for (int idx = 0; idx < 10; idx++) {
-              if (rows == null || idx >= rows.size()) {
-                formatted[idx] = "";
-                continue;
-              }
-
-              EconomyRepository.TopBalanceRow row = rows.get(idx);
-              UUID uuid = row == null ? null : row.uuid();
-              MantissaAmount amount = row == null ? MantissaAmount.zero() : row.amount();
-
-              OfflinePlayer off = uuid == null ? null : Bukkit.getOfflinePlayer(uuid);
-              String name = off == null || off.getName() == null ? (uuid == null ? "unknown" : uuid.toString()) : off.getName();
-
-              String amountShown = AmountNotation.formatShort(amount, def.fractionDigits());
-
-              String template = def.topPlaceholder() == null ? "" : def.topPlaceholder();
-              formatted[idx] = applySimpleTemplate(template, Map.of(
-                  "number", String.valueOf(idx + 1),
-                  "name", name,
-                  "amount", amountShown,
-                  "currency", def.symbolPlural()
-              ));
-            }
-
-            topCache.put(cur, TopSnapshot.ready(formatted, topTtl));
-          } finally {
-            TopSnapshot s = topCache.get(cur);
-            if (s != null) s.refreshing.set(false);
-          }
-        });
-      }
+    Optional<EconomyLeaderboardService.SnapshotView> viewOpt = leaderboard.getTop(cur, 10);
+    if (viewOpt.isEmpty()) {
+      return "loading";
     }
 
-    // Return current cached values (even while refresh is running)
-    TopSnapshot now = topCache.get(cur);
-    if (now == null || now.values == null) return "";
-    String out = now.values[place - 1];
-    return out == null ? "" : out;
+    var view = viewOpt.get();
+    if (view.top() == null || view.top().size() < place) return "";
+
+    EconomyLeaderboardService.Row row = view.top().get(place - 1);
+    if (row == null || row.uuid() == null) return "";
+
+    UUID uuid = row.uuid();
+    OfflinePlayer off = Bukkit.getOfflinePlayer(uuid);
+    String name = off.getName() == null ? uuid.toString() : off.getName();
+
+    MantissaAmount amount = row.amount() == null ? MantissaAmount.zero() : row.amount();
+    String amountShown = AmountNotation.formatShort(amount, def.fractionDigits());
+
+    String template = def.topPlaceholder() == null ? "" : def.topPlaceholder();
+    return applySimpleTemplate(template, Map.of(
+        "number", String.valueOf(place),
+        "name", name,
+        "amount", amountShown,
+        "currency", def.symbolPlural()
+    ));
+  }
+
+  private String resolveTopPlayer(CurrencyDefinition def, PlaceholderResolveContext ctx) {
+    if (def == null) return "";
+
+    Player p = tryResolvePlayer(ctx);
+    if (p == null) return "";
+
+    String cur = normalize(def.id());
+    if (cur.isBlank()) return "";
+
+    OptionalInt rankOpt = leaderboard.getRank(cur, p.getUniqueId());
+    if (rankOpt.isEmpty()) {
+      return "loading";
+    }
+
+    int rank = rankOpt.getAsInt();
+    if (rank <= 0) return "";
+
+    MantissaAmount a = readOnlineAmount(p.getUniqueId(), cur);
+    String amountShown = AmountNotation.formatShort(a, def.fractionDigits());
+
+    String template = def.topPlaceholder() == null ? "" : def.topPlaceholder();
+    return applySimpleTemplate(template, Map.of(
+        "number", String.valueOf(rank),
+        "name", p.getName(),
+        "amount", amountShown,
+        "currency", def.symbolPlural()
+    ));
   }
 
   private MantissaAmount readOnlineAmount(UUID playerId, String currencyIdLower) {
@@ -263,20 +266,5 @@ public final class EconomyPlaceholderService implements Service, AutoCloseable {
   private static Player tryResolvePlayer(PlaceholderResolveContext ctx) {
     if (ctx == null || ctx.logicContext() == null) return null;
     return ctx.logicContext().get(BukkitContextKeys.PLAYER).orElse(null);
-  }
-
-  private record TopSnapshot(long expiresAtMs, String[] values, AtomicBoolean refreshing) {
-
-    static TopSnapshot ready(String[] values, Duration ttl) {
-      return new TopSnapshot(System.currentTimeMillis() + ttl.toMillis(), values, new AtomicBoolean(false));
-    }
-
-    static TopSnapshot empty(Duration ttl) {
-      return new TopSnapshot(0L, new String[10], new AtomicBoolean(false));
-    }
-
-    boolean isExpired() {
-      return System.currentTimeMillis() > expiresAtMs;
-    }
   }
 }

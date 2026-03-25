@@ -59,6 +59,37 @@ public final class EconomyRepository implements Service {
     });
   }
 
+  public CompletableFuture<List<TopBalanceRow>> loadAllBalancesForCurrency(
+      String currencyIdLower,
+      EconomyBalanceEntity.EconomyAccountType accountType,
+      int hardCap
+  ) {
+    String cur = normalizeCurrency(currencyIdLower);
+    if (cur.isBlank()) return CompletableFuture.completedFuture(List.of());
+    if (accountType == null) return CompletableFuture.completedFuture(List.of());
+
+    final int cap = hardCap <= 0 ? 200_000 : Math.min(hardCap, 200_000);
+
+    return dbAsync.executeAsyncInTransaction(em -> {
+      List<EconomyBalanceEntity> rows = em.createQuery(
+              "select b from EconomyBalanceEntity b where b.currency = :cur and b.accountType = :type",
+              EconomyBalanceEntity.class
+          )
+          .setParameter("cur", cur)
+          .setParameter("type", accountType)
+          .setMaxResults(cap)
+          .getResultList();
+
+      List<TopBalanceRow> out = new ArrayList<>(rows.size());
+      for (EconomyBalanceEntity r : rows) {
+        if (r.getPlayerUuid() == null) continue;
+        MantissaAmount amount = MantissaAmount.parseStorage(r.getAmount(), r.getAmountExp3());
+        out.add(new TopBalanceRow(r.getPlayerUuid(), amount));
+      }
+      return out;
+    });
+  }
+
   public CompletableFuture<Boolean> hasBalanceRow(
       UUID uuid,
       String currencyIdLower,

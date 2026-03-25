@@ -10,10 +10,9 @@ import io.nexstudios.nexeconomy.command.suggestions.PlayerSuggestion;
 import io.nexstudios.nexeconomy.definition.AmountNotation;
 import io.nexstudios.nexeconomy.definition.CurrencyDefinition;
 import io.nexstudios.nexeconomy.definition.CurrencyType;
-import io.nexstudios.nexeconomy.service.economy.repo.EconomyRepository;
+import io.nexstudios.nexeconomy.service.economy.leaderboard.EconomyLeaderboardService;
 import io.nexstudios.nexeconomy.service.economy.EconomyService;
 import io.nexstudios.nexeconomy.definition.MantissaAmount;
-import io.nexstudios.nexlogic.bukkit.services.entity.EconomyBalanceEntity;
 import io.nexstudios.serviceregistry.di.Dependencies;
 import io.nexstudios.serviceregistry.di.Service;
 import io.nexstudios.serviceregistry.di.ServiceAccessor;
@@ -25,6 +24,7 @@ import org.bukkit.entity.Player;
 import org.bukkit.plugin.Plugin;
 
 import java.math.BigDecimal;
+import java.util.Optional;
 
 @CommandRoot(
     name = "currency", aliases = {"money", "eco"},
@@ -33,20 +33,20 @@ import java.math.BigDecimal;
 @Dependencies({
     ComponentService.class,
     EconomyService.class,
-    EconomyRepository.class
+    EconomyLeaderboardService.class,
 })
 public final class MoneyCommand implements Service {
 
   private final ComponentService componentService;
   private final EconomyService economy;
-  private final EconomyRepository repo;
   private final Plugin plugin;
+  private final EconomyLeaderboardService leaderboard;
 
   public MoneyCommand(ServiceAccessor accessor) {
     this.componentService = accessor.getService(ComponentService.class);
     this.economy = accessor.getService(EconomyService.class);
-    this.repo = accessor.getService(EconomyRepository.class);
     this.plugin = accessor.getService(PaperPluginService.class).plugin();
+    this.leaderboard = accessor.getService(EconomyLeaderboardService.class);
   }
 
   @Command(value = "", permission = "nexeconomy.use")
@@ -158,25 +158,40 @@ public final class MoneyCommand implements Service {
       return 0;
     }
 
-    repo.topBalances(def.id(), 10, EconomyBalanceEntity.EconomyAccountType.PLAYER).thenAccept(rows -> {
-      String overall = rows.isEmpty()
-          ? "0"
-          : AmountNotation.formatShort(rows.getFirst().amount(), def.fractionDigits());
+    String cur = def.id();
 
-      Bukkit.getScheduler().runTask(plugin, () -> {
-        componentService.getComponents(
-            player,
-            "currency.baltop.header",
-            "NotDefined",
-            TagResolver.resolver(
-                Placeholder.parsed("overall", overall),
-                Placeholder.parsed("currency", def.symbolPlural())
-            ),
-            false
-        ).forEach(player::sendMessage);
+    Optional<EconomyLeaderboardService.SnapshotView> viewOpt = leaderboard.getTop(cur, 10);
+    if (viewOpt.isEmpty()) {
+      player.sendMessage(componentService.builder(player, "general.response-error", "NotDefined", true)
+          .resolver(TagResolver.resolver(Placeholder.parsed("error", "Leaderboard is loading")))
+          .build());
+      return 1;
+    }
 
-        int i = 1;
-        for (EconomyRepository.TopBalanceRow row : rows) {
+    var view = viewOpt.get();
+    var rows = view.top();
+
+    String overall = (rows == null || rows.isEmpty())
+        ? "0"
+        : AmountNotation.formatShort(rows.getFirst().amount(), def.fractionDigits());
+
+    Bukkit.getScheduler().runTask(plugin, () -> {
+      componentService.getComponents(
+          player,
+          "currency.baltop.header",
+          "NotDefined",
+          TagResolver.resolver(
+              Placeholder.parsed("overall", overall),
+              Placeholder.parsed("currency", def.symbolPlural())
+          ),
+          false
+      ).forEach(player::sendMessage);
+
+      int i = 1;
+      if (rows != null) {
+        for (EconomyLeaderboardService.Row row : rows) {
+          if (row == null || row.uuid() == null) continue;
+
           OfflinePlayer off = Bukkit.getOfflinePlayer(row.uuid());
           String name = off.getName() == null ? row.uuid().toString() : off.getName();
 
@@ -192,15 +207,10 @@ public final class MoneyCommand implements Service {
               .build());
           i++;
         }
+      }
 
-        componentService.getComponents(player, "currency.baltop.footer", "NotDefined", false)
-            .forEach(player::sendMessage);
-      });
-    }).exceptionally(ex -> {
-      player.sendMessage(componentService.builder(player, "general.response-error", "NotDefined", true)
-          .resolver(TagResolver.resolver(Placeholder.parsed("error", ex.getMessage() == null ? "Unknown" : ex.getMessage())))
-          .build());
-      return null;
+      componentService.getComponents(player, "currency.baltop.footer", "NotDefined", false)
+          .forEach(player::sendMessage);
     });
 
     return 1;

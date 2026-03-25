@@ -2,3 +2,8 @@
 vault-bridge:
   # Enables or disables the Vault Bridge functionality.
   enabled: true
+
+# Configuration for the leaderboard module.
+leaderboard:
+  # The time-to-live (TTL) for any leaderboard placeholder, in seconds.
+  ttl-seconds: 30
