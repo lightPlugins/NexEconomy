@@ -1,0 +1,133 @@
+# Display name of this bank (supports MiniMessage formatting).
+name: "<yellow>NexEconomy Bank"
+
+# Whether this bank is active and should be loaded by the plugin.
+enabled: true
+
+# Currency id used for this bank.
+# Usually this is the currency file name without extension from /currencies (e.g. "vault", "gems", ...).
+currency: "vault"
+
+# If true, every player has access to this bank without needing to unlock it first.
+unlocked-by-default: true
+
+member-system:
+  # Enables the shared bank member system (roles, permissions, limits).
+  enabled: true
+
+  # Maximum number of members that can be in this bank at the same time.
+  max: 10
+
+  roles:
+    # List of role definitions.
+    # Each role is referenced by its "id" and defines what members are allowed to do.
+    - id: owner
+      # Role display name (supports MiniMessage formatting).
+      name: '<red>Owner'
+
+      # the priority of this role.
+      # roles with a higher priority are allowed to kick members with lower priority.
+      priority: 100
+
+      # Whether members with this role can deposit money into the bank.
+      canDeposit: true
+
+      withdraw:
+        # Whether members with this role can withdraw money from the bank.
+        can: true
+
+        # Daily withdraw limit for this role (per member).
+        # Use "-1" for unlimited.
+        # Supports amount notation like "10k" (mantissa is optional).
+        # (the daily/hourly limit is applied individually per player)
+        daily-limit: '-1'
+
+        # Hourly withdraw limit for this role (per member).
+        # Use "-1" for unlimited.
+        # (the daily/hourly limit is applied individually per player)
+        hourly-limit: '-1'
+
+      # Whether members with this role can invite other players to the bank.
+      canInvite: true
+
+      # Whether members with this role can kick/remove other members from the bank.
+      canKick: true
+
+      # Whether members with this role can upgrade the bank level.
+      canUpgrade: true
+
+      # Whether members with this role can view the bank transaction log / audit history.
+      canViewLog: true
+
+    - id: member
+      name: '<green>Member'
+      priority: 10
+      canDeposit: true
+      withdraw:
+        can: true
+        # Example limits for regular members: (the daily/hourly limit is applied individually per player)
+        daily-limit: '10k'
+        hourly-limit: '1k'
+      canInvite: true
+      canKick: false
+      canUpgrade: true
+      canViewLog: true
+
+    - id: noob
+      name: '<yellow>Noob'
+      priority: 1
+      canDeposit: true
+      withdraw:
+        can: true
+        # Small starter limits for new/low-trust members:
+        daily-limit: '500'
+        hourly-limit: '50'
+      canInvite: false
+      canKick: false
+      canUpgrade: true
+      canViewLog: false
+
+interest-system:
+  # WARNING: In a multi-server network, enable this on ONE server only.
+  # If multiple servers apply interest, players may receive interest multiple times.
+  enabled: true
+
+  # Interest percentage applied per run (e.g. 0.02 = +2%).
+  percentage: 0.02
+
+  # Time of day when interest is applied (HH:mm:ss).
+  time: "03:00:00"
+
+  # Timezone used to interpret "time".
+  timezone: "Europe/Berlin"
+
+level-system:
+  # Level upgrades for this bank.
+  # Level 1 is typically the default/start level and may be handled implicitly.
+  - level: 2
+
+    # Maximum allowed bank balance at this level.
+    # Supports amount notation like "10k" (mantissa is optional).
+    # the corresponding currency is used for this level.
+    max-balance: '10k'
+
+    # Permission required to upgrade to this level.
+    need-permission: "nexeconomy.bank.level.2"
+
+    # Cost to upgrade to this level (usually in the bank currency or a defined upgrade currency).
+    # (mantissa is optional).
+    upgrade-cost: '5000'
+
+  - level: 3
+
+    # Maximum allowed bank balance at this level.
+    # Supports amount notation like "10k" (mantissa is optional).
+    # the corresponding currency is used for this level.
+    max-balance: '500k'
+
+    # Permission required to upgrade to this level.
+    need-permission: "nexeconomy.bank.level.3"
+
+    # Cost to upgrade to this level (usually in the bank currency or a defined upgrade currency).
+    # (mantissa is optional).
+    upgrade-cost: '25k'

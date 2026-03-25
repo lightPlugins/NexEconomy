@@ -89,3 +89,31 @@ currency:
     pay-daily-limit-pay: '<red>You have reached your daily limit of <yellow><amount> <gray><currency>. <red>You cannot pay any more currency to players today!'
     pay-daily-limit-target: '<red>Target has reached their daily limit of <yellow><amount> <gray><currency>. <red>You cannot pay them any more currency today!'
     pay-daily-limit-reset: '<gray>Daily limit reset for <yellow><player>.'
+bank:
+  error: '<red>Bank error: <dark_red><error></dark_red></red>'
+  balance: '<gray>Bank <yellow><bank> <gray>(owner: <yellow><owner><gray>) balance: <yellow><amount> <gray><currency>.'
+  members: '<gray>Bank <yellow><bank> <gray>(owner: <yellow><owner><gray>) members: <yellow><members><gray>.'
+  invite:
+    sent: '<gray>Invite sent: <yellow><player> <gray>to bank <yellow><bank> <gray>as <yellow><role><gray>.'
+    sent-other: '<gray>Invite sent: <yellow><player> <gray>to bank <yellow><bank> <gray>(owner: <yellow><owner><gray>) as <yellow><role><gray>.'
+    received: '<gray>You have been invited to bank <yellow><bank> <gray>by <yellow><owner> <gray>as <yellow><role><gray>. Use <yellow>/bank accept <bank> <owner><gray>.'
+    received-other: '<gray>You have been invited to bank <yellow><bank> <gray>(owner: <yellow><owner><gray>) by <yellow><inviter> <gray>as <yellow><role><gray>. Use <yellow>/bank accept <bank> <owner><gray>.'
+  other:
+    accept:
+      none: '<red>No pending bank invite from <dark_red><owner><red>.'
+      success: '<gray>Accepted bank invite from <yellow><owner><gray>.'
+    deny:
+      none: '<red>No pending bank invite from <dark_red><owner><red>.'
+      success: '<gray>Denied bank invite from <yellow><owner><gray>.'
+    invites:
+      empty: '<gray>You have no pending bank invites.'
+      header: '<gray>Pending bank invites: <yellow><amount><gray>.'
+      row: '<dark_gray>● <gray>bank=<yellow><bank> <gray>owner=<yellow><owner> <dark_gray>(<yellow><ownerUuid><dark_gray>) <gray>role=<yellow><role> <gray>invitedBy=<yellow><invitedBy>'
+  accept:
+    none: '<red>No pending invite for bank <dark_red><bank> <red>from <dark_red><owner><red>.'
+    success: '<gray>You joined bank <yellow><bank> <gray>(owner: <yellow><owner><gray>).'
+    owner-notify: '<yellow><player> <gray>accepted your bank invite for <yellow><bank><gray>.'
+  deposit:
+    success: '<gray>Deposited <yellow><amount> <gray>into bank <yellow><bank> <gray>(owner: <yellow><owner><gray>).'
+    withdraw:
+      success: '<gray>Withdrew <yellow><amount> <gray>from bank <yellow><bank> <gray>(owner: <yellow><owner><gray>).'

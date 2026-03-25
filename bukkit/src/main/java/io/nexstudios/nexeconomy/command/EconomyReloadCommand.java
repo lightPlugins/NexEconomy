@@ -5,6 +5,7 @@ import io.nexstudios.commandservice.service.commands.annotations.CommandRoot;
 import io.nexstudios.commandservice.service.commands.source.NexPaperCommandSource;
 import io.nexstudios.languageservice.service.component.ComponentService;
 import io.nexstudios.languageservice.service.language.LanguageService;
+import io.nexstudios.nexeconomy.service.bank.BankService;
 import io.nexstudios.nexeconomy.service.placeholder.EconomyPlaceholderService;
 import io.nexstudios.nexeconomy.service.registry.CurrencyRegistryService;
 import io.nexstudios.nexeconomy.service.economy.EconomyPlayerCacheService;
@@ -22,7 +23,8 @@ import org.bukkit.entity.Player;
     LanguageService.class,
     CurrencyRegistryService.class,
     EconomyPlayerCacheService.class,
-    EconomyPlaceholderService.class
+    EconomyPlaceholderService.class,
+    BankService.class
 })
 public class EconomyReloadCommand implements Service {
 
@@ -31,6 +33,7 @@ public class EconomyReloadCommand implements Service {
   private final CurrencyRegistryService currencyRegistry;
   private final EconomyPlayerCacheService playerCache;
   private final EconomyPlaceholderService placeholderService;
+  private final BankService bankService;
 
   public EconomyReloadCommand(ServiceAccessor accessor) {
     this.componentService = accessor.getService(ComponentService.class);
@@ -38,6 +41,7 @@ public class EconomyReloadCommand implements Service {
     this.currencyRegistry = accessor.getService(CurrencyRegistryService.class);
     this.playerCache = accessor.getService(EconomyPlayerCacheService.class);
     this.placeholderService = accessor.getService(EconomyPlaceholderService.class);
+    this.bankService = accessor.getService(BankService.class);
   }
 
   @Command(value = "reload", permission = "nexeconomy.admin")
@@ -49,6 +53,7 @@ public class EconomyReloadCommand implements Service {
     currencyRegistry.reload();
     playerCache.ensureMissingCurrenciesForAllOnline();
     placeholderService.reload();
+    bankService.ensureMissingUnlockedBanksForAllOnline();
 
     player.sendMessage(componentService.builder(player, "general.reload", "NotDefined", true).build());
     return 1;

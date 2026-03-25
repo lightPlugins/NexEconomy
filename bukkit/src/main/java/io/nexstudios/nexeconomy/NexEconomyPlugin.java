@@ -8,8 +8,11 @@ import io.nexstudios.itemservice.bukkit.ItemServiceModule;
 import io.nexstudios.languageservice.LanguageServiceModule;
 import io.nexstudios.languageservice.service.language.LanguageService;
 import io.nexstudios.nexeconomy.command.*;
+import io.nexstudios.nexeconomy.modules.BankCoreModule;
 import io.nexstudios.nexeconomy.modules.EconomyCoreModule;
 import io.nexstudios.nexeconomy.provider.VaultEconomyBridgeService;
+import io.nexstudios.nexeconomy.service.bank.listener.BankPlayerListener;
+import io.nexstudios.nexeconomy.service.bank.sync.BankRedisSyncService;
 import io.nexstudios.nexeconomy.service.economy.EconomyFlushService;
 import io.nexstudios.nexeconomy.service.economy.EconomyRedisSyncService;
 import io.nexstudios.nexeconomy.service.economy.listener.EconomyPlayerListener;
@@ -50,7 +53,8 @@ public class NexEconomyPlugin extends NexPaperPlugin {
     initNexLogic();
     // install internal ServiceModule
     List<ServiceModule> modules = List.of(
-        new EconomyCoreModule()
+        new EconomyCoreModule(),
+        new BankCoreModule()
     );
     services().installAll(modules);
 
@@ -81,14 +85,17 @@ public class NexEconomyPlugin extends NexPaperPlugin {
             EconomyReloadCommand.class,
             MoneyCommand.class,
             EconomyMigrationCommand.class,
-            EconomyStatusCommand.class
+            EconomyStatusCommand.class,
+            BankCommand.class
         )
     );
 
     services().getService(EconomyRedisSyncService.class).start();
+    services().getService(BankRedisSyncService.class).start();
 
     registerListeners(
-        new EconomyPlayerListener(services())
+        new EconomyPlayerListener(services()),
+        new BankPlayerListener(services())
     );
 
     getLogger().info("NexEconomy successfully started.");
