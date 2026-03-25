@@ -51,7 +51,7 @@ public final class EconomyLeaderboardService implements Service {
 
   public void reload() {
     int seconds = settings == null ? DEFAULT_TTL_SECONDS : settings.getInt("leaderboard.ttl-seconds", DEFAULT_TTL_SECONDS);
-    seconds = clamp(seconds, MIN_TTL_SECONDS, MAX_TTL_SECONDS);
+    seconds = clamp(seconds);
 
     this.ttl = Duration.ofSeconds(seconds);
     this.snapshots.clear();
@@ -192,8 +192,8 @@ public final class EconomyLeaderboardService implements Service {
     return s == null ? "" : s.trim().toLowerCase(Locale.ROOT);
   }
 
-  private static int clamp(int value, int min, int max) {
-    if (value < min) return min;
-    return Math.min(value, max);
+  private static int clamp(int value) {
+    if (value < EconomyLeaderboardService.MIN_TTL_SECONDS) return EconomyLeaderboardService.MIN_TTL_SECONDS;
+    return Math.min(value, EconomyLeaderboardService.MAX_TTL_SECONDS);
   }
 }
