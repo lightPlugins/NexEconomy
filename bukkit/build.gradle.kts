@@ -18,7 +18,7 @@ dependencies {
 
     compileOnly("io.nexstudios.nexlogic:nexlogic-bukkit:v1.0.0")
 
-    compileOnly("net.milkbowl.vault:VaultUnlockedAPI:2.16") {
+    implementation("net.milkbowl.vault:VaultUnlockedAPI:2.16") {
         exclude(group = "org.bukkit", module = "bukkit")
     }
 

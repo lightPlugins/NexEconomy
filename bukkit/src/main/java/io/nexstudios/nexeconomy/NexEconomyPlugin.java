@@ -26,7 +26,6 @@ import org.jetbrains.annotations.NotNull;
 
 import java.time.Duration;
 import java.util.List;
-import java.util.UUID;
 import java.util.concurrent.TimeUnit;
 
 public class NexEconomyPlugin extends NexPaperPlugin {
@@ -60,7 +59,9 @@ public class NexEconomyPlugin extends NexPaperPlugin {
   @Override
   protected void load() {
     getLogger().info("NexEconomy is loading...");
+
     services().getService(VaultEconomyBridgeService.class);
+
   }
 
   @Override
@@ -69,9 +70,6 @@ public class NexEconomyPlugin extends NexPaperPlugin {
 
     // start background services that require an enabled plugin
     services().getService(EconomyFlushService.class).start();
-
-    TownyService test = nexLogicService.findService(TownyService.class).orElse(null);
-    getLogger().info("Towny test result: " + (test != null));
 
     // init language files
     services().getService(LanguageService.class).reload();
