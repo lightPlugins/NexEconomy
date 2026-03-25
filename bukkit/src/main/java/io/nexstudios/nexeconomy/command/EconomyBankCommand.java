@@ -40,13 +40,13 @@ import java.util.stream.Collectors;
     BankService.class,
     CurrencyRegistryService.class
 })
-public final class BankCommand implements Service {
+public final class EconomyBankCommand implements Service {
 
   private final ComponentService components;
   private final BankService bankService;
   private final CurrencyRegistryService currencies;
 
-  public BankCommand(ServiceAccessor accessor) {
+  public EconomyBankCommand(ServiceAccessor accessor) {
     this.components = accessor.getService(ComponentService.class);
     this.bankService = accessor.getService(BankService.class);
     this.currencies = accessor.getService(CurrencyRegistryService.class);

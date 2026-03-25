@@ -35,14 +35,14 @@ import java.util.Optional;
     EconomyService.class,
     EconomyLeaderboardService.class,
 })
-public final class MoneyCommand implements Service {
+public final class EconomyMainCommand implements Service {
 
   private final ComponentService componentService;
   private final EconomyService economy;
   private final Plugin plugin;
   private final EconomyLeaderboardService leaderboard;
 
-  public MoneyCommand(ServiceAccessor accessor) {
+  public EconomyMainCommand(ServiceAccessor accessor) {
     this.componentService = accessor.getService(ComponentService.class);
     this.economy = accessor.getService(EconomyService.class);
     this.plugin = accessor.getService(PaperPluginService.class).plugin();

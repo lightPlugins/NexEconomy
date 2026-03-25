@@ -83,10 +83,10 @@ public class NexEconomyPlugin extends NexPaperPlugin {
         List.of(
             EconomyPayCommand.class,
             EconomyReloadCommand.class,
-            MoneyCommand.class,
+            EconomyMainCommand.class,
             EconomyMigrationCommand.class,
             EconomyStatusCommand.class,
-            BankCommand.class
+            EconomyBankCommand.class
         )
     );
 
