@@ -1,7 +1,7 @@
 package io.nexstudios.nexeconomy.service.migration.impl;
 
 import io.nexstudios.framework.paper.services.plugin.PaperPluginService;
-import io.nexstudios.nexeconomy.service.definition.MantissaAmount;
+import io.nexstudios.nexeconomy.definition.MantissaAmount;
 import io.nexstudios.nexeconomy.service.economy.repo.EconomyRepository;
 import io.nexstudios.nexeconomy.service.migration.MigrationImporter;
 import io.nexstudios.nexeconomy.service.migration.MigrationRequest;

@@ -1,10 +1,10 @@
 package io.nexstudios.nexeconomy.service.economy;
 
-import io.nexstudios.nexeconomy.service.definition.CurrencyDefinition;
-import io.nexstudios.nexeconomy.service.definition.CurrencyType;
+import io.nexstudios.nexeconomy.definition.CurrencyDefinition;
+import io.nexstudios.nexeconomy.definition.CurrencyType;
 import io.nexstudios.nexeconomy.service.economy.repo.EconomyPlayer;
 import io.nexstudios.nexeconomy.service.registry.CurrencyRegistryService;
-import io.nexstudios.nexeconomy.service.definition.MantissaAmount;
+import io.nexstudios.nexeconomy.definition.MantissaAmount;
 import io.nexstudios.nexeconomy.service.economy.repo.EconomyRepository;
 import io.nexstudios.nexlogic.bukkit.services.entity.EconomyBalanceEntity;
 import io.nexstudios.nexlogic.common.services.logging.LoggerService;

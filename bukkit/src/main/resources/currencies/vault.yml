@@ -9,7 +9,9 @@ symbol:
   plural: 'Coins'
   singular: 'Coin'
 # The placeholder for nex placeholder api
-placeholder: '<yellow>#name#: <yellow>#amount# <gray>#symbol#'
+player-placeholder: '<yellow><amount> <gray><symbol>'
+# The placeholder for places (%nexeconomy:<currency>_top_<number>)
+top-placeholder: '<dark_gray>● <yellow><bold><number><reset><gray># <dark_gray>● <yellow><name> <gray>- <yellow><amount> <gray><currency>'
 # How many digits should be shown after the decimal point.
 fraction-digits: 0
 # The types of your currency:

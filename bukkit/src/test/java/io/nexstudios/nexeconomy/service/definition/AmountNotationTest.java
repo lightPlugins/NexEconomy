@@ -1,5 +1,7 @@
 package io.nexstudios.nexeconomy.service.definition;
 
+import io.nexstudios.nexeconomy.definition.AmountNotation;
+import io.nexstudios.nexeconomy.definition.MantissaAmount;
 import org.junit.jupiter.api.Test;
 
 import java.math.BigDecimal;

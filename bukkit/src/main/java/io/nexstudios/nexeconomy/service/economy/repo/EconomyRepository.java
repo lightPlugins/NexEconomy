@@ -1,7 +1,7 @@
 package io.nexstudios.nexeconomy.service.economy.repo;
 
 import io.nexstudios.nexlogic.bukkit.services.entity.EconomyBalanceEntity;
-import io.nexstudios.nexeconomy.service.definition.MantissaAmount;
+import io.nexstudios.nexeconomy.definition.MantissaAmount;
 import io.nexstudios.nexlogic.common.services.logging.LoggerService;
 import io.nexstudios.nexeconomy.NexEconomyPlugin;
 import io.nexstudios.serviceregistry.di.Dependencies;

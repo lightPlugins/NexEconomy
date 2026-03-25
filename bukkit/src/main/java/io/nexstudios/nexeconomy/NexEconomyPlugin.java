@@ -13,9 +13,9 @@ import io.nexstudios.nexeconomy.provider.VaultEconomyBridgeService;
 import io.nexstudios.nexeconomy.service.economy.EconomyFlushService;
 import io.nexstudios.nexeconomy.service.economy.EconomyRedisSyncService;
 import io.nexstudios.nexeconomy.service.economy.listener.EconomyPlayerListener;
+import io.nexstudios.nexeconomy.service.placeholder.EconomyPlaceholderService;
 import io.nexstudios.nexlogic.bukkit.NexLogicPlugin;
 import io.nexstudios.nexlogic.bukkit.services.effects.logging.BukkitLoggerService;
-import io.nexstudios.nexlogic.bukkit.services.hooks.towny.TownyService;
 import io.nexstudios.nexlogic.common.services.logging.LoggerService;
 import io.nexstudios.serviceregistry.di.ServiceAccessor;
 import io.nexstudios.serviceregistry.di.ServiceModule;
@@ -100,6 +100,8 @@ public class NexEconomyPlugin extends NexPaperPlugin {
     EconomyFlushService flush = services().getService(EconomyFlushService.class);
 
     flush.stop();
+    // unregister placeholders
+    services().findService(EconomyPlaceholderService.class).ifPresent(EconomyPlaceholderService::close);
 
     try {
       getLogger().info("Waiting for final economy flush to finish...");

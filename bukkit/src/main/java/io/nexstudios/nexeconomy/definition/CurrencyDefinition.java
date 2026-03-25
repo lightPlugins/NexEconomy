@@ -1,4 +1,4 @@
-package io.nexstudios.nexeconomy.service.definition;
+package io.nexstudios.nexeconomy.definition;
 
 import java.math.BigDecimal;
 
@@ -7,7 +7,8 @@ public record CurrencyDefinition(
     String name,
     String symbolSingular,
     String symbolPlural,
-    String placeholder,
+    String playerPlaceholder,
+    String topPlaceholder,
     int fractionDigits,
     CurrencyType type,
     BigDecimal startBalance,

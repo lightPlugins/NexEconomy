@@ -1,8 +1,8 @@
 package io.nexstudios.nexeconomy.provider;
 
 import io.nexstudios.nexlogic.bukkit.services.entity.EconomyBalanceEntity;
-import io.nexstudios.nexeconomy.service.definition.CurrencyDefinition;
-import io.nexstudios.nexeconomy.service.definition.MantissaAmount;
+import io.nexstudios.nexeconomy.definition.CurrencyDefinition;
+import io.nexstudios.nexeconomy.definition.MantissaAmount;
 import io.nexstudios.nexeconomy.service.economy.EconomyFlushService;
 import io.nexstudios.nexeconomy.service.economy.EconomyPlayerCacheService;
 import io.nexstudios.nexeconomy.service.economy.repo.EconomyPlayer;

@@ -1,6 +1,6 @@
 package io.nexstudios.nexeconomy.service.economy.repo;
 
-import io.nexstudios.nexeconomy.service.definition.MantissaAmount;
+import io.nexstudios.nexeconomy.definition.MantissaAmount;
 
 import java.util.Map;
 import java.util.Set;

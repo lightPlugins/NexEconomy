@@ -5,6 +5,7 @@ import io.nexstudios.commandservice.service.commands.annotations.CommandRoot;
 import io.nexstudios.commandservice.service.commands.source.NexPaperCommandSource;
 import io.nexstudios.languageservice.service.component.ComponentService;
 import io.nexstudios.languageservice.service.language.LanguageService;
+import io.nexstudios.nexeconomy.service.placeholder.EconomyPlaceholderService;
 import io.nexstudios.nexeconomy.service.registry.CurrencyRegistryService;
 import io.nexstudios.nexeconomy.service.economy.EconomyPlayerCacheService;
 import io.nexstudios.serviceregistry.di.Dependencies;
@@ -20,7 +21,8 @@ import org.bukkit.entity.Player;
     ComponentService.class,
     LanguageService.class,
     CurrencyRegistryService.class,
-    EconomyPlayerCacheService.class
+    EconomyPlayerCacheService.class,
+    EconomyPlaceholderService.class
 })
 public class EconomyReloadCommand implements Service {
 
@@ -28,12 +30,14 @@ public class EconomyReloadCommand implements Service {
   private final LanguageService languageService;
   private final CurrencyRegistryService currencyRegistry;
   private final EconomyPlayerCacheService playerCache;
+  private final EconomyPlaceholderService placeholderService;
 
   public EconomyReloadCommand(ServiceAccessor accessor) {
     this.componentService = accessor.getService(ComponentService.class);
     this.languageService = accessor.getService(LanguageService.class);
     this.currencyRegistry = accessor.getService(CurrencyRegistryService.class);
     this.playerCache = accessor.getService(EconomyPlayerCacheService.class);
+    this.placeholderService = accessor.getService(EconomyPlaceholderService.class);
   }
 
   @Command(value = "reload", permission = "nexeconomy.admin")
@@ -44,6 +48,7 @@ public class EconomyReloadCommand implements Service {
     languageService.reload();
     currencyRegistry.reload();
     playerCache.ensureMissingCurrenciesForAllOnline();
+    placeholderService.reload();
 
     player.sendMessage(componentService.builder(player, "general.reload", "NotDefined", true).build());
     return 1;

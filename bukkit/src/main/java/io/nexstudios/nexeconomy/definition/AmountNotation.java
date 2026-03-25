@@ -1,4 +1,4 @@
-package io.nexstudios.nexeconomy.service.definition;
+package io.nexstudios.nexeconomy.definition;
 
 import java.math.BigDecimal;
 import java.math.RoundingMode;

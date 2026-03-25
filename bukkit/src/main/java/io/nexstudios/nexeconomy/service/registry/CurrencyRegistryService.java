@@ -1,9 +1,9 @@
 package io.nexstudios.nexeconomy.service.registry;
 
 import io.nexstudios.framework.paper.services.plugin.PaperPluginService;
-import io.nexstudios.nexeconomy.service.definition.AmountNotation;
-import io.nexstudios.nexeconomy.service.definition.CurrencyDefinition;
-import io.nexstudios.nexeconomy.service.definition.CurrencyType;
+import io.nexstudios.nexeconomy.definition.AmountNotation;
+import io.nexstudios.nexeconomy.definition.CurrencyDefinition;
+import io.nexstudios.nexeconomy.definition.CurrencyType;
 import io.nexstudios.nexlogic.common.services.logging.LoggerService;
 import io.nexstudios.serviceregistry.di.Dependencies;
 import io.nexstudios.serviceregistry.di.Service;
@@ -61,7 +61,8 @@ public final class CurrencyRegistryService implements Service {
           yml.getString("name", id),
           yml.getString("symbol.singular", id),
           yml.getString("symbol.plural", id),
-          yml.getString("placeholder", ""),
+          yml.getString("player-placeholder", "<yellow><amount> <gray><symbol>"),
+          yml.getString("top-placeholder", "<dark_gray>● <yellow><bold><number><reset><gray># <dark_gray>● <yellow><name> <gray>- <yellow><amount> <gray><currency>"),
           clampFractionDigits(yml.getInt("fraction-digits", 0)),
           type,
           readBigDecimal(yml, "start-balance", BigDecimal.ZERO),

@@ -5,6 +5,8 @@ import io.nexstudios.configservice.service.singlereader.FileReaderService;
 import io.nexstudios.framework.paper.services.plugin.PaperPluginService;
 import io.nexstudios.nexeconomy.service.registry.CurrencyRegistryService;
 import io.nexstudios.nexeconomy.service.economy.EconomyPlayerCacheService;
+import io.nexstudios.nexeconomy.service.economy.EconomyFlushService;
+import io.nexstudios.nexeconomy.service.economy.repo.EconomyRepository;
 import io.nexstudios.nexlogic.common.services.logging.LoggerService;
 import io.nexstudios.serviceregistry.di.Dependencies;
 import io.nexstudios.serviceregistry.di.Service;
@@ -12,8 +14,6 @@ import io.nexstudios.serviceregistry.di.ServiceAccessor;
 import org.bukkit.Bukkit;
 import org.bukkit.plugin.Plugin;
 import org.bukkit.plugin.ServicePriority;
-import io.nexstudios.nexeconomy.service.economy.EconomyFlushService;
-import io.nexstudios.nexeconomy.service.economy.repo.EconomyRepository;
 
 import java.nio.file.Path;
 
@@ -70,8 +70,10 @@ public final class VaultEconomyBridgeService implements Service {
     }
 
     VaultEconomyProvider provider = new VaultEconomyProvider(currencies, cache, flush, repo);
+    // OG Vault
     Bukkit.getServicesManager().register(net.milkbowl.vault.economy.Economy.class, provider, plugin, ServicePriority.Highest);
     VaultUnlockedEconomyProvider providerUnlocked = new VaultUnlockedEconomyProvider(currencies, cache, flush, repo);
+    // Vault fork "VaultUnlocked"
     Bukkit.getServicesManager().register(net.milkbowl.vault2.economy.Economy.class, providerUnlocked, plugin, ServicePriority.Highest);
 
     logger.logger().info("Registered Vault/VaultUnlocked Economy provider (currency=" + vaultCurrencyId + ", priority=Highest) successfully.");
