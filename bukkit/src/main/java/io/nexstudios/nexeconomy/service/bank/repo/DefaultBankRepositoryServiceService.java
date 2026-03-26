@@ -11,6 +11,7 @@ import jakarta.persistence.EntityManager;
 import jakarta.persistence.LockModeType;
 
 import java.time.Instant;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
@@ -383,22 +384,74 @@ public final class DefaultBankRepositoryServiceService implements BankRepository
   public CompletableFuture<List<InviteLookupRow>> findInvitesForInvitee(UUID inviteeUuid) {
     if (inviteeUuid == null) return CompletableFuture.completedFuture(List.of());
 
-    Function<EntityManager, List<InviteLookupRow>> work = em -> em.createQuery(
+    Function<EntityManager, List<Object[]>> work = em -> em.createQuery(
             """
-            select new io.nexstudios.nexeconomy.service.bank.repo.InviteLookupRow(
-              a.id, a.bankIdLower, a.ownerUuid,
-              i.inviteeUuid, i.invitedByUuid, i.roleIdLower, i.expiresAt
-            )
+            select a.id, a.bankIdLower, a.ownerUuid,
+                   i.inviteeUuid, i.invitedByUuid, i.roleIdLower, i.expiresAt
             from BankInviteEntity i
             join BankAccountEntity a on a.id = i.bankAccountId
             where i.inviteeUuid = :invitee
             """,
-            InviteLookupRow.class
+            Object[].class
         )
         .setParameter("invitee", inviteeUuid)
         .getResultList();
 
-    return dbAsync.executeAsyncInTransaction(work);
+    return dbAsync.executeAsyncInTransaction(work).thenApply(rows -> mapInviteLookupRows(rows));
+  }
+
+  @Override
+  public CompletableFuture<List<InviteLookupRow>> findInvitesForInviteeFromOwner(UUID inviteeUuid, UUID ownerUuid) {
+    if (inviteeUuid == null || ownerUuid == null) return CompletableFuture.completedFuture(List.of());
+
+    Function<EntityManager, List<Object[]>> work = em -> em.createQuery(
+            """
+            select a.id, a.bankIdLower, a.ownerUuid,
+                   i.inviteeUuid, i.invitedByUuid, i.roleIdLower, i.expiresAt
+            from BankInviteEntity i
+            join BankAccountEntity a on a.id = i.bankAccountId
+            where i.inviteeUuid = :invitee
+              and a.ownerUuid = :owner
+            """,
+            Object[].class
+        )
+        .setParameter("invitee", inviteeUuid)
+        .setParameter("owner", ownerUuid)
+        .getResultList();
+
+    return dbAsync.executeAsyncInTransaction(work).thenApply(rows -> mapInviteLookupRows(rows));
+  }
+
+  private static List<InviteLookupRow> mapInviteLookupRows(List<Object[]> rows) {
+    if (rows == null || rows.isEmpty()) return List.of();
+
+    List<InviteLookupRow> out = new ArrayList<>(rows.size());
+    for (Object[] r : rows) {
+      if (r == null || r.length < 7) continue;
+
+      UUID bankAccountId = r[0] instanceof UUID u ? u : null;
+      String bankIdLower = r[1] == null ? null : String.valueOf(r[1]);
+      UUID ownerUuid = r[2] instanceof UUID u ? u : null;
+
+      UUID inviteeUuid = r[3] instanceof UUID u ? u : null;
+      UUID invitedByUuid = r[4] instanceof UUID u ? u : null;
+      String roleIdLower = r[5] == null ? null : String.valueOf(r[5]);
+      Instant expiresAt = r[6] instanceof Instant i ? i : null;
+
+      if (bankAccountId == null) continue;
+
+      out.add(new InviteLookupRow(
+          bankAccountId,
+          bankIdLower,
+          ownerUuid,
+          inviteeUuid,
+          invitedByUuid,
+          roleIdLower,
+          expiresAt
+      ));
+    }
+
+    return List.copyOf(out);
   }
 
   @Override
@@ -463,31 +516,6 @@ public final class DefaultBankRepositoryServiceService implements BankRepository
       return true;
     });
   }
-
-  @Override
-  public CompletableFuture<List<InviteLookupRow>> findInvitesForInviteeFromOwner(UUID inviteeUuid, UUID ownerUuid) {
-    if (inviteeUuid == null || ownerUuid == null) return CompletableFuture.completedFuture(List.of());
-
-    Function<EntityManager, List<InviteLookupRow>> work = em -> em.createQuery(
-            """
-            select new io.nexstudios.nexeconomy.service.bank.repo.InviteLookupRow(
-              a.id, a.bankIdLower, a.ownerUuid,
-              i.inviteeUuid, i.invitedByUuid, i.roleIdLower, i.expiresAt
-            )
-            from BankInviteEntity i
-            join BankAccountEntity a on a.id = i.bankAccountId
-            where i.inviteeUuid = :invitee
-              and a.ownerUuid = :owner
-            """,
-            InviteLookupRow.class
-        )
-        .setParameter("invitee", inviteeUuid)
-        .setParameter("owner", ownerUuid)
-        .getResultList();
-
-    return dbAsync.executeAsyncInTransaction(work);
-  }
-
 
   private static String normalizeId(String s) {
     return s == null ? "" : s.trim().toLowerCase(java.util.Locale.ROOT);

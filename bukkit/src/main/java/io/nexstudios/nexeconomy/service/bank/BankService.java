@@ -37,6 +37,8 @@ public interface BankService extends Service {
 
   CompletableFuture<Boolean> denyInviteFromOwner(UUID ownerUuid, UUID inviteeUuid);
 
+  CompletableFuture<Boolean> leave(String bankId, UUID ownerUuid, UUID memberUuid);
+
   void ensureMissingUnlockedBanksForAllOnline();
 
 }

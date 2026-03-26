@@ -12,6 +12,7 @@ public record BankDefinition(
     boolean enabled,
     String currencyIdLower,
     boolean unlockedByDefault,
+    String defaultMaxBalanceRaw,
     MemberSystem memberSystem,
     InterestSystem interestSystem,
     List<LevelDefinition> levels

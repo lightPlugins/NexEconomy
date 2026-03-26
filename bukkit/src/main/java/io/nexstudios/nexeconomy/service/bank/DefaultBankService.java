@@ -45,6 +45,10 @@ public final class DefaultBankService implements BankService, Service {
   private final CurrencyRegistryService currencies;
   private final EconomyService economy;
 
+  private static final String ERR_INVITEE_ALREADY_IN_ANOTHER_BANK = "invitee_already_in_another_bank";
+  private static final String ERR_INVITEE_ALREADY_MEMBER_SOMEWHERE = "invitee_already_member_somewhere";
+  private static final String ERR_OWNER_CANNOT_LEAVE = "owner_cannot_leave";
+
   public DefaultBankService(ServiceAccessor accessor) {
     this.banks = accessor.getService(BankRegistryService.class);
     this.repo = accessor.getService(BankRepositoryService.class);
@@ -134,9 +138,9 @@ public final class DefaultBankService implements BankService, Service {
                     return CompletableFuture.failedFuture(new IllegalStateException("member limit reached"));
                   }
 
-                  return repo.isMemberOfAnyOtherAccount(inviteeUuid, ownerUuid).thenCompose(inOther -> {
+                  return repo.isMemberOfAnyOtherAccount(inviteeUuid, inviteeUuid).thenCompose(inOther -> {
                     if (Boolean.TRUE.equals(inOther)) {
-                      return CompletableFuture.failedFuture(new IllegalStateException("invitee already in another bank"));
+                      return CompletableFuture.failedFuture(new IllegalStateException(ERR_INVITEE_ALREADY_IN_ANOTHER_BANK));
                     }
 
                     return repo.upsertInvite(acc.getId(), inviteeUuid, actorUuid, finalRoleLower).thenApply(inv -> {
@@ -188,12 +192,20 @@ public final class DefaultBankService implements BankService, Service {
             }
 
             String finalRoleLower = roleLower;
-            return repo.upsertMember(acc.getId(), inviteeUuid, inv.getInvitedByUuid(), finalRoleLower)
-                .thenCompose(member -> repo.deleteInvite(acc.getId(), inviteeUuid))
-                .thenApply(deleted -> {
-                  if (redisSync != null) redisSync.publishInvalidateAccount(acc.getId());
-                  return true;
-                });
+
+            // enforce "one bank membership only"
+            return repo.isMemberOfAnyOtherAccount(inviteeUuid, inviteeUuid).thenCompose(inOther -> {
+              if (Boolean.TRUE.equals(inOther)) {
+                return CompletableFuture.failedFuture(new IllegalStateException(ERR_INVITEE_ALREADY_MEMBER_SOMEWHERE));
+              }
+
+              return repo.upsertMember(acc.getId(), inviteeUuid, inv.getInvitedByUuid(), finalRoleLower)
+                  .thenCompose(member -> repo.deleteInvite(acc.getId(), inviteeUuid))
+                  .thenApply(deleted -> {
+                    if (redisSync != null) redisSync.publishInvalidateAccount(acc.getId());
+                    return true;
+                  });
+            });
           });
         })
     );
@@ -356,6 +368,30 @@ public final class DefaultBankService implements BankService, Service {
     );
   }
 
+  @Override
+  public CompletableFuture<Boolean> leave(String bankId, UUID ownerUuid, UUID memberUuid) {
+    String bankIdLower = normalizeId(bankId);
+    if (bankIdLower.isBlank()) return CompletableFuture.failedFuture(new IllegalArgumentException("bankId is blank"));
+    if (ownerUuid == null) return CompletableFuture.failedFuture(new IllegalArgumentException("ownerUuid is null"));
+    if (memberUuid == null) return CompletableFuture.failedFuture(new IllegalArgumentException("memberUuid is null"));
+
+    if (ownerUuid.equals(memberUuid)) {
+      return CompletableFuture.failedFuture(new IllegalStateException(ERR_OWNER_CANNOT_LEAVE));
+    }
+
+    return getOrCreateAccount(bankIdLower, ownerUuid).thenCompose(acc ->
+        repo.deleteMember(acc.getId(), memberUuid).thenCompose(deleted -> {
+          // if the player had an invite too, remove it
+          return repo.deleteInvite(acc.getId(), memberUuid).exceptionally(ignored -> false).thenApply(x -> deleted);
+        }).thenApply(deleted -> {
+          if (Boolean.TRUE.equals(deleted) && redisSync != null) {
+            redisSync.publishInvalidateAccount(acc.getId());
+          }
+          return Boolean.TRUE.equals(deleted);
+        })
+    );
+  }
+
   private CompletableFuture<BankDefinition.RoleDefinition> requireRole(BankDefinition def, UUID bankAccountId, UUID actorUuid) {
     BankDefinition.MemberSystem ms = def == null ? null : def.memberSystem();
     if (ms == null || ms.rolesByIdLower() == null) {
@@ -391,7 +427,20 @@ public final class DefaultBankService implements BankService, Service {
 
   private MantissaAmount resolveLevelMaxBalance(BankDefinition def, CurrencyDefinition currency, int level) {
     if (def == null) return null;
-    if (def.levels() == null || def.levels().isEmpty()) return null;
+
+    // Level 1 default cap (from "default-max-balance")
+    MantissaAmount defaultCap = null;
+    String rawDefault = def.defaultMaxBalanceRaw();
+    if (rawDefault != null) {
+      MantissaAmount parsed = parseLimit(currency, rawDefault);
+      BigDecimal human = parsed == null ? BigDecimal.valueOf(-1) : parsed.toHuman();
+      if (human.compareTo(BigDecimal.valueOf(-1)) != 0) {
+        defaultCap = parsed;
+      }
+    }
+
+    // No level-system configured => default cap applies (or unlimited if default is -1)
+    if (def.levels() == null || def.levels().isEmpty()) return defaultCap;
 
     BankDefinition.LevelDefinition best = null;
     for (BankDefinition.LevelDefinition l : def.levels()) {
@@ -401,14 +450,15 @@ public final class DefaultBankService implements BankService, Service {
       }
     }
 
-    if (best == null) return null;
+    // If no matching level entry, use default cap (Level 1 behavior)
+    if (best == null) return defaultCap;
 
     String raw = best.maxBalanceRaw();
     MantissaAmount parsed = parseLimit(currency, raw);
-    if (parsed == null) return null;
+    if (parsed == null) return defaultCap;
 
     BigDecimal human = parsed.toHuman();
-    if (human.compareTo(BigDecimal.valueOf(-1)) == 0) return null;
+    if (human.compareTo(BigDecimal.valueOf(-1)) == 0) return null; // explicit unlimited at that level
     return parsed;
   }
 

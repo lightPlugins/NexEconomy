@@ -14,6 +14,7 @@ general:
   reset-target: '<red>Your economy data has been reset.'
   sync-currencies: '<gray>Synchronizing currencies across servers...'
   sync-complete: '<gray>Synchronization of <yellow><amount> <gray>currencies complete.'
+
 migration:
   list: '<gray>Available migration importers: <yellow><importers><gray>.'
   no-vault-currency: '<red>Migration failed: no Vault currency configured (currency-type: vault).</red>'
@@ -33,6 +34,7 @@ migration:
     - '<dark_gray>● <gray>skipped: <yellow><skipped>'
     - '<dark_gray>● <gray>failed: <yellow><failed>'
     - '<dark_gray>● <gray>total imported (human): <yellow><total>'
+
 status:
   start: '<gray>Collecting economy status...'
   header:
@@ -47,6 +49,7 @@ status:
   footer:
     - '<gray> '
     - '<gray><strikethrough>------------------------------</strikethrough>'
+
 currency:
   balance: '<gray>You have <yellow><amount> <gray><currency>.'
   balance-other: '<gray>Player <yellow><target> <gray>has <yellow><amount> <gray><currency>.'
@@ -89,31 +92,65 @@ currency:
     pay-daily-limit-pay: '<red>You have reached your daily limit of <yellow><amount> <gray><currency>. <red>You cannot pay any more currency to players today!'
     pay-daily-limit-target: '<red>Target has reached their daily limit of <yellow><amount> <gray><currency>. <red>You cannot pay them any more currency today!'
     pay-daily-limit-reset: '<gray>Daily limit reset for <yellow><player>.'
+
 bank:
-  error: '<red>Bank error: <dark_red><error></dark_red></red>'
-  balance: '<gray>Bank <yellow><bank> <gray>(owner: <yellow><owner><gray>) balance: <yellow><amount> <gray><currency>.'
-  members: '<gray>Bank <yellow><bank> <gray>(owner: <yellow><owner><gray>) members: <yellow><members><gray>.'
+  # Fallback used only for unknown/internal errors
+  errors:
+    bank-not-available: '<red>This bank is not available.</red>'
+    member-system-disabled: '<red>The member system for this bank is disabled.</red>'
+    no-permission: '<red>You do not have permission to do that in this bank.</red>'
+    player-must-be-online: '<red>You must be online to perform this action.</red>'
+    insufficient-funds: '<red>You do not have enough money to deposit this amount.</red>'
+    max-balance-reached: '<red>This bank has reached its maximum balance for the current level.</red>'
+    bank-empty: '<red>This bank does not have enough funds.</red>'
+    withdraw-limit-reached: '<red>You have reached your withdraw limit for this bank.</red>'
+    not-a-member: '<red>You are not a member of this bank.</red>'
+    unknown-role: '<red>This bank role does not exist.</red>'
+    already-a-member: '<red>This player is already a member of this bank.</red>'
+    internal: '<red>Something went wrong with the bank system: <dark_red><error></dark_red></red>'
+
+  uuid:
+    invalid: '<red>That does not look like a valid UUID: <dark_red><value></dark_red></red>'
+
+  balance:
+    self: '<gray>Your balance in <yellow><bank></yellow> is <yellow><amount></yellow> <gray><currency></gray>.'
+    other: '<gray>The balance of <yellow><bank></yellow> <gray>(owner: <yellow><owner></yellow>) is <yellow><amount></yellow> <gray><currency></gray>.'
+
+  members:
+    self: '<gray>The members of <yellow><bank></yellow> are: <yellow><members></yellow>.'
+    other: '<gray>The members of <yellow><bank></yellow> <gray>(owner: <yellow><owner></yellow>) are: <yellow><members></yellow>.'
+
+  deposit:
+    self: '<gray>You deposited <yellow><amount></yellow> into <yellow><bank></yellow>.'
+    other: '<gray>You deposited <yellow><amount></yellow> into <yellow><bank></yellow> <gray>(owner: <yellow><owner></yellow>).</gray>'
+
+  withdraw:
+    self: '<gray>You withdrew <yellow><amount></yellow> from <yellow><bank></yellow>.'
+    other: '<gray>You withdrew <yellow><amount></yellow> from <yellow><bank></yellow> <gray>(owner: <yellow><owner></yellow>).</gray>'
+
   invite:
-    sent: '<gray>Invite sent: <yellow><player> <gray>to bank <yellow><bank> <gray>as <yellow><role><gray>.'
-    sent-other: '<gray>Invite sent: <yellow><player> <gray>to bank <yellow><bank> <gray>(owner: <yellow><owner><gray>) as <yellow><role><gray>.'
-    received: '<gray>You have been invited to bank <yellow><bank> <gray>by <yellow><owner> <gray>as <yellow><role><gray>. Use <yellow>/bank accept <bank> <owner><gray>.'
-    received-other: '<gray>You have been invited to bank <yellow><bank> <gray>(owner: <yellow><owner><gray>) by <yellow><inviter> <gray>as <yellow><role><gray>. Use <yellow>/bank accept <bank> <owner><gray>.'
+    sent: '<gray>You invited <yellow><player></yellow> to <yellow><bank></yellow> as <yellow><role></yellow>.'
+    sent-other: '<gray>You invited <yellow><player></yellow> to <yellow><bank></yellow> <gray>(owner: <yellow><owner></yellow>)</gray> as <yellow><role></yellow>.'
+    received: '<gray>You have been invited to <yellow><bank></yellow> by <yellow><owner></yellow> as <yellow><role></yellow>. <gray>To accept, use:</gray> <yellow>/bank accept <bank> <owner></yellow><gray>.</gray>'
+    received-other: '<gray>You have been invited to <yellow><bank></yellow> <gray>(owner: <yellow><owner></yellow>)</gray> by <yellow><inviter></yellow> as <yellow><role></yellow>. <gray>To accept, use:</gray> <yellow>/bank accept <bank> <owner></yellow><gray>.</gray>'
+    invitee-already-member: '<red><player></red> <gray>is already a member of another bank and cannot be invited again.</gray>'
+    you-already-member: '<red>You are already a member of another bank. Leave that bank first before joining a new one.</red>'
+
+  accept:
+    already-member: '<red>You cannot join this bank because you are already a member of another bank.</red> <gray>Please leave your current bank first and try again.</gray>'
+
+  leave:
+    success: '<gray>You have left <yellow><bank></yellow>.'
+    owner-cannot-leave: '<red>You cannot leave your own bank.</red>'
+
   other:
     accept:
-      none: '<red>No pending bank invite from <dark_red><owner><red>.'
-      success: '<gray>Accepted bank invite from <yellow><owner><gray>.'
+      none: '<red>You do not have any pending bank invites from <dark_red><owner></dark_red></red><red>.</red>'
+      success: '<gray>You accepted the bank invite from <yellow><owner></yellow>.</gray>'
     deny:
-      none: '<red>No pending bank invite from <dark_red><owner><red>.'
-      success: '<gray>Denied bank invite from <yellow><owner><gray>.'
+      none: '<red>You do not have any pending bank invites from <dark_red><owner></dark_red></red><red>.</red>'
+      success: '<gray>You declined the bank invite from <yellow><owner></yellow>.</gray>'
     invites:
-      empty: '<gray>You have no pending bank invites.'
-      header: '<gray>Pending bank invites: <yellow><amount><gray>.'
-      row: '<dark_gray>● <gray>bank=<yellow><bank> <gray>owner=<yellow><owner> <dark_gray>(<yellow><ownerUuid><dark_gray>) <gray>role=<yellow><role> <gray>invitedBy=<yellow><invitedBy>'
-  accept:
-    none: '<red>No pending invite for bank <dark_red><bank> <red>from <dark_red><owner><red>.'
-    success: '<gray>You joined bank <yellow><bank> <gray>(owner: <yellow><owner><gray>).'
-    owner-notify: '<yellow><player> <gray>accepted your bank invite for <yellow><bank><gray>.'
-  deposit:
-    success: '<gray>Deposited <yellow><amount> <gray>into bank <yellow><bank> <gray>(owner: <yellow><owner><gray>).'
-    withdraw:
-      success: '<gray>Withdrew <yellow><amount> <gray>from bank <yellow><bank> <gray>(owner: <yellow><owner><gray>).'
+      empty: '<gray>You currently have no pending bank invites.</gray>'
+      header: '<gray>You have <yellow><amount></yellow> pending bank invite(s):</gray>'
+      row: '<dark_gray>● <gray>Bank:</gray> <yellow><bank></yellow> <dark_gray>|</dark_gray> <gray>Owner:</gray> <yellow><owner></yellow> <dark_gray>(</dark_gray><yellow><owner-uuid></yellow><dark_gray>)</dark_gray> <dark_gray>|</dark_gray> <gray>Role:</gray> <yellow><role></yellow> <dark_gray>|</dark_gray> <gray>Invited by:</gray> <yellow><invited-by></yellow>'

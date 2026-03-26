@@ -81,6 +81,8 @@ public final class DefaultBankRegistryService implements BankRegistryService {
     String currency = normalizeId(yml.getString("currency", "vault"));
     boolean unlocked = yml.getBoolean("unlocked-by-default", true);
 
+    String defaultMaxBalanceRaw = yml.getString("default-max-balance", "-1");
+
     BankDefinition.MemberSystem memberSystem = parseMemberSystem(yml.getConfigurationSection("member-system"));
     BankDefinition.InterestSystem interestSystem = parseInterestSystem(yml.getConfigurationSection("interest-system"));
 
@@ -93,6 +95,7 @@ public final class DefaultBankRegistryService implements BankRegistryService {
         enabled,
         currency,
         unlocked,
+        defaultMaxBalanceRaw,
         memberSystem,
         interestSystem,
         levels

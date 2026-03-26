@@ -11,6 +11,9 @@ currency: "vault"
 # If true, every player has access to this bank without needing to unlock it first.
 unlocked-by-default: true
 
+# Default maximum balance for this bank. (level 1)
+default-max-balance: '1k'
+
 member-system:
   # Enables the shared bank member system (roles, permissions, limits).
   enabled: true

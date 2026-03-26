@@ -7,6 +7,7 @@ import io.nexstudios.commandservice.service.commands.annotations.Suggest;
 import io.nexstudios.commandservice.service.commands.source.NexPaperCommandSource;
 import io.nexstudios.languageservice.service.component.ComponentService;
 import io.nexstudios.nexeconomy.command.suggestions.AmountSuggestion;
+import io.nexstudios.nexeconomy.command.suggestions.BankRoleSuggestion;
 import io.nexstudios.nexeconomy.command.suggestions.BankSuggestion;
 import io.nexstudios.nexeconomy.command.suggestions.PlayerSuggestion;
 import io.nexstudios.nexeconomy.definition.AmountNotation;
@@ -207,12 +208,12 @@ public final class EconomyBankCommand implements Service {
     return 1;
   }
 
-  @Command(value = "invite <bank> <player> [role]", permission = "nexeconomy.bank.invite")
+  @Command(value = "invite <bank> <player> <role>", permission = "nexeconomy.bank.invite")
   public int inviteSelf(
       NexPaperCommandSource source,
       @Arg("bank") @Suggest(BankSuggestion.class) String bank,
       @Arg("player") @Suggest(PlayerSuggestion.class) Player player,
-      @Arg("role") String role
+      @Arg("role") @Suggest(BankRoleSuggestion.class) String role
   ) {
     Player sender = (Player) source.sender();
     if (sender == null) return 0;
@@ -252,6 +253,12 @@ public final class EconomyBankCommand implements Service {
           ))
           .build());
     }).exceptionally(ex -> {
+      if (isMarker(ex, "invitee_already_in_another_bank")) {
+        sender.sendMessage(components.builder(sender, "bank.invite.invitee-already-member", "NotDefined", true)
+            .resolver(TagResolver.resolver(Placeholder.parsed("player", player.getName())))
+            .build());
+        return null;
+      }
       sendBankError(sender, ex);
       return null;
     });
@@ -261,19 +268,19 @@ public final class EconomyBankCommand implements Service {
 
   // --- other (member) commands ---
 
-  @Command(value = "other balance <bank> <ownerUuid>", permission = "nexeconomy.bank.other.balance")
+  @Command(value = "other balance <bank> <owner>", permission = "nexeconomy.bank.other.balance")
   public int balanceOther(
       NexPaperCommandSource source,
       @Arg("bank") @Suggest(BankSuggestion.class) String bank,
-      @Arg("ownerUuid") String ownerUuidRaw
+      @Arg("owner") String ownerName
   ) {
     Player sender = (Player) source.sender();
     if (sender == null) return 0;
 
-    UUID ownerUuid = parseUuid(ownerUuidRaw);
+    UUID ownerUuid = resolvePlayerUuidByName(ownerName);
     if (ownerUuid == null) {
-      sender.sendMessage(components.builder(sender, "bank.uuid.invalid", "NotDefined", true)
-          .resolver(TagResolver.resolver(Placeholder.parsed("value", ownerUuidRaw == null ? "" : ownerUuidRaw)))
+      sender.sendMessage(components.builder(sender, "general.player-not-found", "NotDefined", true)
+          .resolver(TagResolver.resolver(Placeholder.parsed("player", ownerName == null ? "unknown" : ownerName)))
           .build());
       return 0;
     }
@@ -302,19 +309,19 @@ public final class EconomyBankCommand implements Service {
     return 1;
   }
 
-  @Command(value = "other members <bank> <ownerUuid>", permission = "nexeconomy.bank.other.members")
+  @Command(value = "other members <bank> <owner>", permission = "nexeconomy.bank.other.members")
   public int membersOther(
       NexPaperCommandSource source,
       @Arg("bank") @Suggest(BankSuggestion.class) String bank,
-      @Arg("ownerUuid") String ownerUuidRaw
+      @Arg("owner") String ownerName
   ) {
     Player sender = (Player) source.sender();
     if (sender == null) return 0;
 
-    UUID ownerUuid = parseUuid(ownerUuidRaw);
+    UUID ownerUuid = resolvePlayerUuidByName(ownerName);
     if (ownerUuid == null) {
-      sender.sendMessage(components.builder(sender, "bank.uuid.invalid", "NotDefined", true)
-          .resolver(TagResolver.resolver(Placeholder.parsed("value", ownerUuidRaw == null ? "" : ownerUuidRaw)))
+      sender.sendMessage(components.builder(sender, "general.player-not-found", "NotDefined", true)
+          .resolver(TagResolver.resolver(Placeholder.parsed("player", ownerName == null ? "unknown" : ownerName)))
           .build());
       return 0;
     }
@@ -348,20 +355,20 @@ public final class EconomyBankCommand implements Service {
     return 1;
   }
 
-  @Command(value = "other deposit <bank> <ownerUuid> <amount>", permission = "nexeconomy.bank.other.deposit")
+  @Command(value = "other deposit <bank> <owner> <amount>", permission = "nexeconomy.bank.other.deposit")
   public int depositOther(
       NexPaperCommandSource source,
       @Arg("bank") @Suggest(BankSuggestion.class) String bank,
-      @Arg("ownerUuid") String ownerUuidRaw,
+      @Arg("owner") String ownerName,
       @Arg("amount") @Suggest(AmountSuggestion.class) String amountRaw
   ) {
     Player sender = (Player) source.sender();
     if (sender == null) return 0;
 
-    UUID ownerUuid = parseUuid(ownerUuidRaw);
+    UUID ownerUuid = resolvePlayerUuidByName(ownerName);
     if (ownerUuid == null) {
-      sender.sendMessage(components.builder(sender, "bank.uuid.invalid", "NotDefined", true)
-          .resolver(TagResolver.resolver(Placeholder.parsed("value", ownerUuidRaw == null ? "" : ownerUuidRaw)))
+      sender.sendMessage(components.builder(sender, "general.player-not-found", "NotDefined", true)
+          .resolver(TagResolver.resolver(Placeholder.parsed("player", ownerName == null ? "unknown" : ownerName)))
           .build());
       return 0;
     }
@@ -397,20 +404,20 @@ public final class EconomyBankCommand implements Service {
     return 1;
   }
 
-  @Command(value = "other withdraw <bank> <ownerUuid> <amount>", permission = "nexeconomy.bank.other.withdraw")
+  @Command(value = "other withdraw <bank> <owner> <amount>", permission = "nexeconomy.bank.other.withdraw")
   public int withdrawOther(
       NexPaperCommandSource source,
       @Arg("bank") @Suggest(BankSuggestion.class) String bank,
-      @Arg("ownerUuid") String ownerUuidRaw,
+      @Arg("owner") String ownerName,
       @Arg("amount") @Suggest(AmountSuggestion.class) String amountRaw
   ) {
     Player sender = (Player) source.sender();
     if (sender == null) return 0;
 
-    UUID ownerUuid = parseUuid(ownerUuidRaw);
+    UUID ownerUuid = resolvePlayerUuidByName(ownerName);
     if (ownerUuid == null) {
-      sender.sendMessage(components.builder(sender, "bank.uuid.invalid", "NotDefined", true)
-          .resolver(TagResolver.resolver(Placeholder.parsed("value", ownerUuidRaw == null ? "" : ownerUuidRaw)))
+      sender.sendMessage(components.builder(sender, "general.player-not-found", "NotDefined", true)
+          .resolver(TagResolver.resolver(Placeholder.parsed("player", ownerName == null ? "unknown" : ownerName)))
           .build());
       return 0;
     }
@@ -446,21 +453,21 @@ public final class EconomyBankCommand implements Service {
     return 1;
   }
 
-  @Command(value = "other invite <bank> <ownerUuid> <player> [role]", permission = "nexeconomy.bank.other.invite")
+  @Command(value = "other invite <bank> <owner> <player> [role]", permission = "nexeconomy.bank.other.invite")
   public int inviteOther(
       NexPaperCommandSource source,
       @Arg("bank") @Suggest(BankSuggestion.class) String bank,
-      @Arg("ownerUuid") String ownerUuidRaw,
+      @Arg("owner") String ownerName,
       @Arg("player") @Suggest(PlayerSuggestion.class) Player player,
-      @Arg("role") String role
+      @Arg("role") @Suggest(BankRoleSuggestion.class) String role
   ) {
     Player sender = (Player) source.sender();
     if (sender == null) return 0;
 
-    UUID ownerUuid = parseUuid(ownerUuidRaw);
+    UUID ownerUuid = resolvePlayerUuidByName(ownerName);
     if (ownerUuid == null) {
-      sender.sendMessage(components.builder(sender, "bank.uuid.invalid", "NotDefined", true)
-          .resolver(TagResolver.resolver(Placeholder.parsed("value", ownerUuidRaw == null ? "" : ownerUuidRaw)))
+      sender.sendMessage(components.builder(sender, "general.player-not-found", "NotDefined", true)
+          .resolver(TagResolver.resolver(Placeholder.parsed("player", ownerName == null ? "unknown" : ownerName)))
           .build());
       return 0;
     }
@@ -498,6 +505,12 @@ public final class EconomyBankCommand implements Service {
           ))
           .build());
     }).exceptionally(ex -> {
+      if (isMarker(ex, "invitee_already_in_another_bank")) {
+        sender.sendMessage(components.builder(sender, "bank.invite.invitee-already-member", "NotDefined", true)
+            .resolver(TagResolver.resolver(Placeholder.parsed("player", player.getName())))
+            .build());
+        return null;
+      }
       sendBankError(sender, ex);
       return null;
     });
@@ -529,9 +542,9 @@ public final class EconomyBankCommand implements Service {
             .resolver(TagResolver.resolver(
                 Placeholder.parsed("bank", row.bankIdLower() == null ? "" : row.bankIdLower()),
                 Placeholder.parsed("owner", ownerName),
-                Placeholder.parsed("ownerUuid", row.ownerUuid() == null ? "" : row.ownerUuid().toString()),
+                Placeholder.parsed("owner-uuid", row.ownerUuid() == null ? "" : row.ownerUuid().toString()),
                 Placeholder.parsed("role", row.roleIdLower() == null ? "" : row.roleIdLower()),
-                Placeholder.parsed("invitedBy", invitedByName)
+                Placeholder.parsed("invited-by", invitedByName)
             ))
             .build());
       }
@@ -543,18 +556,70 @@ public final class EconomyBankCommand implements Service {
     return 1;
   }
 
-  @Command(value = "other accept <ownerUuid>", permission = "nexeconomy.bank.other.accept")
-  public int acceptOther(
+  @Command(value = "leave <bank> <owner>", permission = "nexeconomy.bank.leave")
+  public int leave(
       NexPaperCommandSource source,
-      @Arg("ownerUuid") String ownerUuidRaw
+      @Arg("bank") @Suggest(BankSuggestion.class) String bank,
+      @Arg("owner") String ownerName
   ) {
     Player sender = (Player) source.sender();
     if (sender == null) return 0;
 
-    UUID ownerUuid = parseUuid(ownerUuidRaw);
+    String bankId = normalize(bank);
+    if (bankId.isBlank()) return 0;
+
+    UUID ownerUuid = resolvePlayerUuidByName(ownerName);
     if (ownerUuid == null) {
-      sender.sendMessage(components.builder(sender, "bank.uuid.invalid", "NotDefined", true)
-          .resolver(TagResolver.resolver(Placeholder.parsed("value", ownerUuidRaw == null ? "" : ownerUuidRaw)))
+      sender.sendMessage(components.builder(sender, "general.player-not-found", "NotDefined", true)
+          .resolver(TagResolver.resolver(Placeholder.parsed("player", ownerName == null ? "unknown" : ownerName)))
+          .build());
+      return 0;
+    }
+
+    bankService.leave(bankId, ownerUuid, sender.getUniqueId()).thenAccept(left -> {
+      if (!Boolean.TRUE.equals(left)) {
+        sender.sendMessage(components.builder(sender, "bank.leave.not-a-member", "NotDefined", true)
+            .resolver(TagResolver.resolver(
+                Placeholder.parsed("bank", bankId),
+                Placeholder.parsed("owner", nameOrUuid(ownerUuid))
+            ))
+            .build());
+        return;
+      }
+
+      sender.sendMessage(components.builder(sender, "bank.leave.success", "NotDefined", true)
+          .resolver(TagResolver.resolver(
+              Placeholder.parsed("bank", bankId),
+              Placeholder.parsed("owner", nameOrUuid(ownerUuid))
+          ))
+          .build());
+    }).exceptionally(ex -> {
+      if (isMarker(ex, "owner_cannot_leave")) {
+        sender.sendMessage(components.builder(sender, "bank.leave.owner-cannot-leave", "NotDefined", true)
+            .resolver(TagResolver.resolver(Placeholder.parsed("bank", bankId)))
+            .build());
+        return null;
+      }
+
+      sendBankError(sender, ex);
+      return null;
+    });
+
+    return 1;
+  }
+
+  @Command(value = "other accept <owner>", permission = "nexeconomy.bank.other.accept")
+  public int acceptOther(
+      NexPaperCommandSource source,
+      @Arg("owner") String ownerName
+  ) {
+    Player sender = (Player) source.sender();
+    if (sender == null) return 0;
+
+    UUID ownerUuid = resolvePlayerUuidByName(ownerName);
+    if (ownerUuid == null) {
+      sender.sendMessage(components.builder(sender, "general.player-not-found", "NotDefined", true)
+          .resolver(TagResolver.resolver(Placeholder.parsed("player", ownerName == null ? "unknown" : ownerName)))
           .build());
       return 0;
     }
@@ -573,6 +638,10 @@ public final class EconomyBankCommand implements Service {
           .resolver(TagResolver.resolver(Placeholder.parsed("owner", ownerShown)))
           .build());
     }).exceptionally(ex -> {
+      if (isMarker(ex, "invitee_already_member_somewhere")) {
+        sender.sendMessage(components.builder(sender, "bank.accept.already-member", "NotDefined", true).build());
+        return null;
+      }
       sendBankError(sender, ex);
       return null;
     });
@@ -580,18 +649,18 @@ public final class EconomyBankCommand implements Service {
     return 1;
   }
 
-  @Command(value = "other deny <ownerUuid>", permission = "nexeconomy.bank.other.deny")
+  @Command(value = "other deny <owner>", permission = "nexeconomy.bank.other.deny")
   public int denyOther(
       NexPaperCommandSource source,
-      @Arg("ownerUuid") String ownerUuidRaw
+      @Arg("owner") String ownerName
   ) {
     Player sender = (Player) source.sender();
     if (sender == null) return 0;
 
-    UUID ownerUuid = parseUuid(ownerUuidRaw);
+    UUID ownerUuid = resolvePlayerUuidByName(ownerName);
     if (ownerUuid == null) {
-      sender.sendMessage(components.builder(sender, "bank.uuid.invalid", "NotDefined", true)
-          .resolver(TagResolver.resolver(Placeholder.parsed("value", ownerUuidRaw == null ? "" : ownerUuidRaw)))
+      sender.sendMessage(components.builder(sender, "general.player-not-found", "NotDefined", true)
+          .resolver(TagResolver.resolver(Placeholder.parsed("player", ownerName == null ? "unknown" : ownerName)))
           .build());
       return 0;
     }
@@ -615,6 +684,36 @@ public final class EconomyBankCommand implements Service {
     });
 
     return 1;
+  }
+
+  // --- helpers ---
+
+  private static UUID resolvePlayerUuidByName(String name) {
+    if (name == null) return null;
+    String n = name.trim();
+    if (n.isBlank()) return null;
+
+    // Prefer cached lookups if available (doesn't create fake/offline profiles).
+    OfflinePlayer cached = Bukkit.getOfflinePlayerIfCached(n);
+    if (cached != null) {
+      return cached.getUniqueId();
+    }
+
+    // Fallback: may still resolve on servers that know the player.
+    OfflinePlayer off = Bukkit.getOfflinePlayer(n);
+    return off.getUniqueId();
+  }
+
+  private static boolean isMarker(Throwable ex, String marker) {
+    if (marker == null || marker.isBlank()) return false;
+
+    Throwable t = ex;
+    for (int i = 0; i < 6 && t != null; i++) {
+      String msg = t.getMessage();
+      if (msg != null && msg.equalsIgnoreCase(marker)) return true;
+      t = t.getCause();
+    }
+    return false;
   }
 
   // --- helpers ---
@@ -656,11 +755,75 @@ public final class EconomyBankCommand implements Service {
 
   private void sendBankError(Player player, Throwable ex) {
     if (player == null) return;
-    String msg = ex == null
-        ? "Unknown"
-        : (ex.getMessage() == null || ex.getMessage().isBlank() ? ex.getClass().getSimpleName() : ex.getMessage());
 
-    player.sendMessage(components.builder(player, "bank.error", "NotDefined", true)
+    Throwable root = ex;
+    for (int i = 0; i < 6 && root != null && root.getCause() != null; i++) {
+      root = root.getCause();
+    }
+
+    if (isMarker(root, "bank not available")) {
+      player.sendMessage(components.builder(player, "bank.errors.bank-not-available", "NotDefined", true).build());
+      return;
+    }
+
+    if (isMarker(root, "member system disabled")) {
+      player.sendMessage(components.builder(player, "bank.errors.member-system-disabled", "NotDefined", true).build());
+      return;
+    }
+
+    if (isMarker(root, "no permission")) {
+      player.sendMessage(components.builder(player, "bank.errors.no-permission", "NotDefined", true).build());
+      return;
+    }
+
+    if (isMarker(root, "player must be online")) {
+      player.sendMessage(components.builder(player, "bank.errors.player-must-be-online", "NotDefined", true).build());
+      return;
+    }
+
+    if (isMarker(root, "insufficient funds")) {
+      player.sendMessage(components.builder(player, "bank.errors.insufficient-funds", "NotDefined", true).build());
+      return;
+    }
+
+    if (isMarker(root, "max balance reached")) {
+      player.sendMessage(components.builder(player, "bank.errors.max-balance-reached", "NotDefined", true).build());
+      return;
+    }
+
+    if (isMarker(root, "bank empty")) {
+      player.sendMessage(components.builder(player, "bank.errors.bank-empty", "NotDefined", true).build());
+      return;
+    }
+
+    if (isMarker(root, "limit reached")) {
+      player.sendMessage(components.builder(player, "bank.errors.withdraw-limit-reached", "NotDefined", true).build());
+      return;
+    }
+
+    if (isMarker(root, "not a member")) {
+      player.sendMessage(components.builder(player, "bank.errors.not-a-member", "NotDefined", true).build());
+      return;
+    }
+
+    if (isMarker(root, "unknown role")) {
+      player.sendMessage(components.builder(player, "bank.errors.unknown-role", "NotDefined", true).build());
+      return;
+    }
+
+    if (isMarker(root, "already a member")) {
+      player.sendMessage(components.builder(player, "bank.errors.already-a-member", "NotDefined", true).build());
+      return;
+    }
+
+    // Fallback (nur wenn wirklich unerwartet)
+    String msg = root == null
+        ? "Unknown"
+        : (root.getMessage() == null || root.getMessage().isBlank() ? root.getClass().getSimpleName() : root.getMessage());
+
+    ex.printStackTrace();
+
+    player.sendMessage(components.builder(player, "bank.errors.internal", "NotDefined", true)
         .resolver(TagResolver.resolver(Placeholder.parsed("error", msg)))
         .build());
   }
