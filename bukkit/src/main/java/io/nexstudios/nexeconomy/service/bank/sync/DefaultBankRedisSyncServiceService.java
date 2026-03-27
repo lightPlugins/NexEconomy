@@ -6,6 +6,7 @@ import io.nexstudios.databaseservice.bukkit.service.api.pubsub.PubSubSubscriptio
 import io.nexstudios.databaseservice.bukkit.service.api.pubsub.RedisPubSubService;
 import io.nexstudios.framework.paper.services.plugin.PaperPluginService;
 import io.nexstudios.nexeconomy.NexEconomyPlugin;
+import io.nexstudios.nexeconomy.service.bank.cache.BankAccountCacheService;
 import io.nexstudios.nexlogic.common.services.logging.LoggerService;
 import io.nexstudios.serviceregistry.di.Dependencies;
 import io.nexstudios.serviceregistry.di.ServiceAccessor;
