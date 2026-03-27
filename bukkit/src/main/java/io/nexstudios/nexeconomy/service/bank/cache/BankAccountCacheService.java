@@ -11,11 +11,14 @@ import io.nexstudios.serviceregistry.di.Service;
 import io.nexstudios.serviceregistry.di.ServiceAccessor;
 
 import java.nio.file.Path;
+import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.List;
 import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicLong;
 
 @Dependencies({
     BankRepositoryService.class,
@@ -31,9 +34,10 @@ public final class BankAccountCacheService implements Service {
       List<BankMemberEntity> members
   ) {}
 
-  private record Entry(View view, long loadedAtMs, AtomicBoolean refreshing) {
+  private record Entry(View view, long loadedAtMs, AtomicBoolean refreshing, AtomicLong lastAccessMs) {
     static Entry of(View view) {
-      return new Entry(view, System.currentTimeMillis(), new AtomicBoolean(false));
+      long now = System.currentTimeMillis();
+      return new Entry(view, now, new AtomicBoolean(false), new AtomicLong(now));
     }
   }
 
@@ -41,15 +45,27 @@ public final class BankAccountCacheService implements Service {
   private static final int MIN_TTL_SECONDS = 0;
   private static final int MAX_TTL_SECONDS = 300;
 
+  private static final int DEFAULT_MAX_ENTRIES = 10_000;
+  private static final int MIN_MAX_ENTRIES = 0;
+  private static final int MAX_MAX_ENTRIES = 250_000;
+
+  private static final int DEFAULT_CLEANUP_BATCH = 512;
+  private static final int MIN_CLEANUP_BATCH = 64;
+  private static final int MAX_CLEANUP_BATCH = 10_000;
+
   private final BankRepositoryService repo;
   private final FileConfiguration settings;
 
   private volatile long ttlMs = DEFAULT_TTL_SECONDS * 1000L;
+  private volatile int maxEntries = DEFAULT_MAX_ENTRIES;
+  private volatile int cleanupBatch = DEFAULT_CLEANUP_BATCH;
 
   private final ConcurrentHashMap<Key, Entry> byKey = new ConcurrentHashMap<>();
   private final ConcurrentHashMap<UUID, Entry> byAccountId = new ConcurrentHashMap<>();
 
   private final ConcurrentHashMap<Key, CompletableFuture<View>> inFlight = new ConcurrentHashMap<>();
+
+  private final AtomicBoolean cleanupRunning = new AtomicBoolean(false);
 
   public BankAccountCacheService(ServiceAccessor accessor) {
     this.repo = accessor.getService(BankRepositoryService.class);
@@ -67,6 +83,19 @@ public final class BankAccountCacheService implements Service {
 
     seconds = clamp(seconds);
     this.ttlMs = seconds <= 0 ? 0L : seconds * 1000L;
+
+    int max = settings == null
+        ? DEFAULT_MAX_ENTRIES
+        : settings.getInt("bank-cache.max-entries", DEFAULT_MAX_ENTRIES);
+    this.maxEntries = clampMaxEntries(max);
+
+    int batch = settings == null
+        ? DEFAULT_CLEANUP_BATCH
+        : settings.getInt("bank-cache.cleanup-batch", DEFAULT_CLEANUP_BATCH);
+    this.cleanupBatch = clampCleanupBatch(batch);
+
+    // If maxEntries got lowered, ensure we start shrinking soon.
+    maybeCleanupAsync();
   }
 
   public View get(String bankIdLower, UUID ownerUuid) {
@@ -76,11 +105,14 @@ public final class BankAccountCacheService implements Service {
     Entry e = byKey.get(key);
     if (e == null) return null;
 
+    touch(e);
+
     // refresh in background if expired (serve stale)
     if (isExpired(e) && e.refreshing().compareAndSet(false, true)) {
       refreshAsync(key, ownerUuid);
     }
 
+    maybeCleanupAsync();
     return e.view();
   }
 
@@ -89,6 +121,8 @@ public final class BankAccountCacheService implements Service {
 
     Entry e = byAccountId.get(bankAccountId);
     if (e == null) return null;
+
+    touch(e);
 
     // refresh in background if expired (serve stale)
     View v = e.view();
@@ -99,6 +133,7 @@ public final class BankAccountCacheService implements Service {
       }
     }
 
+    maybeCleanupAsync();
     return v;
   }
 
@@ -138,9 +173,13 @@ public final class BankAccountCacheService implements Service {
 
     Entry existing = byKey.get(key);
     if (existing != null) {
+      touch(existing);
+
       if (isExpired(existing) && existing.refreshing().compareAndSet(false, true)) {
         refreshAsync(key, ownerUuid);
       }
+
+      maybeCleanupAsync();
       return CompletableFuture.completedFuture(existing.view());
     }
 
@@ -163,10 +202,10 @@ public final class BankAccountCacheService implements Service {
         return CompletableFuture.failedFuture(new IllegalStateException("bank account not available"));
       }
 
-      // Ensure owner is always a member (same behavior as DefaultBankService.getOrCreateAccount)
       UUID realOwner = acc.getOwnerUuid();
       if (realOwner != null) {
-        return repo.upsertMember(acc.getId(), realOwner, realOwner, "owner").thenCompose(ignored -> loadBalanceAndMembers(acc));
+        return repo.upsertMember(acc.getId(), realOwner, realOwner, "owner")
+            .thenCompose(ignored -> loadBalanceAndMembers(acc));
       }
 
       return loadBalanceAndMembers(acc);
@@ -190,7 +229,6 @@ public final class BankAccountCacheService implements Service {
   }
 
   private void refreshAsync(Key key, UUID ownerUuid) {
-    // Single-flight through inFlight (re-uses same mechanism)
     inFlight.computeIfAbsent(key, ignored ->
         loadFresh(key.bankIdLower(), ownerUuid).thenApply(view -> {
           put(key, view);
@@ -212,6 +250,75 @@ public final class BankAccountCacheService implements Service {
     Entry entry = Entry.of(view);
     byKey.put(key, entry);
     byAccountId.put(view.account().getId(), entry);
+
+    maybeCleanupAsync();
+  }
+
+  private void maybeCleanupAsync() {
+    int max = this.maxEntries;
+    if (max <= 0) return; // disabled
+    if (byKey.size() <= max) return;
+
+    if (!cleanupRunning.compareAndSet(false, true)) return;
+
+    // Run on same async chain as callers (DB layer is async anyway); cleanup is CPU-only + limited batch.
+    CompletableFuture.runAsync(() -> {
+      try {
+        cleanupNow();
+      } finally {
+        cleanupRunning.set(false);
+      }
+    });
+  }
+
+  private void cleanupNow() {
+    int max = this.maxEntries;
+    if (max <= 0) return;
+
+    int size = byKey.size();
+    int over = size - max;
+    if (over <= 0) return;
+
+    int batch = Math.min(this.cleanupBatch, size);
+    if (batch <= 0) return;
+
+    // Sample up to "batch" entries (iteration over CHM is weakly consistent).
+    ArrayList<java.util.Map.Entry<Key, Entry>> sample = new ArrayList<>(batch);
+    int taken = 0;
+    for (var e : byKey.entrySet()) {
+      sample.add(e);
+      taken++;
+      if (taken >= batch) break;
+    }
+
+    // Sort by lastAccess (oldest first)
+    sample.sort(Comparator.comparingLong(a -> a.getValue() == null ? 0L : a.getValue().lastAccessMs().get()));
+
+    // Remove enough oldest to go below limit (up to sample size)
+    int toRemove = Math.min(over, sample.size());
+    for (int i = 0; i < toRemove; i++) {
+      var ent = sample.get(i);
+      Key key = ent.getKey();
+      Entry entry = ent.getValue();
+      if (key == null || entry == null) continue;
+
+      // remove only if same instance (avoid racing with refresh/replace)
+      boolean removed = byKey.remove(key, entry);
+      if (!removed) continue;
+
+      View v = entry.view();
+      UUID accountId = v == null || v.account() == null ? null : v.account().getId();
+      if (accountId != null) {
+        byAccountId.remove(accountId, entry);
+      }
+
+      inFlight.remove(key);
+    }
+  }
+
+  private static void touch(Entry e) {
+    if (e == null) return;
+    e.lastAccessMs().set(System.currentTimeMillis());
   }
 
   private boolean isExpired(Entry e) {
@@ -224,6 +331,16 @@ public final class BankAccountCacheService implements Service {
   private static int clamp(int value) {
     if (value < MIN_TTL_SECONDS) return MIN_TTL_SECONDS;
     return Math.min(value, MAX_TTL_SECONDS);
+  }
+
+  private static int clampMaxEntries(int value) {
+    if (value < MIN_MAX_ENTRIES) return MIN_MAX_ENTRIES;
+    return Math.min(value, MAX_MAX_ENTRIES);
+  }
+
+  private static int clampCleanupBatch(int value) {
+    if (value < MIN_CLEANUP_BATCH) return MIN_CLEANUP_BATCH;
+    return Math.min(value, MAX_CLEANUP_BATCH);
   }
 
   private static String normalize(String s) {
