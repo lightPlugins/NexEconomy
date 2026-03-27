@@ -49,14 +49,12 @@ public final class VaultUnlockedEconomyProvider implements Economy, Service {
       LoggerService logger,
       CurrencyRegistryService currencies,
       EconomyPlayerCacheService cache,
-      EconomyFlushService flush,
       EconomyRepository repo,
       EconomyService economy
   ) {
     this.logger = logger;
     this.currencies = currencies;
     this.cache = cache;
-    this.flush = flush;
     this.repo = repo;
     this.economy = economy;
   }

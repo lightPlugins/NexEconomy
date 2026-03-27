@@ -76,7 +76,7 @@ public final class VaultEconomyBridgeService implements Service {
     VaultEconomyProvider provider = new VaultEconomyProvider(logger, currencies, cache, flush, repo, economy);
     Bukkit.getServicesManager().register(net.milkbowl.vault.economy.Economy.class, provider, plugin, ServicePriority.Highest);
 
-    VaultUnlockedEconomyProvider providerUnlocked = new VaultUnlockedEconomyProvider(logger, currencies, cache, flush, repo, economy);
+    VaultUnlockedEconomyProvider providerUnlocked = new VaultUnlockedEconomyProvider(logger, currencies, cache, repo, economy);
     Bukkit.getServicesManager().register(net.milkbowl.vault2.economy.Economy.class, providerUnlocked, plugin, ServicePriority.Highest);
 
     logger.logger().info("Registered Vault/VaultUnlocked Economy provider (currency=" + vaultCurrencyId + ", priority=Highest) successfully.");
