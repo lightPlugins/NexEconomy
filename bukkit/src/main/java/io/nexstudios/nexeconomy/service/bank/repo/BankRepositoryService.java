@@ -62,4 +62,8 @@ public interface BankRepositoryService extends Service {
       MantissaAmount amount,
       String meta
   );
+
+  CompletableFuture<List<UUID>> findOwnerUuidsForMember(UUID memberUuid);
+
+  CompletableFuture<List<UUID>> findOwnerUuidsForMember(String bankIdLower, UUID memberUuid);
 }

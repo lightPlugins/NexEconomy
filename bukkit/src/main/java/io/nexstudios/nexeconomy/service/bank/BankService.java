@@ -41,4 +41,8 @@ public interface BankService extends Service {
 
   void ensureMissingUnlockedBanksForAllOnline();
 
+  CompletableFuture<MantissaAmount> balanceVisibleTo(String bankId, UUID ownerUuid, UUID viewerUuid);
+
+  CompletableFuture<List<BankMemberEntity>> membersVisibleTo(String bankId, UUID ownerUuid, UUID viewerUuid);
+
 }

@@ -24,7 +24,8 @@ import java.util.UUID;
  */
 @Dependencies({
     LoggerService.class,
-    PaperPluginService.class
+    PaperPluginService.class,
+    BankAccountCacheService.class
 })
 public final class DefaultBankRedisSyncServiceService implements BankRedisSyncService, AutoCloseable {
 
@@ -34,6 +35,8 @@ public final class DefaultBankRedisSyncServiceService implements BankRedisSyncSe
   private final LoggerService logger;
   private final Plugin plugin;
 
+  private final BankAccountCacheService cache;
+
   private final Optional<RedisPubSubService> pubSubOpt;
 
   private PubSubSubscription subscription;
@@ -41,6 +44,8 @@ public final class DefaultBankRedisSyncServiceService implements BankRedisSyncSe
   public DefaultBankRedisSyncServiceService(ServiceAccessor accessor) {
     this.logger = accessor.getService(LoggerService.class);
     this.plugin = accessor.getService(PaperPluginService.class).plugin();
+
+    this.cache = accessor.getService(BankAccountCacheService.class);
 
     this.pubSubOpt = NexEconomyPlugin.getNexLogicService()
         .findService(RedisPubSubService.class);
@@ -98,10 +103,15 @@ public final class DefaultBankRedisSyncServiceService implements BankRedisSyncSe
 
     if (!IDENTIFIER_INVALIDATE_ACCOUNT.equals(msg.identifier())) return;
 
-    // Next step: wire this into a local bank cache (invalidate(accountId)).
-    // For now we just accept the message to validate the protocol.
     msg.stringValue("bankAccountId").ifPresent(id -> {
-      // no-op (cache will be added next)
+      try {
+        java.util.UUID accountId = java.util.UUID.fromString(id);
+        if (cache != null) {
+          cache.invalidate(accountId);
+        }
+      } catch (IllegalArgumentException ignored) {
+        // ignore invalid payload
+      }
     });
   }
 

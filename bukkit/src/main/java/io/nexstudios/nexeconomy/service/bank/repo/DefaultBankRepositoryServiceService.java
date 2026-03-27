@@ -53,6 +53,63 @@ public final class DefaultBankRepositoryServiceService implements BankRepository
   }
 
   @Override
+  public CompletableFuture<List<UUID>> findOwnerUuidsForMember(UUID memberUuid) {
+    if (memberUuid == null) return CompletableFuture.completedFuture(List.of());
+
+    return dbAsync.executeAsyncInTransaction(em -> {
+      List<UUID> owners = em.createQuery(
+              """
+              select distinct a.ownerUuid
+              from BankMemberEntity m
+              join BankAccountEntity a on a.id = m.bankAccountId
+              where m.memberUuid = :member
+              """,
+              UUID.class
+          )
+          .setParameter("member", memberUuid)
+          .getResultList();
+
+      if (owners == null || owners.isEmpty()) return List.of();
+
+      ArrayList<UUID> out = new ArrayList<>(owners.size());
+      for (UUID u : owners) {
+        if (u != null) out.add(u);
+      }
+      return List.copyOf(out);
+    });
+  }
+
+  @Override
+  public CompletableFuture<List<UUID>> findOwnerUuidsForMember(String bankIdLower, UUID memberUuid) {
+    String bank = normalizeId(bankIdLower);
+    if (bank.isBlank() || memberUuid == null) return CompletableFuture.completedFuture(List.of());
+
+    return dbAsync.executeAsyncInTransaction(em -> {
+      List<UUID> owners = em.createQuery(
+              """
+              select distinct a.ownerUuid
+              from BankMemberEntity m
+              join BankAccountEntity a on a.id = m.bankAccountId
+              where m.memberUuid = :member
+                and a.bankIdLower = :bank
+              """,
+              UUID.class
+          )
+          .setParameter("member", memberUuid)
+          .setParameter("bank", bank)
+          .getResultList();
+
+      if (owners == null || owners.isEmpty()) return List.of();
+
+      ArrayList<UUID> out = new ArrayList<>(owners.size());
+      for (UUID u : owners) {
+        if (u != null) out.add(u);
+      }
+      return List.copyOf(out);
+    });
+  }
+
+  @Override
   public CompletableFuture<BankAccountEntity> createAccountIfMissing(String bankIdLower, UUID ownerUuid) {
     String bank = normalizeId(bankIdLower);
     if (bank.isBlank()) return CompletableFuture.failedFuture(new IllegalArgumentException("bankIdLower is blank"));

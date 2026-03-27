@@ -6,10 +6,7 @@ import io.nexstudios.commandservice.service.commands.annotations.CommandRoot;
 import io.nexstudios.commandservice.service.commands.annotations.Suggest;
 import io.nexstudios.commandservice.service.commands.source.NexPaperCommandSource;
 import io.nexstudios.languageservice.service.component.ComponentService;
-import io.nexstudios.nexeconomy.command.suggestions.AmountSuggestion;
-import io.nexstudios.nexeconomy.command.suggestions.BankRoleSuggestion;
-import io.nexstudios.nexeconomy.command.suggestions.BankSuggestion;
-import io.nexstudios.nexeconomy.command.suggestions.PlayerSuggestion;
+import io.nexstudios.nexeconomy.command.suggestions.*;
 import io.nexstudios.nexeconomy.definition.AmountNotation;
 import io.nexstudios.nexeconomy.definition.CurrencyDefinition;
 import io.nexstudios.nexeconomy.definition.CurrencyType;
@@ -272,7 +269,7 @@ public final class EconomyBankCommand implements Service {
   public int balanceOther(
       NexPaperCommandSource source,
       @Arg("bank") @Suggest(BankSuggestion.class) String bank,
-      @Arg("owner") String ownerName
+      @Arg("owner") @Suggest(BankOwnerSuggestion.class) String ownerName
   ) {
     Player sender = (Player) source.sender();
     if (sender == null) return 0;
@@ -288,7 +285,9 @@ public final class EconomyBankCommand implements Service {
     String bankId = normalize(bank);
     if (bankId.isBlank()) return 0;
 
-    bankService.balance(bankId, ownerUuid).thenCompose(bal ->
+    UUID viewerUuid = sender.getUniqueId();
+
+    bankService.balanceVisibleTo(bankId, ownerUuid, viewerUuid).thenCompose(bal ->
         resolveCurrency(bankId).thenApply(cur -> new BalanceView(bal, cur))
     ).thenAccept(view -> {
       String shown = AmountNotation.formatShort(view.balance, view.currency == null ? 0 : view.currency.fractionDigits());
@@ -313,7 +312,7 @@ public final class EconomyBankCommand implements Service {
   public int membersOther(
       NexPaperCommandSource source,
       @Arg("bank") @Suggest(BankSuggestion.class) String bank,
-      @Arg("owner") String ownerName
+      @Arg("owner") @Suggest(BankOwnerSuggestion.class) String ownerName
   ) {
     Player sender = (Player) source.sender();
     if (sender == null) return 0;
@@ -329,7 +328,9 @@ public final class EconomyBankCommand implements Service {
     String bankId = normalize(bank);
     if (bankId.isBlank()) return 0;
 
-    bankService.members(bankId, ownerUuid).thenAccept(list -> {
+    UUID viewerUuid = sender.getUniqueId();
+
+    bankService.membersVisibleTo(bankId, ownerUuid, viewerUuid).thenAccept(list -> {
       String members = (list == null || list.isEmpty())
           ? "-"
           : list.stream().map(m -> {
@@ -359,7 +360,7 @@ public final class EconomyBankCommand implements Service {
   public int depositOther(
       NexPaperCommandSource source,
       @Arg("bank") @Suggest(BankSuggestion.class) String bank,
-      @Arg("owner") String ownerName,
+      @Arg("owner") @Suggest(BankOwnerSuggestion.class) String ownerName,
       @Arg("amount") @Suggest(AmountSuggestion.class) String amountRaw
   ) {
     Player sender = (Player) source.sender();
@@ -408,7 +409,7 @@ public final class EconomyBankCommand implements Service {
   public int withdrawOther(
       NexPaperCommandSource source,
       @Arg("bank") @Suggest(BankSuggestion.class) String bank,
-      @Arg("owner") String ownerName,
+      @Arg("owner") @Suggest(BankOwnerSuggestion.class) String ownerName,
       @Arg("amount") @Suggest(AmountSuggestion.class) String amountRaw
   ) {
     Player sender = (Player) source.sender();
@@ -457,7 +458,7 @@ public final class EconomyBankCommand implements Service {
   public int inviteOther(
       NexPaperCommandSource source,
       @Arg("bank") @Suggest(BankSuggestion.class) String bank,
-      @Arg("owner") String ownerName,
+      @Arg("owner") @Suggest(BankOwnerSuggestion.class) String ownerName,
       @Arg("player") @Suggest(PlayerSuggestion.class) Player player,
       @Arg("role") @Suggest(BankRoleSuggestion.class) String role
   ) {
@@ -560,7 +561,7 @@ public final class EconomyBankCommand implements Service {
   public int leave(
       NexPaperCommandSource source,
       @Arg("bank") @Suggest(BankSuggestion.class) String bank,
-      @Arg("owner") String ownerName
+      @Arg("owner") @Suggest(BankOwnerSuggestion.class) String ownerName
   ) {
     Player sender = (Player) source.sender();
     if (sender == null) return 0;
@@ -611,7 +612,7 @@ public final class EconomyBankCommand implements Service {
   @Command(value = "other accept <owner>", permission = "nexeconomy.bank.other.accept")
   public int acceptOther(
       NexPaperCommandSource source,
-      @Arg("owner") String ownerName
+      @Arg("owner") @Suggest(BankOwnerSuggestion.class) String ownerName
   ) {
     Player sender = (Player) source.sender();
     if (sender == null) return 0;
@@ -652,7 +653,7 @@ public final class EconomyBankCommand implements Service {
   @Command(value = "other deny <owner>", permission = "nexeconomy.bank.other.deny")
   public int denyOther(
       NexPaperCommandSource source,
-      @Arg("owner") String ownerName
+      @Arg("owner") @Suggest(BankOwnerSuggestion.class) String ownerName
   ) {
     Player sender = (Player) source.sender();
     if (sender == null) return 0;
@@ -821,6 +822,7 @@ public final class EconomyBankCommand implements Service {
         ? "Unknown"
         : (root.getMessage() == null || root.getMessage().isBlank() ? root.getClass().getSimpleName() : root.getMessage());
 
+    // add existing error messages (remove me after resolving the missing errors!!)
     ex.printStackTrace();
 
     player.sendMessage(components.builder(player, "bank.errors.internal", "NotDefined", true)

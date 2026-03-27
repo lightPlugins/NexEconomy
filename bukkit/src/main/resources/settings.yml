@@ -7,3 +7,9 @@ vault-bridge:
 leaderboard:
   # The time-to-live (TTL) for any leaderboard placeholder, in seconds.
   ttl-seconds: 30
+
+# Configuration for the bank account cache (balance + members per bank account).
+# TTL is a safety net: even if an invalidation is missed, stale entries will refresh in the background.
+# Set to 0 to disable TTL (cache only refreshes on explicit invalidation).
+bank-cache:
+  ttl-seconds: 30
