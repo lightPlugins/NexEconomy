@@ -1,16 +1,22 @@
 package io.nexstudios.nexeconomy.provider;
 
-import io.nexstudios.framework.paper.services.plugin.PaperPluginService;
-import io.nexstudios.nexeconomy.provider.context.PreparedVaultOperation;
-import io.nexstudios.nexeconomy.provider.context.VaultOperationContext;
 import io.nexstudios.nexeconomy.definition.CurrencyDefinition;
 import io.nexstudios.nexeconomy.definition.MantissaAmount;
 import io.nexstudios.nexeconomy.service.economy.EconomyFlushService;
+import io.nexstudios.nexeconomy.service.economy.EconomyErrorCode;
+import io.nexstudios.nexeconomy.service.economy.EconomyException;
 import io.nexstudios.nexeconomy.service.economy.EconomyPlayerCacheService;
+import io.nexstudios.nexeconomy.service.economy.EconomyService;
 import io.nexstudios.nexeconomy.service.economy.repo.EconomyPlayer;
 import io.nexstudios.nexeconomy.service.economy.repo.EconomyRepository;
 import io.nexstudios.nexeconomy.service.registry.CurrencyRegistryService;
-import io.nexstudios.serviceregistry.di.Dependencies;
+import io.nexstudios.nexlogic.common.services.logging.LoggerService;
+import org.bukkit.Bukkit;
+
+import java.util.concurrent.CompletionException;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicLong;
+
 import io.nexstudios.serviceregistry.di.Service;
 import lombok.extern.slf4j.Slf4j;
 import net.milkbowl.vault.economy.Economy;
@@ -21,27 +27,39 @@ import org.bukkit.entity.Player;
 import java.math.BigDecimal;
 import java.math.RoundingMode;
 import java.util.List;
-import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
 
 @Slf4j
 @SuppressWarnings("deprecation")
-@Dependencies({
-    PaperPluginService.class
-})
 public final class VaultEconomyProvider implements Economy, Service {
+
+  private static final long JOIN_TIMEOUT_MS = 500L;
+  private static final long MAIN_THREAD_WARN_COOLDOWN_MS = 5_000L;
+  private static final AtomicLong LAST_MAIN_THREAD_WARN_MS = new AtomicLong(0L);
+
+  private final LoggerService logger;
 
   private final CurrencyRegistryService currencies;
   private final EconomyPlayerCacheService cache;
   private final EconomyFlushService flush;
   private final EconomyRepository repo;
+  private final EconomyService economy;
 
-  public VaultEconomyProvider(CurrencyRegistryService currencies, EconomyPlayerCacheService cache, EconomyFlushService flush, EconomyRepository repo) {
+  public VaultEconomyProvider(
+      LoggerService logger,
+      CurrencyRegistryService currencies,
+      EconomyPlayerCacheService cache,
+      EconomyFlushService flush,
+      EconomyRepository repo,
+      EconomyService economy
+  ) {
+    this.logger = logger;
     this.currencies = currencies;
     this.cache = cache;
     this.flush = flush;
     this.repo = repo;
+    this.economy = economy;
   }
 
   @Override
@@ -108,8 +126,10 @@ public final class VaultEconomyProvider implements Economy, Service {
       return a == null ? 0D : a.toDoubleApprox();
     }
 
+    warnIfMainThreadBlocking("getBalance", uuid);
+
     try {
-      var map = repo.loadBalances(uuid, Set.of(vaultId)).join();
+      var map = joinWithTimeout(repo.loadBalances(uuid, Set.of(vaultId)), "getBalance", uuid);
       MantissaAmount a = map.get(vaultId);
       return a == null ? 0D : a.toDoubleApprox();
     } catch (Exception ex) {
@@ -143,8 +163,10 @@ public final class VaultEconomyProvider implements Economy, Service {
       return cur.compareTo(needed) >= 0;
     }
 
+    warnIfMainThreadBlocking("has", uuid);
+
     try {
-      var map = repo.loadBalances(uuid, Set.of(vaultId)).join();
+      var map = joinWithTimeout(repo.loadBalances(uuid, Set.of(vaultId)), "has", uuid);
       MantissaAmount cur = map.get(vaultId);
       if (cur == null) cur = MantissaAmount.zero();
       return cur.compareTo(needed) >= 0;
@@ -160,43 +182,47 @@ public final class VaultEconomyProvider implements Economy, Service {
 
   @Override
   public EconomyResponse withdrawPlayer(OfflinePlayer player, double amount) {
-    PreparedVaultOperation prepared = prepareOfflineTx(player, amount);
-    if (prepared.error() != null) return prepared.error();
-
-    VaultOperationContext ctx = prepared.vaultOperationContext();
-
-    // online cached -> RAM + Flush
-    if (cache.getOnline(player.getUniqueId()) != null) {
-      MantissaAmount current = ctx.entry().amount() == null ? MantissaAmount.zero() : ctx.entry().amount();
-      if (current.compareTo(ctx.delta()) < 0) {
-        return new EconomyResponse(0, getBalance(player), EconomyResponse.ResponseType.FAILURE, "insufficient funds");
-      }
-
-      ctx.entry().subtract(ctx.delta());
-      if (flush != null) flush.requestFlush(ctx.econ());
-
-      return new EconomyResponse(ctx.requestedHuman().doubleValue(), getBalance(player), EconomyResponse.ResponseType.SUCCESS, null);
+    if (player == null) {
+      return new EconomyResponse(0, 0, EconomyResponse.ResponseType.FAILURE, EconomyErrorCode.INVALID_PLAYER.name());
     }
 
-    // offline player -> DB sofort
-    try {
-      String vaultId = ctx.vaultId();
-      UUID uuid = player.getUniqueId();
+    String vaultId = vaultId();
+    if (vaultId == null) {
+      return new EconomyResponse(0, 0, EconomyResponse.ResponseType.FAILURE, EconomyErrorCode.CURRENCY_NOT_CONFIGURED.name());
+    }
 
-      var existing = repo.loadBalances(uuid, Set.of(vaultId)).join();
-      MantissaAmount current = existing.get(vaultId);
-      if (current == null) current = MantissaAmount.zero();
+    int fd = fractionalDigits();
+    BigDecimal requestedHuman = BigDecimal.valueOf(amount).setScale(fd, RoundingMode.DOWN);
+    MantissaAmount delta = MantissaAmount.of(requestedHuman, 0);
 
-      if (current.compareTo(ctx.delta()) < 0) {
-        return new EconomyResponse(0, current.toDoubleApprox(), EconomyResponse.ResponseType.FAILURE, "insufficient funds");
+    if (delta.compareTo(MantissaAmount.zero()) <= 0) {
+      return new EconomyResponse(0, getBalance(player), EconomyResponse.ResponseType.FAILURE, EconomyErrorCode.INVALID_AMOUNT.name());
+    }
+
+    UUID uuid = player.getUniqueId();
+
+    // Fast-path: online cached => RAM + flush (no join)
+    if (cache.getOnline(uuid) != null) {
+      try {
+        MantissaAmount withdrawn = joinWithTimeout(economy.providerWithdraw(uuid, vaultId, delta), "withdrawPlayer", uuid);
+        double newBal = getBalance(player);
+        return new EconomyResponse(withdrawn.toHuman().doubleValue(), newBal, EconomyResponse.ResponseType.SUCCESS, null);
+      } catch (Exception ex) {
+        EconomyErrorCode code = unwrapCode(ex, EconomyErrorCode.DB_ERROR);
+        return new EconomyResponse(0, getBalance(player), EconomyResponse.ResponseType.FAILURE, code.name());
       }
+    }
 
-      MantissaAmount next = current.subtract(ctx.delta());
-      repo.upsertBulk(uuid, Map.of(vaultId, next)).join();
+    // Cache miss => likely DB path => warn if on main thread
+    warnIfMainThreadBlocking("withdrawPlayer", uuid);
 
-      return new EconomyResponse(ctx.requestedHuman().doubleValue(), next.toDoubleApprox(), EconomyResponse.ResponseType.SUCCESS, null);
+    try {
+      MantissaAmount withdrawn = joinWithTimeout(economy.providerWithdraw(uuid, vaultId, delta), "withdrawPlayer", uuid);
+      double newBal = getBalance(player);
+      return new EconomyResponse(withdrawn.toHuman().doubleValue(), newBal, EconomyResponse.ResponseType.SUCCESS, null);
     } catch (Exception ex) {
-      return new EconomyResponse(0, getBalance(player), EconomyResponse.ResponseType.FAILURE, "db error");
+      EconomyErrorCode code = unwrapCode(ex, EconomyErrorCode.DB_ERROR);
+      return new EconomyResponse(0, getBalance(player), EconomyResponse.ResponseType.FAILURE, code.name());
     }
   }
 
@@ -207,33 +233,47 @@ public final class VaultEconomyProvider implements Economy, Service {
 
   @Override
   public EconomyResponse depositPlayer(OfflinePlayer player, double amount) {
-    PreparedVaultOperation prepared = prepareOfflineTx(player, amount);
-    if (prepared.error() != null) return prepared.error();
-
-    VaultOperationContext ctx = prepared.vaultOperationContext();
-
-    // online cached -> RAM + Flush
-    if (cache.getOnline(player.getUniqueId()) != null) {
-      ctx.entry().add(ctx.delta());
-      if (flush != null) flush.requestFlush(ctx.econ());
-      return new EconomyResponse(ctx.requestedHuman().doubleValue(), getBalance(player), EconomyResponse.ResponseType.SUCCESS, null);
+    if (player == null) {
+      return new EconomyResponse(0, 0, EconomyResponse.ResponseType.FAILURE, EconomyErrorCode.INVALID_PLAYER.name());
     }
 
-    // offline player -> DB sofort
+    String vaultId = vaultId();
+    if (vaultId == null) {
+      return new EconomyResponse(0, 0, EconomyResponse.ResponseType.FAILURE, EconomyErrorCode.CURRENCY_NOT_CONFIGURED.name());
+    }
+
+    int fd = fractionalDigits();
+    BigDecimal requestedHuman = BigDecimal.valueOf(amount).setScale(fd, RoundingMode.DOWN);
+    MantissaAmount delta = MantissaAmount.of(requestedHuman, 0);
+
+    if (delta.compareTo(MantissaAmount.zero()) <= 0) {
+      return new EconomyResponse(0, getBalance(player), EconomyResponse.ResponseType.FAILURE, EconomyErrorCode.INVALID_AMOUNT.name());
+    }
+
+    UUID uuid = player.getUniqueId();
+
+    // Fast-path: online cached => RAM + flush (no join)
+    if (cache.getOnline(uuid) != null) {
+      try {
+        MantissaAmount applied = joinWithTimeout(economy.providerDeposit(uuid, vaultId, delta), "depositPlayer", uuid);
+        double newBal = getBalance(player);
+        return new EconomyResponse(applied.toHuman().doubleValue(), newBal, EconomyResponse.ResponseType.SUCCESS, null);
+      } catch (Exception ex) {
+        EconomyErrorCode code = unwrapCode(ex, EconomyErrorCode.DB_ERROR);
+        return new EconomyResponse(0, getBalance(player), EconomyResponse.ResponseType.FAILURE, code.name());
+      }
+    }
+
+    // Cache miss => likely DB path => warn if on main thread
+    warnIfMainThreadBlocking("depositPlayer", uuid);
+
     try {
-      String vaultId = ctx.vaultId();
-      UUID uuid = player.getUniqueId();
-
-      var existing = repo.loadBalances(uuid, Set.of(vaultId)).join();
-      MantissaAmount current = existing.get(vaultId);
-      if (current == null) current = MantissaAmount.zero();
-
-      MantissaAmount next = current.add(ctx.delta());
-      repo.upsertBulk(uuid, Map.of(vaultId, next)).join();
-
-      return new EconomyResponse(ctx.requestedHuman().doubleValue(), next.toDoubleApprox(), EconomyResponse.ResponseType.SUCCESS, null);
+      MantissaAmount applied = joinWithTimeout(economy.providerDeposit(uuid, vaultId, delta), "depositPlayer", uuid);
+      double newBal = getBalance(player);
+      return new EconomyResponse(applied.toHuman().doubleValue(), newBal, EconomyResponse.ResponseType.SUCCESS, null);
     } catch (Exception ex) {
-      return new EconomyResponse(0, getBalance(player), EconomyResponse.ResponseType.FAILURE, "db error");
+      EconomyErrorCode code = unwrapCode(ex, EconomyErrorCode.DB_ERROR);
+      return new EconomyResponse(0, getBalance(player), EconomyResponse.ResponseType.FAILURE, code.name());
     }
   }
 
@@ -264,9 +304,13 @@ public final class VaultEconomyProvider implements Economy, Service {
     Player online = player.getPlayer();
     if (online == null || !online.isOnline()) return false;
 
-    EconomyPlayer econ = cache.loadOrCreateOnline(online).join();
-    if (flush != null && econ != null) flush.requestFlush(econ);
-    return true;
+    try {
+      EconomyPlayer econ = joinWithTimeout(cache.loadOrCreateOnline(online), "createPlayerAccount", online.getUniqueId());
+      if (flush != null && econ != null) flush.requestFlush(econ);
+      return true;
+    } catch (Exception ex) {
+      return false;
+    }
   }
 
   @Override
@@ -278,43 +322,6 @@ public final class VaultEconomyProvider implements Economy, Service {
     return new EconomyResponse(0, 0, EconomyResponse.ResponseType.NOT_IMPLEMENTED, "not supported");
   }
 
-  private PreparedVaultOperation prepareOfflineTx(OfflinePlayer player, double amount) {
-    if (player == null) {
-      return PreparedVaultOperation.error(new EconomyResponse(0, 0, EconomyResponse.ResponseType.FAILURE, "player is null"));
-    }
-
-    if (amount <= 0) {
-      return PreparedVaultOperation.error(new EconomyResponse(0, getBalance(player), EconomyResponse.ResponseType.FAILURE, "invalid amount"));
-    }
-
-    String vaultId = vaultId();
-    if (vaultId == null) {
-      return PreparedVaultOperation.error(new EconomyResponse(0, 0, EconomyResponse.ResponseType.FAILURE, "vault currency not configured"));
-    }
-
-    EconomyPlayer econ = resolveEconForOfflinePlayer(player);
-    if (econ == null) {
-      return PreparedVaultOperation.error(new EconomyResponse(0, 0, EconomyResponse.ResponseType.FAILURE, "account not available"));
-    }
-
-    int fd = fractionalDigits();
-    BigDecimal requestedHuman = BigDecimal.valueOf(amount).setScale(fd, RoundingMode.DOWN);
-    MantissaAmount delta = MantissaAmount.of(requestedHuman, 0);
-
-    EconomyPlayer.BalanceEntry entry = econ.getOrCreate(vaultId, MantissaAmount.zero());
-    return PreparedVaultOperation.ok(new VaultOperationContext(vaultId, econ, entry, requestedHuman, delta));
-  }
-
-  private EconomyPlayer resolveEconForOfflinePlayer(OfflinePlayer player) {
-    if (player == null) return null;
-    UUID uuid = player.getUniqueId();
-
-    EconomyPlayer cached = cache.getOnline(uuid);
-    if (cached != null) return cached;
-
-    return new EconomyPlayer(uuid);
-  }
-
   private String vaultId() {
     return currencies.vaultCurrencyId();
   }
@@ -322,6 +329,46 @@ public final class VaultEconomyProvider implements Economy, Service {
   private CurrencyDefinition vaultDef() {
     String id = vaultId();
     return id == null ? null : currencies.currency(id);
+  }
+
+  private static EconomyErrorCode unwrapCode(Throwable ex, EconomyErrorCode fallback) {
+    Throwable t = ex;
+    for (int i = 0; i < 8 && t != null; i++) {
+      if (t instanceof EconomyException ee && ee.code() != null) return ee.code();
+      t = t.getCause();
+    }
+    return fallback == null ? EconomyErrorCode.DB_ERROR : fallback;
+  }
+
+  private <T> T joinWithTimeout(java.util.concurrent.CompletableFuture<T> future, String op, UUID uuid) {
+    try {
+      return future.orTimeout(JOIN_TIMEOUT_MS, TimeUnit.MILLISECONDS).join();
+    } catch (CompletionException ex) {
+      Throwable root = ex.getCause() == null ? ex : ex.getCause();
+      if (root instanceof java.util.concurrent.TimeoutException) {
+        if (logger != null) {
+          logger.logger().warning("VaultEconomyProvider: timeout after " + JOIN_TIMEOUT_MS + "ms op=" + op + " uuid=" + uuid);
+        }
+        throw new EconomyException(EconomyErrorCode.DB_ERROR, root);
+      }
+      throw ex;
+    }
+  }
+
+  private void warnIfMainThreadBlocking(String op, UUID uuid) {
+    if (!Bukkit.isPrimaryThread()) return;
+
+    long now = System.currentTimeMillis();
+    long last = LAST_MAIN_THREAD_WARN_MS.get();
+    if ((now - last) < MAIN_THREAD_WARN_COOLDOWN_MS) return;
+    if (!LAST_MAIN_THREAD_WARN_MS.compareAndSet(last, now)) return;
+
+    if (logger != null) {
+      logger.logger().warning(
+          "VaultEconomyProvider: main-thread blocking Vault call (cache miss). op=" + op + " uuid=" + uuid +
+              " timeout=" + JOIN_TIMEOUT_MS + "ms"
+      );
+    }
   }
 
   // Legacy string-based overloads: unsupported

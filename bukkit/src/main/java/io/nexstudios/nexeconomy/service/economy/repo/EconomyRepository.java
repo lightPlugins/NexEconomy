@@ -178,6 +178,86 @@ public final class EconomyRepository implements Service {
   }
 
   /**
+   * Atomically withdraws {@code delta} from the account if sufficient funds exist.
+   * Performed under a pessimistic row lock to prevent lost updates.
+   */
+  public CompletableFuture<TryWithdrawResult> tryWithdraw(
+      UUID uuid,
+      String currencyIdLower,
+      MantissaAmount delta,
+      EconomyBalanceEntity.EconomyAccountType accountType
+  ) {
+    if (uuid == null) return CompletableFuture.failedFuture(new IllegalArgumentException("uuid is null"));
+    String cur = normalizeCurrency(currencyIdLower);
+    if (cur.isBlank()) return CompletableFuture.failedFuture(new IllegalArgumentException("currency is blank"));
+
+    MantissaAmount d = delta == null ? MantissaAmount.zero() : MantissaAmount.normalize(delta);
+    if (d.isNegative() || d.compareTo(MantissaAmount.zero()) == 0) {
+      return CompletableFuture.completedFuture(TryWithdrawResult.failed(MantissaAmount.zero()));
+    }
+
+    EconomyBalanceEntity.EconomyAccountType type = accountType == null
+        ? EconomyBalanceEntity.EconomyAccountType.PLAYER
+        : accountType;
+
+    return dbAsync.executeAsyncInTransaction(em -> {
+      List<EconomyBalanceEntity> list = em.createQuery(
+              "select b from EconomyBalanceEntity b where b.playerUuid = :uuid and b.currency = :cur and b.accountType = :type",
+              EconomyBalanceEntity.class
+          )
+          .setParameter("uuid", uuid)
+          .setParameter("cur", cur)
+          .setParameter("type", type)
+          .setMaxResults(1)
+          .setLockMode(LockModeType.PESSIMISTIC_WRITE)
+          .getResultList();
+
+      EconomyBalanceEntity row = list.isEmpty() ? null : list.getFirst();
+
+      MantissaAmount current = row == null
+          ? MantissaAmount.zero()
+          : MantissaAmount.parseStorage(row.getAmount(), row.getAmountExp3());
+
+      if (current.compareTo(d) < 0) {
+        return TryWithdrawResult.failed(current);
+      }
+
+      MantissaAmount next = current.subtract(d);
+      MantissaAmount.Storage st = next.toStorage();
+
+      if (row == null) {
+        em.persist(EconomyBalanceEntity.builder()
+            .playerUuid(uuid)
+            .currency(cur)
+            .amount(st.mantissaText())
+            .amountExp3(st.exp3())
+            .accountType(type)
+            .build());
+      } else {
+        row.setAmount(st.mantissaText());
+        row.setAmountExp3(st.exp3());
+        row.setAccountType(type);
+        em.merge(row);
+      }
+
+      return TryWithdrawResult.ok(next);
+    }).exceptionally(ex -> {
+      logger.logger().warning("tryWithdraw failed for " + uuid + " cur=" + cur + " type=" + type + ": " + ex.getMessage());
+      throw new RuntimeException(ex);
+    });
+  }
+
+  public record TryWithdrawResult(boolean success, MantissaAmount balanceAfter) {
+    public static TryWithdrawResult ok(MantissaAmount balanceAfter) {
+      return new TryWithdrawResult(true, balanceAfter == null ? MantissaAmount.zero() : balanceAfter);
+    }
+
+    public static TryWithdrawResult failed(MantissaAmount balanceAfter) {
+      return new TryWithdrawResult(false, balanceAfter == null ? MantissaAmount.zero() : balanceAfter);
+    }
+  }
+
+  /**
    * Runs a minimal DB query to verify the database connection and JPA pipeline.
    */
   public CompletableFuture<Void> ping() {

@@ -1,10 +1,9 @@
 package io.nexstudios.nexeconomy.provider;
 
+import io.nexstudios.nexeconomy.service.economy.*;
 import io.nexstudios.nexlogic.bukkit.services.entity.EconomyBalanceEntity;
 import io.nexstudios.nexeconomy.definition.CurrencyDefinition;
 import io.nexstudios.nexeconomy.definition.MantissaAmount;
-import io.nexstudios.nexeconomy.service.economy.EconomyFlushService;
-import io.nexstudios.nexeconomy.service.economy.EconomyPlayerCacheService;
 import io.nexstudios.nexeconomy.service.economy.repo.EconomyPlayer;
 import io.nexstudios.nexeconomy.service.economy.repo.EconomyRepository;
 import io.nexstudios.nexeconomy.service.registry.CurrencyRegistryService;
@@ -18,13 +17,24 @@ import java.math.BigDecimal;
 import java.math.RoundingMode;
 import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.CompletionException;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicLong;
+import io.nexstudios.nexlogic.common.services.logging.LoggerService;
+import org.bukkit.Bukkit;
 
 public final class VaultUnlockedEconomyProvider implements Economy, Service {
 
+  private static final long JOIN_TIMEOUT_MS = 500L;
+  private static final long MAIN_THREAD_WARN_COOLDOWN_MS = 5_000L;
+  private static final AtomicLong LAST_MAIN_THREAD_WARN_MS = new AtomicLong(0L);
+
+  private final LoggerService logger;
+
   private final CurrencyRegistryService currencies;
   private final EconomyPlayerCacheService cache;
-  private final EconomyFlushService flush;
   private final EconomyRepository repo;
+  private final EconomyService economy;
 
   /**
    * Vault2 works with BigDecimal, so we can allow larger values than the double-safe limit used in Vault v1.
@@ -36,15 +46,19 @@ public final class VaultUnlockedEconomyProvider implements Economy, Service {
   private final ConcurrentHashMap<UUID, Boolean> accountIsPlayer = new ConcurrentHashMap<>();
 
   public VaultUnlockedEconomyProvider(
+      LoggerService logger,
       CurrencyRegistryService currencies,
       EconomyPlayerCacheService cache,
       EconomyFlushService flush,
-      EconomyRepository repo
+      EconomyRepository repo,
+      EconomyService economy
   ) {
+    this.logger = logger;
     this.currencies = currencies;
     this.cache = cache;
     this.flush = flush;
     this.repo = repo;
+    this.economy = economy;
   }
 
   @Override
@@ -284,56 +298,44 @@ public final class VaultUnlockedEconomyProvider implements Economy, Service {
   }
 
   @Override
-  public @NotNull EconomyResponse withdraw(@NotNull String pluginName, @NotNull UUID accountID, @NotNull String worldName, @NotNull String currency, @NotNull BigDecimal amount) {
+  public @NotNull EconomyResponse withdraw(
+      @NotNull String pluginName,
+      @NotNull UUID accountID,
+      @NotNull String worldName,
+      @NotNull String currency,
+      @NotNull BigDecimal amount
+  ) {
     if (amount.compareTo(BigDecimal.ZERO) <= 0) {
-      return new EconomyResponse(amount, BigDecimal.ZERO, EconomyResponse.ResponseType.FAILURE, "invalid amount");
+      return new EconomyResponse(amount, BigDecimal.ZERO, EconomyResponse.ResponseType.FAILURE, EconomyErrorCode.INVALID_AMOUNT.name());
     }
 
     String cur = normalizeCurrency(currency);
     if (!hasCurrency(cur)) {
-      return new EconomyResponse(amount, BigDecimal.ZERO, EconomyResponse.ResponseType.FAILURE, "unknown currency");
+      return new EconomyResponse(amount, BigDecimal.ZERO, EconomyResponse.ResponseType.FAILURE, EconomyErrorCode.CURRENCY_NOT_CONFIGURED.name());
     }
 
     BigDecimal safeAmount = clampAbs(amount);
     if (safeAmount.compareTo(BigDecimal.ZERO) <= 0) {
-      return new EconomyResponse(amount, BigDecimal.ZERO, EconomyResponse.ResponseType.FAILURE, "amount too large");
+      return new EconomyResponse(amount, BigDecimal.ZERO, EconomyResponse.ResponseType.FAILURE, EconomyErrorCode.INVALID_AMOUNT.name());
     }
 
     EconomyBalanceEntity.EconomyAccountType type = resolveAccountType(accountID);
-
     MantissaAmount delta = MantissaAmount.of(safeAmount, 0);
 
-    if (type == EconomyBalanceEntity.EconomyAccountType.PLAYER) {
-      EconomyPlayer econ = cache.getOnline(accountID);
-      if (econ != null) {
-        EconomyPlayer.BalanceEntry entry = econ.getOrCreate(cur, MantissaAmount.zero());
-        MantissaAmount current = entry.amount() == null ? MantissaAmount.zero() : entry.amount();
-
-        if (current.compareTo(delta) < 0) {
-          return new EconomyResponse(amount, BigDecimal.ZERO, EconomyResponse.ResponseType.FAILURE, "insufficient funds");
-        }
-
-        entry.subtract(delta);
-        if (flush != null) flush.requestFlush(econ);
-
-        return new EconomyResponse(amount, BigDecimal.ZERO, EconomyResponse.ResponseType.SUCCESS, "Success");
-      }
+    // Warn if cache miss and we're on main thread
+    boolean cached = (type == EconomyBalanceEntity.EconomyAccountType.TOWNY)
+        ? (cache.getTowny(accountID) != null)
+        : (cache.getOnline(accountID) != null);
+    if (!cached) {
+      warnIfMainThreadBlocking("vault2.withdraw", accountID);
     }
 
     try {
-      MantissaAmount current = repo.loadSingleBalance(accountID, cur, type).join();
-      current = current == null ? MantissaAmount.zero() : current;
-
-      if (current.compareTo(delta) < 0) {
-        return new EconomyResponse(amount, BigDecimal.ZERO, EconomyResponse.ResponseType.FAILURE, "insufficient funds");
-      }
-
-      MantissaAmount next = current.subtract(delta);
-      repo.upsertBulk(accountID, Map.of(cur, next), type).join();
-
-      return new EconomyResponse(amount, BigDecimal.ZERO, EconomyResponse.ResponseType.SUCCESS, "success");
+      MantissaAmount withdrawn = joinWithTimeout(economy.providerWithdraw(accountID, cur, delta, type), "vault2.withdraw", accountID);
+      return new EconomyResponse(withdrawn.toHuman(), BigDecimal.ZERO, EconomyResponse.ResponseType.SUCCESS, "Successfully withdrawn");
     } catch (Exception ex) {
-      return new EconomyResponse(amount, BigDecimal.ZERO, EconomyResponse.ResponseType.FAILURE, "db error");
+      EconomyErrorCode code = unwrapCode(ex, EconomyErrorCode.DB_ERROR);
+      return new EconomyResponse(amount, BigDecimal.ZERO, EconomyResponse.ResponseType.FAILURE, code.name());
     }
   }
 
@@ -361,43 +363,35 @@ public final class VaultUnlockedEconomyProvider implements Economy, Service {
       @NotNull BigDecimal amount
   ) {
     if (amount.compareTo(BigDecimal.ZERO) <= 0) {
-      return new EconomyResponse(amount, BigDecimal.ZERO, EconomyResponse.ResponseType.FAILURE, "invalid amount");
+      return new EconomyResponse(amount, BigDecimal.ZERO, EconomyResponse.ResponseType.FAILURE, EconomyErrorCode.INVALID_AMOUNT.name());
     }
 
     String cur = normalizeCurrency(currency);
     if (!hasCurrency(cur)) {
-      return new EconomyResponse(amount, BigDecimal.ZERO, EconomyResponse.ResponseType.FAILURE, "unknown currency");
+      return new EconomyResponse(amount, BigDecimal.ZERO, EconomyResponse.ResponseType.FAILURE, EconomyErrorCode.CURRENCY_NOT_CONFIGURED.name());
     }
 
     BigDecimal safeAmount = clampAbs(amount);
     if (safeAmount.compareTo(BigDecimal.ZERO) <= 0) {
-      return new EconomyResponse(amount, BigDecimal.ZERO, EconomyResponse.ResponseType.FAILURE, "amount too large");
+      return new EconomyResponse(amount, BigDecimal.ZERO, EconomyResponse.ResponseType.FAILURE, EconomyErrorCode.INVALID_AMOUNT.name());
     }
 
     EconomyBalanceEntity.EconomyAccountType type = resolveAccountType(accountID);
-
     MantissaAmount delta = MantissaAmount.of(safeAmount, 0);
 
-    if (type == EconomyBalanceEntity.EconomyAccountType.PLAYER) {
-      EconomyPlayer econ = cache.getOnline(accountID);
-      if (econ != null) {
-        EconomyPlayer.BalanceEntry entry = econ.getOrCreate(cur, MantissaAmount.zero());
-        entry.add(delta);
-        if (flush != null) flush.requestFlush(econ);
-        return new EconomyResponse(amount, BigDecimal.ZERO, EconomyResponse.ResponseType.SUCCESS, "success");
-      }
+    boolean cached = (type == EconomyBalanceEntity.EconomyAccountType.TOWNY)
+        ? (cache.getTowny(accountID) != null)
+        : (cache.getOnline(accountID) != null);
+    if (!cached) {
+      warnIfMainThreadBlocking("vault2.deposit", accountID);
     }
 
     try {
-      MantissaAmount current = repo.loadSingleBalance(accountID, cur, type).join();
-      current = current == null ? MantissaAmount.zero() : current;
-
-      MantissaAmount next = current.add(delta);
-      repo.upsertBulk(accountID, Map.of(cur, next), type).join();
-
-      return new EconomyResponse(amount, BigDecimal.ZERO, EconomyResponse.ResponseType.SUCCESS, "success");
+      MantissaAmount applied = joinWithTimeout(economy.providerDeposit(accountID, cur, delta, type), "vault2.deposit", accountID);
+      return new EconomyResponse(applied.toHuman(), BigDecimal.ZERO, EconomyResponse.ResponseType.SUCCESS, "Successfully deposited");
     } catch (Exception ex) {
-      return new EconomyResponse(amount, BigDecimal.ZERO, EconomyResponse.ResponseType.FAILURE, "db error");
+      EconomyErrorCode code = unwrapCode(ex, EconomyErrorCode.DB_ERROR);
+      return new EconomyResponse(amount, BigDecimal.ZERO, EconomyResponse.ResponseType.FAILURE, code.name());
     }
   }
 
@@ -446,6 +440,37 @@ public final class VaultUnlockedEconomyProvider implements Economy, Service {
     return false;
   }
 
+  private <T> T joinWithTimeout(java.util.concurrent.CompletableFuture<T> future, String op, UUID uuid) {
+    try {
+      return future.orTimeout(JOIN_TIMEOUT_MS, TimeUnit.MILLISECONDS).join();
+    } catch (CompletionException ex) {
+      Throwable root = ex.getCause() == null ? ex : ex.getCause();
+      if (root instanceof java.util.concurrent.TimeoutException) {
+        if (logger != null) {
+          logger.logger().warning("VaultUnlockedEconomyProvider: timeout after " + JOIN_TIMEOUT_MS + "ms op=" + op + " uuid=" + uuid);
+        }
+        throw new EconomyException(EconomyErrorCode.DB_ERROR, root);
+      }
+      throw ex;
+    }
+  }
+
+  private void warnIfMainThreadBlocking(String op, UUID uuid) {
+    if (!Bukkit.isPrimaryThread()) return;
+
+    long now = System.currentTimeMillis();
+    long last = LAST_MAIN_THREAD_WARN_MS.get();
+    if ((now - last) < MAIN_THREAD_WARN_COOLDOWN_MS) return;
+    if (!LAST_MAIN_THREAD_WARN_MS.compareAndSet(last, now)) return;
+
+    if (logger != null) {
+      logger.logger().warning(
+          "VaultUnlockedEconomyProvider: main-thread blocking Vault call (cache miss). op=" + op + " uuid=" + uuid +
+              " timeout=" + JOIN_TIMEOUT_MS + "ms"
+      );
+    }
+  }
+
   private static BigDecimal clampAbs(BigDecimal value) {
     if (value == null) return BigDecimal.ZERO;
     BigDecimal abs = value.abs();
@@ -472,6 +497,15 @@ public final class VaultUnlockedEconomyProvider implements Economy, Service {
   private static int clampFractionDigits(int fd) {
     if (fd < 0) return 0;
     return Math.min(fd, 8);
+  }
+
+  private static EconomyErrorCode unwrapCode(Throwable ex, EconomyErrorCode fallback) {
+    Throwable t = ex;
+    for (int i = 0; i < 8 && t != null; i++) {
+      if (t instanceof EconomyException ee && ee.code() != null) return ee.code();
+      t = t.getCause();
+    }
+    return fallback == null ? EconomyErrorCode.DB_ERROR : fallback;
   }
 
   private static String normalizeCurrency(String s) {

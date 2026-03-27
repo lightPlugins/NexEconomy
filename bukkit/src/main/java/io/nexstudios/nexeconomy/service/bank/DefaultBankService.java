@@ -5,6 +5,7 @@ import io.nexstudios.nexeconomy.definition.CurrencyDefinition;
 import io.nexstudios.nexeconomy.definition.CurrencyType;
 import io.nexstudios.nexeconomy.definition.MantissaAmount;
 import io.nexstudios.nexeconomy.service.bank.cache.BankAccountCacheService;
+import io.nexstudios.nexeconomy.service.bank.cache.BankAccountPresenceService;
 import io.nexstudios.nexeconomy.service.bank.definition.BankDefinition;
 import io.nexstudios.nexeconomy.service.bank.registry.BankRegistryService;
 import io.nexstudios.nexeconomy.service.bank.repo.BankRepositoryService;
@@ -35,6 +36,7 @@ import java.util.concurrent.CompletableFuture;
     BankRepositoryService.class,
     BankRedisSyncService.class,
     BankAccountCacheService.class,
+    BankAccountPresenceService.class,
     CurrencyRegistryService.class,
     EconomyService.class,
     EconomyPlayerCacheService.class
@@ -45,6 +47,7 @@ public final class DefaultBankService implements BankService, Service {
   private final BankRepositoryService repo;
   private final BankRedisSyncService redisSync;
   private final BankAccountCacheService cache;
+  private final BankAccountPresenceService presence;
   private final CurrencyRegistryService currencies;
   private final EconomyService economy;
 
@@ -57,6 +60,7 @@ public final class DefaultBankService implements BankService, Service {
     this.repo = accessor.getService(BankRepositoryService.class);
     this.redisSync = accessor.getService(BankRedisSyncService.class);
     this.cache = accessor.getService(BankAccountCacheService.class);
+    this.presence = accessor.getService(BankAccountPresenceService.class);
     this.currencies = accessor.getService(CurrencyRegistryService.class);
     this.economy = accessor.getService(EconomyService.class);
   }
@@ -310,6 +314,10 @@ public final class DefaultBankService implements BankService, Service {
               .thenApply(deleted -> {
                 cache.invalidate(bankAccountId);
                 if (redisSync != null) redisSync.publishInvalidateAccount(bankAccountId);
+
+                if (presence != null) {
+                  presence.onMemberAdded(bankAccountId, bankIdLower, ownerUuid, inviteeUuid);
+                }
                 return true;
               });
         });
@@ -500,16 +508,20 @@ public final class DefaultBankService implements BankService, Service {
 
     return getOrCreateAccount(bankIdLower, ownerUuid).thenCompose(acc ->
         repo.deleteMember(acc.getId(), memberUuid).thenCompose(deleted ->
-            repo.deleteInvite(acc.getId(), memberUuid)
-                .exceptionally(ignored -> false)
-                .thenApply(x -> deleted))
-                .thenApply(deleted -> {
-                  if (Boolean.TRUE.equals(deleted)) {
-                    if (cache != null) cache.invalidate(acc.getId());
-                    if (redisSync != null) redisSync.publishInvalidateAccount(acc.getId());
-                  }
-          return Boolean.TRUE.equals(deleted);
-        })
+                repo.deleteInvite(acc.getId(), memberUuid)
+                    .exceptionally(ignored -> false)
+                    .thenApply(x -> deleted))
+            .thenApply(deleted -> {
+              if (Boolean.TRUE.equals(deleted)) {
+                if (cache != null) cache.invalidate(acc.getId());
+                if (redisSync != null) redisSync.publishInvalidateAccount(acc.getId());
+
+                if (presence != null) {
+                  presence.onMemberRemoved(acc.getId(), memberUuid);
+                }
+              }
+              return Boolean.TRUE.equals(deleted);
+            })
     );
   }
 

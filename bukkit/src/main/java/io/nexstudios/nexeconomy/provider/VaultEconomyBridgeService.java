@@ -16,6 +16,7 @@ import org.bukkit.plugin.Plugin;
 import org.bukkit.plugin.ServicePriority;
 
 import java.nio.file.Path;
+import io.nexstudios.nexeconomy.service.economy.EconomyService;
 
 @Dependencies({
     LoggerService.class,
@@ -24,7 +25,8 @@ import java.nio.file.Path;
     EconomyPlayerCacheService.class,
     EconomyFlushService.class,
     EconomyRepository.class,
-    FileReaderService.class
+    FileReaderService.class,
+    EconomyService.class
 })
 public final class VaultEconomyBridgeService implements Service {
 
@@ -35,6 +37,7 @@ public final class VaultEconomyBridgeService implements Service {
   private final EconomyFlushService flush;
   private final EconomyRepository repo;
   private final FileConfiguration settings;
+  private final EconomyService economy;
 
   public VaultEconomyBridgeService(ServiceAccessor accessor) {
     this.logger = accessor.getService(LoggerService.class);
@@ -43,6 +46,7 @@ public final class VaultEconomyBridgeService implements Service {
     this.cache = accessor.getService(EconomyPlayerCacheService.class);
     this.flush = accessor.getService(EconomyFlushService.class);
     this.repo = accessor.getService(EconomyRepository.class);
+    this.economy = accessor.getService(EconomyService.class);
 
     FileReaderService fileReaderService = accessor.getService(FileReaderService.class);
     this.settings = fileReaderService.load(Path.of("settings.yml"), "settings.yml", true);
@@ -69,11 +73,10 @@ public final class VaultEconomyBridgeService implements Service {
       return;
     }
 
-    VaultEconomyProvider provider = new VaultEconomyProvider(currencies, cache, flush, repo);
-    // OG Vault
+    VaultEconomyProvider provider = new VaultEconomyProvider(logger, currencies, cache, flush, repo, economy);
     Bukkit.getServicesManager().register(net.milkbowl.vault.economy.Economy.class, provider, plugin, ServicePriority.Highest);
-    VaultUnlockedEconomyProvider providerUnlocked = new VaultUnlockedEconomyProvider(currencies, cache, flush, repo);
-    // Vault fork "VaultUnlocked"
+
+    VaultUnlockedEconomyProvider providerUnlocked = new VaultUnlockedEconomyProvider(logger, currencies, cache, flush, repo, economy);
     Bukkit.getServicesManager().register(net.milkbowl.vault2.economy.Economy.class, providerUnlocked, plugin, ServicePriority.Highest);
 
     logger.logger().info("Registered Vault/VaultUnlocked Economy provider (currency=" + vaultCurrencyId + ", priority=Highest) successfully.");

@@ -574,6 +574,40 @@ public final class DefaultBankRepositoryServiceService implements BankRepository
     });
   }
 
+  @Override
+  public CompletableFuture<List<BankAccountRef>> findBankAccountsForMember(UUID memberUuid) {
+    if (memberUuid == null) return CompletableFuture.completedFuture(List.of());
+
+    return dbAsync.executeAsyncInTransaction(em -> {
+      List<Object[]> rows = em.createQuery(
+              """
+              select a.id, a.bankIdLower, a.ownerUuid
+              from BankMemberEntity m
+              join BankAccountEntity a on a.id = m.bankAccountId
+              where m.memberUuid = :member
+              """,
+              Object[].class
+          )
+          .setParameter("member", memberUuid)
+          .getResultList();
+
+      if (rows == null || rows.isEmpty()) return List.of();
+
+      ArrayList<BankAccountRef> out = new ArrayList<>(rows.size());
+      for (Object[] r : rows) {
+        if (r == null || r.length < 3) continue;
+
+        UUID id = r[0] instanceof UUID u ? u : null;
+        String bankIdLower = r[1] == null ? null : String.valueOf(r[1]);
+        UUID ownerUuid = r[2] instanceof UUID u ? u : null;
+
+        if (id == null) continue;
+        out.add(new BankAccountRef(id, bankIdLower, ownerUuid));
+      }
+      return List.copyOf(out);
+    });
+  }
+
   private static String normalizeId(String s) {
     return s == null ? "" : s.trim().toLowerCase(java.util.Locale.ROOT);
   }

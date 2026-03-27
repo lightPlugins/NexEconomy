@@ -232,4 +232,158 @@ public final class EconomyService implements Service {
   private static String normalize(String currency) {
     return currency == null ? "" : currency.trim().toLowerCase(Locale.ROOT);
   }
+
+  /**
+   * Provider-facing deposit that returns the actually applied delta (may be capped by max-balance).
+   * Works for online (RAM+flush) and offline (DB).
+   */
+  public CompletableFuture<MantissaAmount> providerDeposit(
+      UUID accountId,
+      String currencyId,
+      MantissaAmount requestedDelta,
+      EconomyBalanceEntity.EconomyAccountType accountType
+  ) {
+    String cur = normalize(currencyId);
+    if (accountId == null) return CompletableFuture.failedFuture(new EconomyException(EconomyErrorCode.INVALID_PLAYER));
+    if (cur.isBlank()) return CompletableFuture.failedFuture(new EconomyException(EconomyErrorCode.CURRENCY_NOT_CONFIGURED));
+
+    CurrencyDefinition def = currencies.currency(cur);
+    if (def == null) return CompletableFuture.failedFuture(new EconomyException(EconomyErrorCode.CURRENCY_NOT_FOUND));
+
+    EconomyBalanceEntity.EconomyAccountType type = accountType == null
+        ? EconomyBalanceEntity.EconomyAccountType.PLAYER
+        : accountType;
+
+    MantissaAmount delta = normalizeForCurrency(def, requestedDelta);
+    if (delta.isNegative() || delta.compareTo(MantissaAmount.zero()) == 0) {
+      return CompletableFuture.failedFuture(new EconomyException(EconomyErrorCode.INVALID_AMOUNT));
+    }
+
+    // Online/RAM path (only meaningful if cached)
+    EconomyPlayer cached = (type == EconomyBalanceEntity.EconomyAccountType.TOWNY)
+        ? cache.getTowny(accountId)
+        : cache.getOnline(accountId);
+
+    if (cached != null) {
+      EconomyPlayer.BalanceEntry entry = cached.getOrCreate(cur, MantissaAmount.zero());
+      MantissaAmount current = entry.amount() == null ? MantissaAmount.zero() : entry.amount();
+
+      MantissaAmount allowed = capDeltaToMax(def, current, delta);
+      if (allowed.compareTo(MantissaAmount.zero()) == 0) {
+        return CompletableFuture.failedFuture(new EconomyException(EconomyErrorCode.MAX_BALANCE_REACHED));
+      }
+
+      entry.add(allowed);
+      if (type == EconomyBalanceEntity.EconomyAccountType.TOWNY) {
+        flush.requestFlushTowny(cached);
+      } else {
+        flush.requestFlush(cached);
+      }
+      return CompletableFuture.completedFuture(allowed);
+    }
+
+    // Offline/DB path: cap against DB state, then apply delta atomically
+    return repo.loadSingleBalance(accountId, cur, type).thenCompose(current -> {
+      MantissaAmount curBal = current == null ? MantissaAmount.zero() : current;
+      MantissaAmount allowed = capDeltaToMax(def, curBal, delta);
+
+      if (allowed.compareTo(MantissaAmount.zero()) == 0) {
+        return CompletableFuture.failedFuture(new EconomyException(EconomyErrorCode.MAX_BALANCE_REACHED));
+      }
+
+      return repo.applyDelta(accountId, cur, allowed, type).thenApply(ignored -> allowed);
+    }).exceptionally(ex -> {
+      if (ex instanceof EconomyException ee) throw ee;
+      throw new EconomyException(EconomyErrorCode.DB_ERROR, ex);
+    });
+  }
+
+  public CompletableFuture<MantissaAmount> providerDeposit(UUID playerId, String currencyId, MantissaAmount requestedDelta) {
+    return providerDeposit(playerId, currencyId, requestedDelta, EconomyBalanceEntity.EconomyAccountType.PLAYER);
+  }
+
+  /**
+   * Provider-facing withdraw that is atomic and returns the actually withdrawn delta.
+   * (No partial withdraw: either full amount succeeds or fails.)
+   */
+  public CompletableFuture<MantissaAmount> providerWithdraw(
+      UUID accountId,
+      String currencyId,
+      MantissaAmount requestedDelta,
+      EconomyBalanceEntity.EconomyAccountType accountType
+  ) {
+    String cur = normalize(currencyId);
+    if (accountId == null) return CompletableFuture.failedFuture(new EconomyException(EconomyErrorCode.INVALID_PLAYER));
+    if (cur.isBlank()) return CompletableFuture.failedFuture(new EconomyException(EconomyErrorCode.CURRENCY_NOT_CONFIGURED));
+
+    CurrencyDefinition def = currencies.currency(cur);
+    if (def == null) return CompletableFuture.failedFuture(new EconomyException(EconomyErrorCode.CURRENCY_NOT_FOUND));
+
+    EconomyBalanceEntity.EconomyAccountType type = accountType == null
+        ? EconomyBalanceEntity.EconomyAccountType.PLAYER
+        : accountType;
+
+    MantissaAmount delta = normalizeForCurrency(def, requestedDelta);
+    if (delta.isNegative() || delta.compareTo(MantissaAmount.zero()) == 0) {
+      return CompletableFuture.failedFuture(new EconomyException(EconomyErrorCode.INVALID_AMOUNT));
+    }
+
+    // Online/RAM path (only meaningful if cached)
+    EconomyPlayer cached = (type == EconomyBalanceEntity.EconomyAccountType.TOWNY)
+        ? cache.getTowny(accountId)
+        : cache.getOnline(accountId);
+
+    if (cached != null) {
+      EconomyPlayer.BalanceEntry entry = cached.getOrCreate(cur, MantissaAmount.zero());
+      MantissaAmount current = entry.amount() == null ? MantissaAmount.zero() : entry.amount();
+
+      if (current.compareTo(delta) < 0) {
+        return CompletableFuture.failedFuture(new EconomyException(EconomyErrorCode.INSUFFICIENT_FUNDS));
+      }
+
+      entry.subtract(delta);
+      if (type == EconomyBalanceEntity.EconomyAccountType.TOWNY) {
+        flush.requestFlushTowny(cached);
+      } else {
+        flush.requestFlush(cached);
+      }
+      return CompletableFuture.completedFuture(delta);
+    }
+
+    // Offline/DB path: atomic check+update
+    return repo.tryWithdraw(accountId, cur, delta, type).thenCompose(res -> {
+      if (res == null || !res.success()) {
+        return CompletableFuture.failedFuture(new EconomyException(EconomyErrorCode.INSUFFICIENT_FUNDS));
+      }
+      return CompletableFuture.completedFuture(delta);
+    }).exceptionally(ex -> {
+      if (ex instanceof EconomyException ee) throw ee;
+      throw new EconomyException(EconomyErrorCode.DB_ERROR, ex);
+    });
+  }
+
+  /**
+   * Convenience overload for PLAYER accounts.
+   */
+  public CompletableFuture<MantissaAmount> providerWithdraw(UUID playerId, String currencyId, MantissaAmount requestedDelta) {
+    return providerWithdraw(playerId, currencyId, requestedDelta, EconomyBalanceEntity.EconomyAccountType.PLAYER);
+  }
+
+  private static MantissaAmount capDeltaToMax(CurrencyDefinition def, MantissaAmount current, MantissaAmount requested) {
+    if (def == null) return requested;
+    BigDecimal max = def.maxBalance();
+    if (max == null) return requested;
+    if (max.compareTo(BigDecimal.ZERO) < 0) return requested; // -1 => unlimited
+
+    MantissaAmount cur = current == null ? MantissaAmount.zero() : MantissaAmount.normalize(current);
+    MantissaAmount req = requested == null ? MantissaAmount.zero() : MantissaAmount.normalize(requested);
+
+    BigDecimal remaining = max.subtract(cur.toHuman());
+    if (remaining.compareTo(BigDecimal.ZERO) <= 0) return MantissaAmount.zero();
+
+    BigDecimal allowedHuman = req.toHuman().min(remaining);
+    if (allowedHuman.compareTo(BigDecimal.ZERO) <= 0) return MantissaAmount.zero();
+
+    return MantissaAmount.of(allowedHuman, 0);
+  }
 }

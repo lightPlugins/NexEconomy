@@ -146,8 +146,7 @@ public final class CurrencyRegistryService implements Service {
     if (s.isBlank()) return def;
 
     try {
-      BigDecimal numeric = new BigDecimal(s);
-      return numeric;
+      return new BigDecimal(s);
     } catch (Exception ignored) {
       // fall through to notation parsing
     }

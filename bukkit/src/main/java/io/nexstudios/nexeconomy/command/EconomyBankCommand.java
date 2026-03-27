@@ -817,7 +817,6 @@ public final class EconomyBankCommand implements Service {
       return;
     }
 
-    // Fallback (nur wenn wirklich unerwartet)
     String msg = root == null
         ? "Unknown"
         : (root.getMessage() == null || root.getMessage().isBlank() ? root.getClass().getSimpleName() : root.getMessage());
