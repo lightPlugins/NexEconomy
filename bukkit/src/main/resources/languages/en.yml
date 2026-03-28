@@ -118,6 +118,7 @@ bank:
       success-sender: '<gray>Unlocked bank <yellow><bank></yellow> for <yellow><player></yellow>.</gray>'
       success-target: '<gray>You have been unlocked for bank <yellow><bank></yellow>.</gray>'
       failed: '<red>Failed to unlock bank: <dark_red><error></dark_red></red>'
+      already-unlocked: '<red>Bank <yellow><bank></yellow> is already unlocked.</red>'
 
   uuid:
     invalid: '<red>That does not look like a valid UUID: <dark_red><value></dark_red></red>'
