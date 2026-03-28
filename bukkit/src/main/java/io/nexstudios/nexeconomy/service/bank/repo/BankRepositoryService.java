@@ -73,4 +73,8 @@ public interface BankRepositoryService extends Service {
   CompletableFuture<List<BankAccountRef>> findBankAccountsForMember(UUID memberUuid);
 
   CompletableFuture<Long> countOtherBankMemberships(UUID memberUuid);
+
+  CompletableFuture<Boolean> isUnlocked(String bankIdLower, UUID ownerUuid);
+
+  CompletableFuture<Boolean> unlock(String bankIdLower, UUID ownerUuid, UUID unlockedByUuid);
 }

@@ -109,6 +109,15 @@ bank:
     already-a-member: '<red>This player is already a member of this bank.</red>'
     internal: '<red>Something went wrong with the bank system: <dark_red><error></dark_red></red>'
     cannot-invite-self: '<red>You cannot invite yourself to your own bank.</red>'
+    bank-locked: '<red>This bank account is <dark_red>locked</dark_red><red>.</red>'
+
+  admin:
+    unlock:
+      invalid-bank: '<red>Invalid bank id.</red>'
+      player-not-found: '<red>Player <dark_red><player></dark_red> could not be found (must be online).</red>'
+      success-sender: '<gray>Unlocked bank <yellow><bank></yellow> for <yellow><player></yellow>.</gray>'
+      success-target: '<gray>You have been unlocked for bank <yellow><bank></yellow>.</gray>'
+      failed: '<red>Failed to unlock bank: <dark_red><error></dark_red></red>'
 
   uuid:
     invalid: '<red>That does not look like a valid UUID: <dark_red><value></dark_red></red>'

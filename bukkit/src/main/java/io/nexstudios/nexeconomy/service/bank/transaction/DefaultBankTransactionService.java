@@ -50,21 +50,30 @@ public final class DefaultBankTransactionService implements BankTransactionServi
     BankDefinition.MemberSystem ms = def.memberSystem();
     if (ms == null || !ms.enabled()) return CompletableFuture.failedFuture(new IllegalStateException("member system disabled"));
 
-    return cache.loadOrCreate(bank, ownerUuid).thenCompose(view -> {
-      if (view == null || view.account() == null || view.account().getId() == null) {
-        return CompletableFuture.failedFuture(new IllegalStateException("bank not available"));
-      }
-
-      BankMemberEntity member = findMember(view.members(), viewerUuid);
-      if (member == null) return CompletableFuture.failedFuture(new IllegalStateException("not a member"));
-
-      String roleId = normalize(member.getRoleIdLower());
-      BankDefinition.RoleDefinition role = ms.rolesByIdLower() == null ? null : ms.rolesByIdLower().get(roleId);
-      if (role == null) return CompletableFuture.failedFuture(new IllegalStateException("no permission"));
-      if (!role.canViewLog()) return CompletableFuture.failedFuture(new IllegalStateException("no permission"));
-
-      return repo.listRecentTransactions(view.account().getId(), limit);
+    CompletableFuture<Void> unlockedGate = def.unlockedByDefault()
+        ? CompletableFuture.completedFuture(null)
+        : repo.isUnlocked(bank, ownerUuid).thenCompose(ok -> {
+      if (Boolean.TRUE.equals(ok)) return CompletableFuture.completedFuture(null);
+      return CompletableFuture.failedFuture(new IllegalStateException("bank locked"));
     });
+
+    return unlockedGate.thenCompose(v ->
+        cache.loadOrCreate(bank, ownerUuid).thenCompose(view -> {
+          if (view == null || view.account() == null || view.account().getId() == null) {
+            return CompletableFuture.failedFuture(new IllegalStateException("bank not available"));
+          }
+
+          BankMemberEntity member = findMember(view.members(), viewerUuid);
+          if (member == null) return CompletableFuture.failedFuture(new IllegalStateException("not a member"));
+
+          String roleId = normalize(member.getRoleIdLower());
+          BankDefinition.RoleDefinition role = ms.rolesByIdLower() == null ? null : ms.rolesByIdLower().get(roleId);
+          if (role == null) return CompletableFuture.failedFuture(new IllegalStateException("no permission"));
+          if (!role.canViewLog()) return CompletableFuture.failedFuture(new IllegalStateException("no permission"));
+
+          return repo.listRecentTransactions(view.account().getId(), limit);
+        })
+    );
   }
 
   private static BankMemberEntity findMember(List<BankMemberEntity> members, UUID uuid) {

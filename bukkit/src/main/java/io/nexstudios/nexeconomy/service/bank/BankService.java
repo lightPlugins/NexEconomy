@@ -50,4 +50,6 @@ public interface BankService extends Service {
 
   CompletableFuture<List<BankMemberEntity>> membersVisibleTo(String bankId, UUID ownerUuid, UUID viewerUuid);
 
+  CompletableFuture<Boolean> unlockBankForPlayer(String bankId, UUID ownerUuid, UUID unlockedByUuid);
+
 }

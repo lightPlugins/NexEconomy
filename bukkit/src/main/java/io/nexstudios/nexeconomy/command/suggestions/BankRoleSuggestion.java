@@ -49,6 +49,7 @@ public final class BankRoleSuggestion implements SuggestionProvider, Service {
     Map<String, BankDefinition.RoleDefinition> roles = ms.rolesByIdLower();
     if (roles == null || roles.isEmpty()) return builder.buildFuture();
 
+
     for (String id : roles.keySet()) {
       if (id == null || id.isBlank()) continue;
       if (remaining.isEmpty() || id.startsWith(remaining)) {

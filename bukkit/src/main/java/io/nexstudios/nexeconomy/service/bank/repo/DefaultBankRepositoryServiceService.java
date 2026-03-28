@@ -652,6 +652,58 @@ public final class DefaultBankRepositoryServiceService implements BankRepository
         .thenApply(list -> list == null ? List.of() : List.copyOf(list));
   }
 
+  @Override
+  public CompletableFuture<Boolean> isUnlocked(String bankIdLower, UUID ownerUuid) {
+    String bank = normalizeId(bankIdLower);
+    if (bank.isBlank() || ownerUuid == null) return CompletableFuture.completedFuture(false);
+
+    return dbAsync.executeAsyncInTransaction(em -> {
+      Long count = em.createQuery(
+              "select count(u) from BankUnlockEntity u where u.bankIdLower = :bank and u.ownerUuid = :owner",
+              Long.class
+          )
+          .setParameter("bank", bank)
+          .setParameter("owner", ownerUuid)
+          .getSingleResult();
+
+      return count != null && count > 0;
+    });
+  }
+
+  @Override
+  public CompletableFuture<Boolean> unlock(String bankIdLower, UUID ownerUuid, UUID unlockedByUuid) {
+    String bank = normalizeId(bankIdLower);
+    if (bank.isBlank()) return CompletableFuture.failedFuture(new IllegalArgumentException("bankIdLower is blank"));
+    if (ownerUuid == null) return CompletableFuture.failedFuture(new IllegalArgumentException("ownerUuid is null"));
+    if (unlockedByUuid == null) return CompletableFuture.failedFuture(new IllegalArgumentException("unlockedByUuid is null"));
+
+    return dbAsync.executeAsyncInTransaction(em -> {
+      List<BankUnlockEntity> list = em.createQuery(
+              "select u from BankUnlockEntity u where u.bankIdLower = :bank and u.ownerUuid = :owner",
+              BankUnlockEntity.class
+          )
+          .setParameter("bank", bank)
+          .setParameter("owner", ownerUuid)
+          .setMaxResults(1)
+          .setLockMode(LockModeType.PESSIMISTIC_WRITE)
+          .getResultList();
+
+      BankUnlockEntity existing = list.isEmpty() ? null : list.getFirst();
+      if (existing != null) return false;
+
+      BankUnlockEntity created = BankUnlockEntity.builder()
+          .id(UUID.randomUUID())
+          .bankIdLower(bank)
+          .ownerUuid(ownerUuid)
+          .unlockedByUuid(unlockedByUuid)
+          .unlockedAt(Instant.now())
+          .build();
+
+      em.persist(created);
+      return true;
+    });
+  }
+
   private static String normalizeId(String s) {
     return s == null ? "" : s.trim().toLowerCase(java.util.Locale.ROOT);
   }

@@ -86,7 +86,8 @@ public class NexEconomyPlugin extends NexPaperPlugin {
             EconomyMainCommand.class,
             EconomyMigrationCommand.class,
             EconomyStatusCommand.class,
-            EconomyBankCommand.class
+            EconomyBankCommand.class,
+            EconomyBankAdminCommand.class
         )
     );
 
