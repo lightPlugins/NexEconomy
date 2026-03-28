@@ -1011,6 +1011,16 @@ public final class EconomyBankCommand implements Service {
       return;
     }
 
+    if (isMarker(root, "bank locked")) {
+      player.sendMessage(components.builder(player, "bank.errors.bank-locked", "NotDefined", true).build());
+      return;
+    }
+
+    if (isMarker(root, "bank accounts locked")) {
+      player.sendMessage(components.builder(player, "bank.errors.bank-accounts-locked", "NotDefined", true).build());
+      return;
+    }
+
     String msg = root == null
         ? "Unknown"
         : (root.getMessage() == null || root.getMessage().isBlank() ? root.getClass().getSimpleName() : root.getMessage());

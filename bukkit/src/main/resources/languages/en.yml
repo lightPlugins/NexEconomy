@@ -91,10 +91,10 @@ currency:
     pay-daily-limit-receive: '<red>You have reached your daily limit of <yellow><amount> <gray><currency>. <red>You cannot receive any more currency from players today!'
     pay-daily-limit-pay: '<red>You have reached your daily limit of <yellow><amount> <gray><currency>. <red>You cannot pay any more currency to players today!'
     pay-daily-limit-target: '<red>Target has reached their daily limit of <yellow><amount> <gray><currency>. <red>You cannot pay them any more currency today!'
-    pay-daily-limit-reset: '<gray>Daily limit reset for <yellow><player>.'
+    pay-daily-limit-reset: '<gray>Daily limit reset for <yellow><player>.</gray>'
 
 bank:
-  # Fallback used only for unknown/internal errors
+
   errors:
     bank-not-available: '<red>This bank is not available.</red>'
     member-system-disabled: '<red>The member system for this bank is disabled.</red>'
@@ -110,6 +110,7 @@ bank:
     internal: '<red>Something went wrong with the bank system: <dark_red><error></dark_red></red>'
     cannot-invite-self: '<red>You cannot invite yourself to your own bank.</red>'
     bank-locked: '<red>This bank account is <dark_red>locked</dark_red><red>.</red>'
+    bank-accounts-locked: '<red>This player''s bank accounts are locked.</red>'
 
   admin:
     unlock:
@@ -118,7 +119,27 @@ bank:
       success-sender: '<gray>Unlocked bank <yellow><bank></yellow> for <yellow><player></yellow>.</gray>'
       success-target: '<gray>You have been unlocked for bank <yellow><bank></yellow>.</gray>'
       failed: '<red>Failed to unlock bank: <dark_red><error></dark_red></red>'
-      already-unlocked: '<red>Bank <yellow><bank></yellow> is already unlocked.</red>'
+      already-unlocked: '<gray>Bank <yellow><bank></yellow> is already unlocked for <yellow><player></yellow>.</gray>'
+
+    lock:
+      invalid-bank: '<red>Invalid bank id.</red>'
+      player-not-found: '<red>Player <dark_red><player></dark_red> could not be found (must be online).</red>'
+      success-sender: '<gray>Locked bank <yellow><bank></yellow> for <yellow><player></yellow>.</gray>'
+      success-target: '<gray>Your access to bank <yellow><bank></yellow> has been locked.</gray>'
+      already-locked: '<gray>Bank <yellow><bank></yellow> is already locked for <yellow><player></yellow>.</gray>'
+      failed: '<red>Failed to lock bank: <dark_red><error></dark_red></red>'
+
+    lockaccounts:
+      player-not-found: '<red>Player <dark_red><player></dark_red> could not be found (use UUID or cached name).</red>'
+      success-sender: '<gray>Locked all bank accounts for <yellow><player></yellow>.</gray>'
+      already-locked: '<gray>Bank accounts for <yellow><player></yellow> are already locked.</gray>'
+      failed: '<red>Failed to lock bank accounts: <dark_red><error></dark_red></red>'
+
+    unlockaccounts:
+      player-not-found: '<red>Player <dark_red><player></dark_red> could not be found (use UUID or cached name).</red>'
+      success-sender: '<gray>Unlocked all bank accounts for <yellow><player></yellow>.</gray>'
+      not-locked: '<gray>Bank accounts for <yellow><player></yellow> are not locked.</gray>'
+      failed: '<red>Failed to unlock bank accounts: <dark_red><error></dark_red></red>'
 
   uuid:
     invalid: '<red>That does not look like a valid UUID: <dark_red><value></dark_red></red>'

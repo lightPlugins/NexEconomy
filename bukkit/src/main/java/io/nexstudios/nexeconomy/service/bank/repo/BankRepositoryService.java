@@ -77,4 +77,12 @@ public interface BankRepositoryService extends Service {
   CompletableFuture<Boolean> isUnlocked(String bankIdLower, UUID ownerUuid);
 
   CompletableFuture<Boolean> unlock(String bankIdLower, UUID ownerUuid, UUID unlockedByUuid);
+
+  CompletableFuture<Boolean> lock(String bankIdLower, UUID ownerUuid, UUID lockedByUuid);
+
+  CompletableFuture<Boolean> isPlayerLocked(UUID playerUuid);
+
+  CompletableFuture<Boolean> lockPlayer(UUID playerUuid, UUID lockedByUuid, String reason);
+
+  CompletableFuture<Boolean> unlockPlayer(UUID playerUuid, UUID unlockedByUuid);
 }

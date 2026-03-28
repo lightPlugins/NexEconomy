@@ -44,36 +44,48 @@ public final class DefaultBankTransactionService implements BankTransactionServi
     if (ownerUuid == null) return CompletableFuture.failedFuture(new IllegalArgumentException("ownerUuid is null"));
     if (viewerUuid == null) return CompletableFuture.failedFuture(new IllegalArgumentException("viewerUuid is null"));
 
-    BankDefinition def = banks.bank(bank).orElse(null);
-    if (def == null || !def.enabled()) return CompletableFuture.failedFuture(new IllegalStateException("bank not available"));
+    return repo.isPlayerLocked(viewerUuid).thenCompose(viewerLocked -> {
+      if (Boolean.TRUE.equals(viewerLocked)) {
+        return CompletableFuture.failedFuture(new IllegalStateException("bank accounts locked"));
+      }
 
-    BankDefinition.MemberSystem ms = def.memberSystem();
-    if (ms == null || !ms.enabled()) return CompletableFuture.failedFuture(new IllegalStateException("member system disabled"));
+      return repo.isPlayerLocked(ownerUuid).thenCompose(ownerLocked -> {
+        if (Boolean.TRUE.equals(ownerLocked)) {
+          return CompletableFuture.failedFuture(new IllegalStateException("bank accounts locked"));
+        }
 
-    CompletableFuture<Void> unlockedGate = def.unlockedByDefault()
-        ? CompletableFuture.completedFuture(null)
-        : repo.isUnlocked(bank, ownerUuid).thenCompose(ok -> {
-      if (Boolean.TRUE.equals(ok)) return CompletableFuture.completedFuture(null);
-      return CompletableFuture.failedFuture(new IllegalStateException("bank locked"));
+        BankDefinition def = banks.bank(bank).orElse(null);
+        if (def == null || !def.enabled()) return CompletableFuture.failedFuture(new IllegalStateException("bank not available"));
+
+        BankDefinition.MemberSystem ms = def.memberSystem();
+        if (ms == null || !ms.enabled()) return CompletableFuture.failedFuture(new IllegalStateException("member system disabled"));
+
+        CompletableFuture<Void> unlockedGate = def.unlockedByDefault()
+            ? CompletableFuture.completedFuture(null)
+            : repo.isUnlocked(bank, ownerUuid).thenCompose(ok -> {
+          if (Boolean.TRUE.equals(ok)) return CompletableFuture.completedFuture(null);
+          return CompletableFuture.failedFuture(new IllegalStateException("bank locked"));
+        });
+
+        return unlockedGate.thenCompose(v ->
+            cache.loadOrCreate(bank, ownerUuid).thenCompose(view -> {
+              if (view == null || view.account() == null || view.account().getId() == null) {
+                return CompletableFuture.failedFuture(new IllegalStateException("bank not available"));
+              }
+
+              BankMemberEntity member = findMember(view.members(), viewerUuid);
+              if (member == null) return CompletableFuture.failedFuture(new IllegalStateException("not a member"));
+
+              String roleId = normalize(member.getRoleIdLower());
+              BankDefinition.RoleDefinition role = ms.rolesByIdLower() == null ? null : ms.rolesByIdLower().get(roleId);
+              if (role == null) return CompletableFuture.failedFuture(new IllegalStateException("no permission"));
+              if (!role.canViewLog()) return CompletableFuture.failedFuture(new IllegalStateException("no permission"));
+
+              return repo.listRecentTransactions(view.account().getId(), limit);
+            })
+        );
+      });
     });
-
-    return unlockedGate.thenCompose(v ->
-        cache.loadOrCreate(bank, ownerUuid).thenCompose(view -> {
-          if (view == null || view.account() == null || view.account().getId() == null) {
-            return CompletableFuture.failedFuture(new IllegalStateException("bank not available"));
-          }
-
-          BankMemberEntity member = findMember(view.members(), viewerUuid);
-          if (member == null) return CompletableFuture.failedFuture(new IllegalStateException("not a member"));
-
-          String roleId = normalize(member.getRoleIdLower());
-          BankDefinition.RoleDefinition role = ms.rolesByIdLower() == null ? null : ms.rolesByIdLower().get(roleId);
-          if (role == null) return CompletableFuture.failedFuture(new IllegalStateException("no permission"));
-          if (!role.canViewLog()) return CompletableFuture.failedFuture(new IllegalStateException("no permission"));
-
-          return repo.listRecentTransactions(view.account().getId(), limit);
-        })
-    );
   }
 
   private static BankMemberEntity findMember(List<BankMemberEntity> members, UUID uuid) {

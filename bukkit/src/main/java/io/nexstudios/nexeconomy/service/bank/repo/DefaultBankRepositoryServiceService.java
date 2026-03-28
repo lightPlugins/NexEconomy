@@ -704,6 +704,108 @@ public final class DefaultBankRepositoryServiceService implements BankRepository
     });
   }
 
+  @Override
+  public CompletableFuture<Boolean> lock(String bankIdLower, UUID ownerUuid, UUID lockedByUuid) {
+    String bank = normalizeId(bankIdLower);
+    if (bank.isBlank()) return CompletableFuture.failedFuture(new IllegalArgumentException("bankIdLower is blank"));
+    if (ownerUuid == null) return CompletableFuture.failedFuture(new IllegalArgumentException("ownerUuid is null"));
+    if (lockedByUuid == null) return CompletableFuture.failedFuture(new IllegalArgumentException("lockedByUuid is null"));
+
+    return dbAsync.executeAsyncInTransaction(em -> {
+      List<BankUnlockEntity> list = em.createQuery(
+              "select u from BankUnlockEntity u where u.bankIdLower = :bank and u.ownerUuid = :owner",
+              BankUnlockEntity.class
+          )
+          .setParameter("bank", bank)
+          .setParameter("owner", ownerUuid)
+          .setMaxResults(1)
+          .setLockMode(LockModeType.PESSIMISTIC_WRITE)
+          .getResultList();
+
+      BankUnlockEntity existing = list.isEmpty() ? null : list.getFirst();
+      if (existing == null) return false;
+
+      em.remove(existing);
+      return true;
+    });
+  }
+
+  @Override
+  public CompletableFuture<Boolean> isPlayerLocked(UUID playerUuid) {
+    if (playerUuid == null) return CompletableFuture.completedFuture(false);
+
+    return dbAsync.executeAsyncInTransaction(em -> {
+      Long count = em.createQuery(
+              "select count(l) from BankAccountLockEntity l where l.playerUuid = :player",
+              Long.class
+          )
+          .setParameter("player", playerUuid)
+          .getSingleResult();
+
+      return count != null && count > 0;
+    });
+  }
+
+  @Override
+  public CompletableFuture<Boolean> lockPlayer(UUID playerUuid, UUID lockedByUuid, String reason) {
+    if (playerUuid == null) return CompletableFuture.failedFuture(new IllegalArgumentException("playerUuid is null"));
+    if (lockedByUuid == null) return CompletableFuture.failedFuture(new IllegalArgumentException("lockedByUuid is null"));
+
+    String r = reason == null ? null : reason.trim();
+    if (r != null && r.isBlank()) r = null;
+    if (r != null && r.length() > 256) r = r.substring(0, 256);
+
+    String finalReason = r;
+
+    return dbAsync.executeAsyncInTransaction(em -> {
+      List<BankAccountLockEntity> list = em.createQuery(
+              "select l from BankAccountLockEntity l where l.playerUuid = :player",
+              BankAccountLockEntity.class
+          )
+          .setParameter("player", playerUuid)
+          .setMaxResults(1)
+          .setLockMode(LockModeType.PESSIMISTIC_WRITE)
+          .getResultList();
+
+      BankAccountLockEntity existing = list.isEmpty() ? null : list.getFirst();
+      if (existing != null) return false;
+
+      BankAccountLockEntity created = BankAccountLockEntity.builder()
+          .id(UUID.randomUUID())
+          .playerUuid(playerUuid)
+          .lockedByUuid(lockedByUuid)
+          .lockedAt(Instant.now())
+          .reason(finalReason)
+          .build();
+
+      em.persist(created);
+      return true;
+    });
+  }
+
+  @Override
+  public CompletableFuture<Boolean> unlockPlayer(UUID playerUuid, UUID unlockedByUuid) {
+    if (playerUuid == null) return CompletableFuture.failedFuture(new IllegalArgumentException("playerUuid is null"));
+    if (unlockedByUuid == null) return CompletableFuture.failedFuture(new IllegalArgumentException("unlockedByUuid is null"));
+
+    return dbAsync.executeAsyncInTransaction(em -> {
+      List<BankAccountLockEntity> list = em.createQuery(
+              "select l from BankAccountLockEntity l where l.playerUuid = :player",
+              BankAccountLockEntity.class
+          )
+          .setParameter("player", playerUuid)
+          .setMaxResults(1)
+          .setLockMode(LockModeType.PESSIMISTIC_WRITE)
+          .getResultList();
+
+      BankAccountLockEntity existing = list.isEmpty() ? null : list.getFirst();
+      if (existing == null) return false;
+
+      em.remove(existing);
+      return true;
+    });
+  }
+
   private static String normalizeId(String s) {
     return s == null ? "" : s.trim().toLowerCase(java.util.Locale.ROOT);
   }

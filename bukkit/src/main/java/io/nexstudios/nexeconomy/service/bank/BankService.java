@@ -52,4 +52,12 @@ public interface BankService extends Service {
 
   CompletableFuture<Boolean> unlockBankForPlayer(String bankId, UUID ownerUuid, UUID unlockedByUuid);
 
+  CompletableFuture<Boolean> lockBankForPlayer(String bankId, UUID ownerUuid, UUID lockedByUuid);
+
+  CompletableFuture<Boolean> lockAllBankAccountsForPlayer(UUID playerUuid, UUID lockedByUuid, String reason);
+
+  CompletableFuture<Boolean> unlockAllBankAccountsForPlayer(UUID playerUuid, UUID unlockedByUuid);
+
+  CompletableFuture<Boolean> isAnyBankAccountLockedForPlayer(UUID playerUuid);
+
 }
