@@ -13,8 +13,7 @@ bank-cache:
   # TTL is a safety net: even if an invalidation is missed, stale entries will refresh in the background.
   # Set to 0 to disable TTL (cache only refreshes on explicit invalidation).
   ttl-seconds: 30
-  # Maximum number of cached bank accounts (bankIdLower + ownerUuid).
-  # Set to 0 to disable eviction (not recommended for large networks).
+  # Maximum number of cached bank accounts.
   max-entries: 10000
   # How many entries to sample per cleanup run. Higher = more accurate eviction, more CPU.
   cleanup-batch: 512

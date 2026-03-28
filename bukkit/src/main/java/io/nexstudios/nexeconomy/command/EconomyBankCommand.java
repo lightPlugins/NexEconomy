@@ -694,15 +694,14 @@ public final class EconomyBankCommand implements Service {
     String n = name.trim();
     if (n.isBlank()) return null;
 
-    // Prefer cached lookups if available (doesn't create fake/offline profiles).
-    OfflinePlayer cached = Bukkit.getOfflinePlayerIfCached(n);
-    if (cached != null) {
-      return cached.getUniqueId();
-    }
+    // Allow direct UUID input (no lookup, fully local)
+    UUID parsed = parseUuid(n);
+    if (parsed != null) return parsed;
 
-    // Fallback: may still resolve on servers that know the player.
-    OfflinePlayer off = Bukkit.getOfflinePlayer(n);
-    return off.getUniqueId();
+    // Only resolve from local cache. DO NOT call Bukkit.getOfflinePlayer(name) here:
+    // it may trigger a Mojang profile lookup and cause lag spikes.
+    OfflinePlayer cached = Bukkit.getOfflinePlayerIfCached(n);
+    return cached == null ? null : cached.getUniqueId();
   }
 
   private static boolean isMarker(Throwable ex, String marker) {
