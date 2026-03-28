@@ -21,12 +21,12 @@ import java.util.function.Function;
 @Dependencies({
     LoggerService.class
 })
-public final class DefaultBankRepositoryServiceService implements BankRepositoryService {
+public final class DefaultBankRepositoryService implements BankRepositoryService {
 
   private final LoggerService logger;
   private final DatabaseAsyncService dbAsync;
 
-  public DefaultBankRepositoryServiceService(ServiceAccessor accessor) {
+  public DefaultBankRepositoryService(ServiceAccessor accessor) {
     this.logger = accessor.getService(LoggerService.class);
     this.dbAsync = NexEconomyPlugin.getNexLogicService()
         .findService(DatabaseAsyncService.class)
