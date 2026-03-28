@@ -7,9 +7,7 @@ import io.nexstudios.serviceregistry.di.ServiceAccessor;
 import org.bukkit.Bukkit;
 import org.bukkit.entity.Player;
 
-import java.util.HashSet;
-import java.util.Set;
-import java.util.UUID;
+import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicInteger;
 
@@ -61,6 +59,41 @@ public final class BankAccountPresenceService implements Service {
       accountsByPlayer.put(playerUuid, Set.of());
       return null;
     });
+  }
+
+  /**
+   * Returns the number of "other banks" the player is a member of (ownerUuid != playerUuid),
+   * but only if the player is currently tracked in the presence cache AND we can resolve
+   * ownerUuid for all referenced accounts from the local BankAccountCacheService.
+   *
+   * If not tracked or not fully resolvable, returns OptionalInt.empty() so callers can fallback to DB.
+   */
+  public OptionalInt countOtherBankMembershipsIfTracked(UUID playerUuid) {
+    if (playerUuid == null) return OptionalInt.empty();
+
+    Player p = Bukkit.getPlayer(playerUuid);
+    if (p == null || !p.isOnline()) return OptionalInt.empty();
+
+    Set<UUID> accountIds = accountsByPlayer.get(playerUuid);
+    if (accountIds == null) return OptionalInt.empty();
+
+    int count = 0;
+
+    for (UUID bankAccountId : accountIds) {
+      if (bankAccountId == null) continue;
+
+      BankAccountCacheService.View view = cache == null ? null : cache.get(bankAccountId);
+      if (view == null || view.account() == null || view.account().getOwnerUuid() == null) {
+        return OptionalInt.empty();
+      }
+
+      UUID owner = view.account().getOwnerUuid();
+      if (!playerUuid.equals(owner)) {
+        count++;
+      }
+    }
+
+    return OptionalInt.of(count);
   }
 
   public void onPlayerQuit(UUID playerUuid) {
@@ -136,5 +169,17 @@ public final class BankAccountPresenceService implements Service {
         cache.invalidate(bankAccountId);
       }
     }
+  }
+
+  public Optional<Set<UUID>> bankAccountIdsIfTracked(UUID playerUuid) {
+    if (playerUuid == null) return Optional.empty();
+
+    Player p = Bukkit.getPlayer(playerUuid);
+    if (p == null || !p.isOnline()) return Optional.empty();
+
+    Set<UUID> ids = accountsByPlayer.get(playerUuid);
+    if (ids == null) return Optional.empty();
+
+    return Optional.of(Set.copyOf(ids));
   }
 }

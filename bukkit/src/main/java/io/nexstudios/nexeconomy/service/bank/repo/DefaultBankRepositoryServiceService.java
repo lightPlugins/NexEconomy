@@ -608,6 +608,50 @@ public final class DefaultBankRepositoryServiceService implements BankRepository
     });
   }
 
+  @Override
+  public CompletableFuture<Long> countOtherBankMemberships(UUID memberUuid) {
+    if (memberUuid == null) return CompletableFuture.completedFuture(0L);
+
+    return dbAsync.executeAsyncInTransaction(em -> {
+      Long count = em.createQuery(
+              """
+              select count(distinct a.id)
+              from BankMemberEntity m
+              join BankAccountEntity a on a.id = m.bankAccountId
+              where m.memberUuid = :member
+                and a.ownerUuid <> :member
+              """,
+              Long.class
+          )
+          .setParameter("member", memberUuid)
+          .getSingleResult();
+
+      return count == null ? 0L : count;
+    });
+  }
+
+  @Override
+  public CompletableFuture<List<BankTransactionEntity>> listRecentTransactions(UUID bankAccountId, int limit) {
+    if (bankAccountId == null) return CompletableFuture.completedFuture(List.of());
+    int lim = limit <= 0 ? 10 : Math.min(limit, 100);
+
+    Function<EntityManager, List<BankTransactionEntity>> work = em -> em.createQuery(
+            """
+            select t
+            from BankTransactionEntity t
+            where t.bankAccountId = :acc
+            order by t.createdAt desc
+            """,
+            BankTransactionEntity.class
+        )
+        .setParameter("acc", bankAccountId)
+        .setMaxResults(lim)
+        .getResultList();
+
+    return dbAsync.executeAsyncInTransaction(work)
+        .thenApply(list -> list == null ? List.of() : List.copyOf(list));
+  }
+
   private static String normalizeId(String s) {
     return s == null ? "" : s.trim().toLowerCase(java.util.Locale.ROOT);
   }

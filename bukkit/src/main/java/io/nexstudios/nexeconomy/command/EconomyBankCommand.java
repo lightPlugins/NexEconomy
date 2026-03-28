@@ -12,8 +12,11 @@ import io.nexstudios.nexeconomy.definition.CurrencyDefinition;
 import io.nexstudios.nexeconomy.definition.CurrencyType;
 import io.nexstudios.nexeconomy.definition.MantissaAmount;
 import io.nexstudios.nexeconomy.service.bank.BankService;
+import io.nexstudios.nexeconomy.service.bank.repo.BankRepositoryService;
 import io.nexstudios.nexeconomy.service.bank.repo.InviteLookupRow;
+import io.nexstudios.nexeconomy.service.bank.transaction.BankTransactionService;
 import io.nexstudios.nexeconomy.service.registry.CurrencyRegistryService;
+import io.nexstudios.nexlogic.bukkit.services.entity.nexeconomy.BankTransactionEntity;
 import io.nexstudios.serviceregistry.di.Dependencies;
 import io.nexstudios.serviceregistry.di.Service;
 import io.nexstudios.serviceregistry.di.ServiceAccessor;
@@ -24,6 +27,10 @@ import org.bukkit.OfflinePlayer;
 import org.bukkit.entity.Player;
 
 import java.math.BigDecimal;
+import java.time.Instant;
+import java.time.ZoneId;
+import java.time.format.DateTimeFormatter;
+import java.util.List;
 import java.util.Locale;
 import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
@@ -36,18 +43,26 @@ import java.util.stream.Collectors;
 @Dependencies({
     ComponentService.class,
     BankService.class,
-    CurrencyRegistryService.class
+    CurrencyRegistryService.class,
+    BankTransactionService.class
 })
 public final class EconomyBankCommand implements Service {
+
+  private static final int TX_LIMIT = 10;
+
+  private static final DateTimeFormatter TX_TIME_FMT =
+      DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm").withZone(ZoneId.systemDefault());
 
   private final ComponentService components;
   private final BankService bankService;
   private final CurrencyRegistryService currencies;
+  private final BankTransactionService txService;
 
   public EconomyBankCommand(ServiceAccessor accessor) {
     this.components = accessor.getService(ComponentService.class);
     this.bankService = accessor.getService(BankService.class);
     this.currencies = accessor.getService(CurrencyRegistryService.class);
+    this.txService = accessor.getService(BankTransactionService.class);
   }
 
   @Command(value = "balance <bank>", permission = "nexeconomy.bank.balance")
@@ -75,6 +90,64 @@ public final class EconomyBankCommand implements Service {
               Placeholder.parsed("currency", view.currency == null ? "" : view.currency.symbolPlural())
           ))
           .build());
+    }).exceptionally(ex -> {
+      sendBankError(sender, ex);
+      return null;
+    });
+
+    return 1;
+  }
+
+  @Command(value = "transactions <bank>", permission = "nexeconomy.bank.transactions")
+  public int transactionsSelf(
+      NexPaperCommandSource source,
+      @Arg("bank") @Suggest(BankSuggestion.class) String bank
+  ) {
+    Player sender = (Player) source.sender();
+    if (sender == null) return 0;
+
+    String bankId = normalize(bank);
+    if (bankId.isBlank()) return 0;
+
+    UUID ownerUuid = sender.getUniqueId();
+    UUID viewerUuid = sender.getUniqueId();
+
+    resolveCurrency(bankId).thenCompose(cur ->
+        txService.transactionsVisibleTo(bankId, ownerUuid, viewerUuid, TX_LIMIT)
+            .thenApply(list -> new TxListView(list, cur))
+    ).thenAccept(view -> {
+      var list = view.transactions;
+      if (list == null || list.isEmpty()) {
+        sender.sendMessage(components.builder(sender, "bank.transactions.empty", "NotDefined", true)
+            .resolver(TagResolver.resolver(Placeholder.parsed("bank", bankId)))
+            .build());
+        return;
+      }
+
+      sender.sendMessage(components.builder(sender, "bank.transactions.header", "NotDefined", true)
+          .resolver(TagResolver.resolver(
+              Placeholder.parsed("bank", bankId),
+              Placeholder.parsed("owner", sender.getName())
+          ))
+          .build());
+
+      int fd = view.currency == null ? 0 : view.currency.fractionDigits();
+
+      for (var tx : list) {
+        if (tx == null) continue;
+
+        String time = formatTime(tx.getCreatedAt());
+        String actor = nameOrUuid(tx.getActorUuid());
+        String amountColored = formatAmountColored(tx.getType(), MantissaAmount.parseStorage(tx.getAmountMantissa(), tx.getAmountExp3()), fd);
+
+        sender.sendMessage(components.builder(sender, "bank.transactions.row", "NotDefined", false)
+            .resolver(TagResolver.resolver(
+                Placeholder.parsed("time", time),
+                Placeholder.parsed("actor", actor),
+                Placeholder.parsed("amount", amountColored)
+            ))
+            .build());
+      }
     }).exceptionally(ex -> {
       sendBankError(sender, ex);
       return null;
@@ -209,15 +282,16 @@ public final class EconomyBankCommand implements Service {
   public int inviteSelf(
       NexPaperCommandSource source,
       @Arg("bank") @Suggest(BankSuggestion.class) String bank,
-      @Arg("player") @Suggest(PlayerSuggestion.class) Player player,
+      @Arg("player") @Suggest(PlayerSuggestion.class) String playerName,
       @Arg("role") @Suggest(BankRoleSuggestion.class) String role
   ) {
     Player sender = (Player) source.sender();
     if (sender == null) return 0;
 
+    Player player = (playerName == null || playerName.isBlank()) ? null : Bukkit.getPlayerExact(playerName.trim());
     if (player == null || !player.isOnline()) {
       sender.sendMessage(components.builder(sender, "general.player-not-found", "NotDefined", true)
-          .resolver(TagResolver.resolver(Placeholder.parsed("player", "unknown")))
+          .resolver(TagResolver.resolver(Placeholder.parsed("player", playerName == null ? "unknown" : playerName)))
           .build());
       return 0;
     }
@@ -264,6 +338,116 @@ public final class EconomyBankCommand implements Service {
   }
 
   // --- other (member) commands ---
+
+  @Command(value = "other list", permission = "nexeconomy.bank.other.list")
+  public int otherList(NexPaperCommandSource source) {
+    Player sender = (Player) source.sender();
+    if (sender == null) return 0;
+
+    UUID uuid = sender.getUniqueId();
+
+    bankService.otherBanks(uuid).thenAccept(list -> {
+      if (list == null || list.isEmpty()) {
+        sender.sendMessage(components.builder(sender, "bank.other.list.empty", "NotDefined", true).build());
+        return;
+      }
+
+      sender.sendMessage(components.builder(sender, "bank.other.list.header", "NotDefined", true)
+          .resolver(TagResolver.resolver(Placeholder.parsed("amount", String.valueOf(list.size()))))
+          .build());
+
+      for (BankRepositoryService.BankAccountRef ref : list) {
+        if (ref == null) continue;
+
+        String ownerShown = nameOrUuid(ref.ownerUuid());
+        String bankShown = ref.bankIdLower() == null ? "" : ref.bankIdLower();
+
+        sender.sendMessage(components.builder(sender, "bank.other.list.row", "NotDefined", true)
+            .resolver(TagResolver.resolver(
+                Placeholder.parsed("bank", bankShown),
+                Placeholder.parsed("owner", ownerShown),
+                Placeholder.parsed("owner-uuid", ref.ownerUuid() == null ? "" : ref.ownerUuid().toString())
+            ))
+            .build());
+      }
+    }).exceptionally(ex -> {
+      sendBankError(sender, ex);
+      return null;
+    });
+
+    return 1;
+  }
+
+  @Command(value = "other transactions <bank> <owner>", permission = "nexeconomy.bank.other.transactions")
+  public int transactionsOther(
+      NexPaperCommandSource source,
+      @Arg("bank") @Suggest(BankSuggestion.class) String bank,
+      @Arg("owner") @Suggest(BankOwnerSuggestion.class) String ownerName
+  ) {
+    Player sender = (Player) source.sender();
+    if (sender == null) return 0;
+
+    UUID ownerUuid = resolvePlayerUuidByName(ownerName);
+    if (ownerUuid == null) {
+      sender.sendMessage(components.builder(sender, "general.player-not-found", "NotDefined", true)
+          .resolver(TagResolver.resolver(Placeholder.parsed("player", ownerName == null ? "unknown" : ownerName)))
+          .build());
+      return 0;
+    }
+
+    String bankId = normalize(bank);
+    if (bankId.isBlank()) return 0;
+
+    UUID viewerUuid = sender.getUniqueId();
+
+    resolveCurrency(bankId).thenCompose(cur ->
+        txService.transactionsVisibleTo(bankId, ownerUuid, viewerUuid, TX_LIMIT)
+            .thenApply(list -> new TxListView(list, cur))
+    ).thenAccept(view -> {
+      var list = view.transactions;
+      String ownerShown = nameOrUuid(ownerUuid);
+
+      if (list == null || list.isEmpty()) {
+        sender.sendMessage(components.builder(sender, "bank.transactions.other.empty", "NotDefined", true)
+            .resolver(TagResolver.resolver(
+                Placeholder.parsed("bank", bankId),
+                Placeholder.parsed("owner", ownerShown)
+            ))
+            .build());
+        return;
+      }
+
+      sender.sendMessage(components.builder(sender, "bank.transactions.other.header", "NotDefined", true)
+          .resolver(TagResolver.resolver(
+              Placeholder.parsed("bank", bankId),
+              Placeholder.parsed("owner", ownerShown)
+          ))
+          .build());
+
+      int fd = view.currency == null ? 0 : view.currency.fractionDigits();
+
+      for (var tx : list) {
+        if (tx == null) continue;
+
+        String time = formatTime(tx.getCreatedAt());
+        String actor = nameOrUuid(tx.getActorUuid());
+        String amountColored = formatAmountColored(tx.getType(), MantissaAmount.parseStorage(tx.getAmountMantissa(), tx.getAmountExp3()), fd);
+
+        sender.sendMessage(components.builder(sender, "bank.transactions.row", "NotDefined", false)
+            .resolver(TagResolver.resolver(
+                Placeholder.parsed("time", time),
+                Placeholder.parsed("actor", actor),
+                Placeholder.parsed("amount", amountColored)
+            ))
+            .build());
+      }
+    }).exceptionally(ex -> {
+      sendBankError(sender, ex);
+      return null;
+    });
+
+    return 1;
+  }
 
   @Command(value = "other balance <bank> <owner>", permission = "nexeconomy.bank.other.balance")
   public int balanceOther(
@@ -459,7 +643,7 @@ public final class EconomyBankCommand implements Service {
       NexPaperCommandSource source,
       @Arg("bank") @Suggest(BankSuggestion.class) String bank,
       @Arg("owner") @Suggest(BankOwnerSuggestion.class) String ownerName,
-      @Arg("player") @Suggest(PlayerSuggestion.class) Player player,
+      @Arg("player") @Suggest(PlayerSuggestion.class) String playerName,
       @Arg("role") @Suggest(BankRoleSuggestion.class) String role
   ) {
     Player sender = (Player) source.sender();
@@ -473,9 +657,10 @@ public final class EconomyBankCommand implements Service {
       return 0;
     }
 
+    Player player = (playerName == null || playerName.isBlank()) ? null : Bukkit.getPlayerExact(playerName.trim());
     if (player == null || !player.isOnline()) {
       sender.sendMessage(components.builder(sender, "general.player-not-found", "NotDefined", true)
-          .resolver(TagResolver.resolver(Placeholder.parsed("player", "unknown")))
+          .resolver(TagResolver.resolver(Placeholder.parsed("player", playerName == null ? "unknown" : playerName)))
           .build());
       return 0;
     }
@@ -816,6 +1001,11 @@ public final class EconomyBankCommand implements Service {
       return;
     }
 
+    if (isMarker(root, "cannot invite owner")) {
+      player.sendMessage(components.builder(player, "bank.errors.cannot-invite-self", "NotDefined", true).build());
+      return;
+    }
+
     String msg = root == null
         ? "Unknown"
         : (root.getMessage() == null || root.getMessage().isBlank() ? root.getClass().getSimpleName() : root.getMessage());
@@ -828,6 +1018,25 @@ public final class EconomyBankCommand implements Service {
         .build());
   }
 
+  private static String formatTime(Instant createdAt) {
+    if (createdAt == null) return "-";
+    return TX_TIME_FMT.format(createdAt);
+  }
+
+  private static String formatAmountColored(Object type, MantissaAmount amount, int fd) {
+    MantissaAmount a = amount == null ? MantissaAmount.zero() : amount;
+    String shown = AmountNotation.formatShort(a, Math.max(0, fd));
+
+    String typeStr = type == null ? "" : String.valueOf(type).trim().toUpperCase(Locale.ROOT);
+    boolean deposit = "DEPOSIT".equals(typeStr);
+
+    if (deposit) {
+      return "<green>+" + shown + "</green>";
+    }
+    return "<red>-" + shown + "</red>";
+  }
+
+  private record TxListView(List<BankTransactionEntity> transactions, CurrencyDefinition currency) {}
   private record AmountView(MantissaAmount amount, CurrencyDefinition currency) {}
   private record BalanceView(MantissaAmount balance, CurrencyDefinition currency) {}
 

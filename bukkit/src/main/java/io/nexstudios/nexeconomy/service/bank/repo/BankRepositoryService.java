@@ -45,7 +45,6 @@ public interface BankRepositoryService extends Service {
 
   CompletableFuture<Boolean> deleteInvite(UUID bankAccountId, UUID inviteeUuid);
 
-
   CompletableFuture<MantissaAmount> addWithdrawUsage(
       UUID bankAccountId,
       UUID memberUuid,
@@ -63,10 +62,15 @@ public interface BankRepositoryService extends Service {
       String meta
   );
 
+  CompletableFuture<List<BankTransactionEntity>> listRecentTransactions(UUID bankAccountId, int limit);
+
+
   CompletableFuture<List<UUID>> findOwnerUuidsForMember(UUID memberUuid);
 
   CompletableFuture<List<UUID>> findOwnerUuidsForMember(String bankIdLower, UUID memberUuid);
 
   record BankAccountRef(UUID bankAccountId, String bankIdLower, UUID ownerUuid) {}
   CompletableFuture<List<BankAccountRef>> findBankAccountsForMember(UUID memberUuid);
+
+  CompletableFuture<Long> countOtherBankMemberships(UUID memberUuid);
 }

@@ -1,5 +1,7 @@
 package io.nexstudios.nexeconomy.service.bank;
 
+import io.nexstudios.configservice.config.FileConfiguration;
+import io.nexstudios.configservice.service.singlereader.FileReaderService;
 import io.nexstudios.nexeconomy.definition.AmountNotation;
 import io.nexstudios.nexeconomy.definition.CurrencyDefinition;
 import io.nexstudios.nexeconomy.definition.CurrencyType;
@@ -22,13 +24,11 @@ import org.bukkit.Bukkit;
 import org.bukkit.entity.Player;
 
 import java.math.BigDecimal;
+import java.nio.file.Path;
 import java.time.Instant;
 import java.time.ZoneId;
 import java.time.ZonedDateTime;
-import java.util.List;
-import java.util.Locale;
-import java.util.Optional;
-import java.util.UUID;
+import java.util.*;
 import java.util.concurrent.CompletableFuture;
 
 @Dependencies({
@@ -39,7 +39,8 @@ import java.util.concurrent.CompletableFuture;
     BankAccountPresenceService.class,
     CurrencyRegistryService.class,
     EconomyService.class,
-    EconomyPlayerCacheService.class
+    EconomyPlayerCacheService.class,
+    FileReaderService.class
 })
 public final class DefaultBankService implements BankService, Service {
 
@@ -50,10 +51,17 @@ public final class DefaultBankService implements BankService, Service {
   private final BankAccountPresenceService presence;
   private final CurrencyRegistryService currencies;
   private final EconomyService economy;
+  private final FileReaderService fileReader;
+  private volatile FileConfiguration settings;
 
-  private static final String ERR_INVITEE_ALREADY_IN_ANOTHER_BANK = "invitee_already_in_another_bank";
-  private static final String ERR_INVITEE_ALREADY_MEMBER_SOMEWHERE = "invitee_already_member_somewhere";
   private static final String ERR_OWNER_CANNOT_LEAVE = "owner_cannot_leave";
+  private static final String ERR_INVITEE_MEMBER_LIMIT_REACHED = "invitee_member_limit_reached";
+
+  private volatile int maxOtherBankMemberships = DEFAULT_MAX_OTHER_BANK_MEMBERSHIPS;
+
+  private static final int DEFAULT_MAX_OTHER_BANK_MEMBERSHIPS = 1; // keep old behavior by default (only one bank member)
+  private static final int MIN_MAX_OTHER_BANK_MEMBERSHIPS = -1;   // -1 = unlimited
+  private static final int MAX_MAX_OTHER_BANK_MEMBERSHIPS = 50;
 
   public DefaultBankService(ServiceAccessor accessor) {
     this.banks = accessor.getService(BankRegistryService.class);
@@ -63,8 +71,26 @@ public final class DefaultBankService implements BankService, Service {
     this.presence = accessor.getService(BankAccountPresenceService.class);
     this.currencies = accessor.getService(CurrencyRegistryService.class);
     this.economy = accessor.getService(EconomyService.class);
+    this.fileReader = accessor.getService(FileReaderService.class);
+
+    reload();
   }
 
+  @Override
+  public void reload() {
+    this.settings = fileReader == null
+        ? null
+        : fileReader.load(Path.of("settings.yml"), "settings.yml", true);
+
+    int raw = settings == null
+        ? DEFAULT_MAX_OTHER_BANK_MEMBERSHIPS
+        : settings.getInt("bank.max-other-banks", DEFAULT_MAX_OTHER_BANK_MEMBERSHIPS);
+
+    if (raw < MIN_MAX_OTHER_BANK_MEMBERSHIPS) raw = MIN_MAX_OTHER_BANK_MEMBERSHIPS;
+    if (raw > MAX_MAX_OTHER_BANK_MEMBERSHIPS) raw = MAX_MAX_OTHER_BANK_MEMBERSHIPS;
+
+    this.maxOtherBankMemberships = raw;
+  }
   @Override
   public CompletableFuture<Optional<BankDefinition>> bank(String bankId) {
     return CompletableFuture.completedFuture(banks.bank(normalizeId(bankId)));
@@ -98,6 +124,61 @@ public final class DefaultBankService implements BankService, Service {
       }
 
       return view.balance() == null ? MantissaAmount.zero() : view.balance();
+    });
+  }
+
+  @Override
+  public CompletableFuture<List<BankRepositoryService.BankAccountRef>> otherBanks(UUID memberUuid) {
+    if (memberUuid == null) return CompletableFuture.completedFuture(List.of());
+
+    // 1) Presence-first (online + tracked)
+    if (presence != null) {
+      Optional<Set<UUID>> idsOpt = presence.bankAccountIdsIfTracked(memberUuid);
+      if (idsOpt.isPresent()) {
+        ArrayList<BankRepositoryService.BankAccountRef> out = new ArrayList<>();
+
+        for (UUID bankAccountId : idsOpt.get()) {
+          if (bankAccountId == null) continue;
+
+          BankAccountCacheService.View v = cache == null ? null : cache.get(bankAccountId);
+          if (v == null || v.account() == null || v.account().getBankIdLower() == null || v.account().getOwnerUuid() == null) {
+            // not fully resolvable -> fallback to DB
+            out.clear();
+            break;
+          }
+
+          UUID owner = v.account().getOwnerUuid();
+          if (memberUuid.equals(owner)) continue; // "other" banks only
+
+          out.add(new BankRepositoryService.BankAccountRef(
+              bankAccountId,
+              v.account().getBankIdLower(),
+              owner
+          ));
+        }
+
+        if (!out.isEmpty()) {
+          return CompletableFuture.completedFuture(List.copyOf(out));
+        }
+        // Note: if tracked but out empty because user is only owner of own banks, we can return empty immediately.
+        // If we broke due to missing data, we fall through to DB.
+        if (idsOpt.get().isEmpty()) {
+          return CompletableFuture.completedFuture(List.of());
+        }
+      }
+    }
+
+    // 2) DB fallback (async)
+    return repo.findBankAccountsForMember(memberUuid).thenApply(refs -> {
+      if (refs == null || refs.isEmpty()) return List.of();
+
+      ArrayList<BankRepositoryService.BankAccountRef> out = new ArrayList<>(refs.size());
+      for (BankRepositoryService.BankAccountRef r : refs) {
+        if (r == null || r.bankAccountId() == null || r.ownerUuid() == null) continue;
+        if (memberUuid.equals(r.ownerUuid())) continue; // "other" banks only
+        out.add(r);
+      }
+      return List.copyOf(out);
     });
   }
 
@@ -242,9 +323,9 @@ public final class DefaultBankService implements BankService, Service {
         return CompletableFuture.failedFuture(new IllegalStateException("member limit reached"));
       }
 
-      return repo.isMemberOfAnyOtherAccount(inviteeUuid, inviteeUuid).thenCompose(inOther -> {
-        if (Boolean.TRUE.equals(inOther)) {
-          return CompletableFuture.failedFuture(new IllegalStateException(ERR_INVITEE_ALREADY_IN_ANOTHER_BANK));
+      return enforceMaxOtherBankMemberships(inviteeUuid).thenCompose(ok -> {
+        if (!Boolean.TRUE.equals(ok)) {
+          return CompletableFuture.failedFuture(new IllegalStateException(ERR_INVITEE_MEMBER_LIMIT_REACHED));
         }
 
         return repo.upsertInvite(bankAccountId, inviteeUuid, actorUuid, finalRoleLower).thenApply(inv -> {
@@ -304,9 +385,9 @@ public final class DefaultBankService implements BankService, Service {
 
         String finalRoleLower = roleLower;
 
-        return repo.isMemberOfAnyOtherAccount(inviteeUuid, inviteeUuid).thenCompose(inOther -> {
-          if (Boolean.TRUE.equals(inOther)) {
-            return CompletableFuture.failedFuture(new IllegalStateException(ERR_INVITEE_ALREADY_MEMBER_SOMEWHERE));
+        return enforceMaxOtherBankMemberships(inviteeUuid).thenCompose(ok -> {
+          if (!Boolean.TRUE.equals(ok)) {
+            return CompletableFuture.failedFuture(new IllegalStateException(ERR_INVITEE_MEMBER_LIMIT_REACHED));
           }
 
           return repo.upsertMember(bankAccountId, inviteeUuid, inv.getInvitedByUuid(), finalRoleLower)
@@ -354,145 +435,143 @@ public final class DefaultBankService implements BankService, Service {
 
   @Override
   public CompletableFuture<MantissaAmount> deposit(String bankId, UUID ownerUuid, UUID actorUuid, MantissaAmount amount) {
-    String bankIdLower = normalizeId(bankId);
-    if (bankIdLower.isBlank()) return CompletableFuture.failedFuture(new IllegalArgumentException("bankId is blank"));
-    if (ownerUuid == null) return CompletableFuture.failedFuture(new IllegalArgumentException("ownerUuid is null"));
-    if (actorUuid == null) return CompletableFuture.failedFuture(new IllegalArgumentException("actorUuid is null"));
+    if (ownerUuid == null) return failedArg("ownerUuid is null");
+    if (actorUuid == null) return failedArg("actorUuid is null");
 
-    MantissaAmount requested = amount == null ? MantissaAmount.zero() : MantissaAmount.normalize(amount);
-    if (requested.isNegative() || requested.compareTo(MantissaAmount.zero()) == 0) {
-      return CompletableFuture.failedFuture(new IllegalArgumentException("invalid amount"));
-    }
+    MantissaAmount requested = requirePositiveAmount(amount);
+    if (requested == null) return failedArg("invalid amount");
 
-    BankDefinition def = banks.bank(bankIdLower).orElse(null);
-    if (def == null || !def.enabled()) return CompletableFuture.failedFuture(new IllegalStateException("bank not available"));
+    return requireEnabledBankCtx(bankId).thenCompose(ctx -> {
+      String bankIdLower = ctx.bankIdLower();
+      BankDefinition def = ctx.def();
 
-    CurrencyDefinition currency = currencies.currency(def.currencyIdLower());
-    if (currency == null) return CompletableFuture.failedFuture(new IllegalStateException("bank currency not found"));
+      CurrencyDefinition currency = currencies.currency(def.currencyIdLower());
+      if (currency == null) return CompletableFuture.failedFuture(new IllegalStateException("bank currency not found"));
 
-    Player actor = Bukkit.getPlayer(actorUuid);
-    if (actor == null || !actor.isOnline()) return CompletableFuture.failedFuture(new IllegalStateException("player must be online"));
+      Player actor = Bukkit.getPlayer(actorUuid);
+      if (actor == null || !actor.isOnline()) return CompletableFuture.failedFuture(new IllegalStateException("player must be online"));
 
-    MantissaAmount delta = normalizeForCurrency(currency, requested);
+      MantissaAmount delta = normalizeForCurrency(currency, requested);
 
-    return getOrCreateAccount(bankIdLower, ownerUuid).thenCompose(acc ->
-        requireRoleCached(def, bankIdLower, ownerUuid, actorUuid).thenCompose(role -> {
-          if (!role.canDeposit()) return CompletableFuture.failedFuture(new IllegalStateException("no permission"));
+      return getOrCreateAccount(bankIdLower, ownerUuid).thenCompose(acc ->
+          requireRoleCached(def, bankIdLower, ownerUuid, actorUuid).thenCompose(role -> {
+            if (!role.canDeposit()) return CompletableFuture.failedFuture(new IllegalStateException("no permission"));
 
-          return enforceLevelCap(def, currency, acc, delta).thenCompose(allowed -> {
-            if (allowed.compareTo(MantissaAmount.zero()) == 0) {
-              return CompletableFuture.failedFuture(new IllegalStateException("max balance reached"));
-            }
+            return enforceLevelCap(def, currency, acc, delta).thenCompose(allowed -> {
+              if (allowed.compareTo(MantissaAmount.zero()) == 0) {
+                return CompletableFuture.failedFuture(new IllegalStateException("max balance reached"));
+              }
 
-            return economy.remove(actor, currency.id(), allowed).thenCompose(ok -> {
-              if (!ok) return CompletableFuture.failedFuture(new IllegalStateException("insufficient funds"));
+              return economy.remove(actor, currency.id(), allowed).thenCompose(ok -> {
+                if (!ok) return CompletableFuture.failedFuture(new IllegalStateException("insufficient funds"));
 
-              return repo.applyBalanceDelta(acc.getId(), allowed).thenCompose(nextBalance -> {
-                return repo.appendTransaction(
-                    acc.getId(),
-                    BankTransactionEntity.Type.DEPOSIT,
-                    actorUuid,
-                    ownerUuid,
-                    allowed,
-                    null
-                ).thenApply(ignoredTx -> {
-                  if (cache != null) cache.invalidate(acc.getId());
-                  if (redisSync != null) redisSync.publishInvalidateAccount(acc.getId());
-                  return allowed;
+                return repo.applyBalanceDelta(acc.getId(), allowed).thenCompose(nextBalance -> {
+                  return repo.appendTransaction(
+                      acc.getId(),
+                      BankTransactionEntity.Type.DEPOSIT,
+                      actorUuid,
+                      ownerUuid,
+                      allowed,
+                      null
+                  ).thenApply(ignoredTx -> {
+                    if (cache != null) cache.invalidate(acc.getId());
+                    if (redisSync != null) redisSync.publishInvalidateAccount(acc.getId());
+                    return allowed;
+                  });
+                }).exceptionallyCompose(ex -> {
+                  return economy.add(actor, currency.id(), allowed).thenCompose(refundOk ->
+                      CompletableFuture.failedFuture(ex)
+                  );
                 });
-              }).exceptionallyCompose(ex -> {
-                return economy.add(actor, currency.id(), allowed).thenCompose(refundOk ->
-                    CompletableFuture.failedFuture(ex)
-                );
               });
             });
-          });
-        })
-    );
+          })
+      );
+    });
   }
 
   @Override
   public CompletableFuture<MantissaAmount> withdraw(String bankId, UUID ownerUuid, UUID actorUuid, MantissaAmount amount) {
-    String bankIdLower = normalizeId(bankId);
-    if (bankIdLower.isBlank()) return CompletableFuture.failedFuture(new IllegalArgumentException("bankId is blank"));
-    if (ownerUuid == null) return CompletableFuture.failedFuture(new IllegalArgumentException("ownerUuid is null"));
-    if (actorUuid == null) return CompletableFuture.failedFuture(new IllegalArgumentException("actorUuid is null"));
+    if (ownerUuid == null) return failedArg("ownerUuid is null");
+    if (actorUuid == null) return failedArg("actorUuid is null");
 
-    MantissaAmount requested = amount == null ? MantissaAmount.zero() : MantissaAmount.normalize(amount);
-    if (requested.isNegative() || requested.compareTo(MantissaAmount.zero()) == 0) {
-      return CompletableFuture.failedFuture(new IllegalArgumentException("invalid amount"));
-    }
+    MantissaAmount requested = requirePositiveAmount(amount);
+    if (requested == null) return failedArg("invalid amount");
 
-    BankDefinition def = banks.bank(bankIdLower).orElse(null);
-    if (def == null || !def.enabled()) return CompletableFuture.failedFuture(new IllegalStateException("bank not available"));
+    return requireEnabledBankCtx(bankId).thenCompose(ctx -> {
+      String bankIdLower = ctx.bankIdLower();
+      BankDefinition def = ctx.def();
 
-    BankDefinition.MemberSystem ms = def.memberSystem();
-    if (ms == null || !ms.enabled()) return CompletableFuture.failedFuture(new IllegalStateException("member system disabled"));
+      BankDefinition.MemberSystem ms = def.memberSystem();
+      if (ms == null || !ms.enabled()) {
+        return CompletableFuture.failedFuture(new IllegalStateException("member system disabled"));
+      }
 
-    CurrencyDefinition currency = currencies.currency(def.currencyIdLower());
-    if (currency == null) return CompletableFuture.failedFuture(new IllegalStateException("bank currency not found"));
+      CurrencyDefinition currency = currencies.currency(def.currencyIdLower());
+      if (currency == null) return CompletableFuture.failedFuture(new IllegalStateException("bank currency not found"));
 
-    Player actor = Bukkit.getPlayer(actorUuid);
-    if (actor == null || !actor.isOnline()) return CompletableFuture.failedFuture(new IllegalStateException("player must be online"));
+      Player actor = Bukkit.getPlayer(actorUuid);
+      if (actor == null || !actor.isOnline()) return CompletableFuture.failedFuture(new IllegalStateException("player must be online"));
 
-    MantissaAmount delta = normalizeForCurrency(currency, requested);
+      MantissaAmount delta = normalizeForCurrency(currency, requested);
 
-    return getOrCreateAccount(bankIdLower, ownerUuid).thenCompose(acc ->
-        requireRoleCached(def, bankIdLower, ownerUuid, actorUuid).thenCompose(role -> {
-          BankDefinition.WithdrawDefinition wd = role.withdraw();
-          boolean canWithdraw = wd != null && wd.canWithdraw();
-          if (!canWithdraw) return CompletableFuture.failedFuture(new IllegalStateException("no permission"));
+      return getOrCreateAccount(bankIdLower, ownerUuid).thenCompose(acc ->
+          requireRoleCached(def, bankIdLower, ownerUuid, actorUuid).thenCompose(role -> {
+            BankDefinition.WithdrawDefinition wd = role.withdraw();
+            boolean canWithdraw = wd != null && wd.canWithdraw();
+            if (!canWithdraw) return CompletableFuture.failedFuture(new IllegalStateException("no permission"));
 
-          return repo.loadBalance(acc.getId()).thenCompose(currentBal -> {
-            MantissaAmount bankBalance = currentBal == null ? MantissaAmount.zero() : currentBal;
-            if (bankBalance.compareTo(MantissaAmount.zero()) <= 0) {
-              return CompletableFuture.failedFuture(new IllegalStateException("bank empty"));
-            }
+            return repo.loadBalance(acc.getId()).thenCompose(currentBal -> {
+              MantissaAmount bankBalance = currentBal == null ? MantissaAmount.zero() : currentBal;
+              if (bankBalance.compareTo(MantissaAmount.zero()) <= 0) {
+                return CompletableFuture.failedFuture(new IllegalStateException("bank empty"));
+              }
 
-            MantissaAmount cappedByBalance = min(delta, bankBalance);
+              MantissaAmount cappedByBalance = min(delta, bankBalance);
 
-            ZoneId zone = resolveBankZone(def);
-            long hourStart = windowStartEpoch(zone, BankWithdrawUsageEntity.WindowType.HOURLY);
-            long dayStart = windowStartEpoch(zone, BankWithdrawUsageEntity.WindowType.DAILY);
+              ZoneId zone = resolveBankZone(def);
+              long hourStart = windowStartEpoch(zone, BankWithdrawUsageEntity.WindowType.HOURLY);
+              long dayStart = windowStartEpoch(zone, BankWithdrawUsageEntity.WindowType.DAILY);
 
-            MantissaAmount dailyLimit = parseLimit(currency, wd.dailyLimitRaw());
-            MantissaAmount hourlyLimit = parseLimit(currency, wd.hourlyLimitRaw());
+              MantissaAmount dailyLimit = parseLimit(currency, wd.dailyLimitRaw());
+              MantissaAmount hourlyLimit = parseLimit(currency, wd.hourlyLimitRaw());
 
-            return computeAllowedByLimits(acc.getId(), actorUuid, cappedByBalance, dailyLimit, hourlyLimit, dayStart, hourStart)
-                .thenCompose(allowed -> {
-                  if (allowed.compareTo(MantissaAmount.zero()) == 0) {
-                    return CompletableFuture.failedFuture(new IllegalStateException("limit reached"));
-                  }
+              return computeAllowedByLimits(acc.getId(), actorUuid, cappedByBalance, dailyLimit, hourlyLimit, dayStart, hourStart)
+                  .thenCompose(allowed -> {
+                    if (allowed.compareTo(MantissaAmount.zero()) == 0) {
+                      return CompletableFuture.failedFuture(new IllegalStateException("limit reached"));
+                    }
 
-                  return repo.applyBalanceDelta(acc.getId(), negate(allowed)).thenCompose(nextBank -> {
-                    return economy.add(actor, currency.id(), allowed).thenCompose(ok -> {
-                      if (!ok) {
-                        return repo.applyBalanceDelta(acc.getId(), allowed).thenCompose(refund ->
-                            CompletableFuture.failedFuture(new IllegalStateException("wallet add failed"))
+                    return repo.applyBalanceDelta(acc.getId(), negate(allowed)).thenCompose(nextBank -> {
+                      return economy.add(actor, currency.id(), allowed).thenCompose(ok -> {
+                        if (!ok) {
+                          return repo.applyBalanceDelta(acc.getId(), allowed).thenCompose(refund ->
+                              CompletableFuture.failedFuture(new IllegalStateException("wallet add failed"))
+                          );
+                        }
+
+                        CompletableFuture<?> usageF = applyUsageIfNeeded(acc.getId(), actorUuid, allowed, dailyLimit, hourlyLimit, dayStart, hourStart);
+                        CompletableFuture<?> txF = repo.appendTransaction(
+                            acc.getId(),
+                            BankTransactionEntity.Type.WITHDRAW,
+                            actorUuid,
+                            ownerUuid,
+                            allowed,
+                            null
                         );
-                      }
 
-                      CompletableFuture<?> usageF = applyUsageIfNeeded(acc.getId(), actorUuid, allowed, dailyLimit, hourlyLimit, dayStart, hourStart);
-                      CompletableFuture<?> txF = repo.appendTransaction(
-                          acc.getId(),
-                          BankTransactionEntity.Type.WITHDRAW,
-                          actorUuid,
-                          ownerUuid,
-                          allowed,
-                          null
-                      );
-
-                      return CompletableFuture.allOf(usageF, txF).thenApply(v -> {
-                        if (cache != null) cache.invalidate(acc.getId());
-                        if (redisSync != null) redisSync.publishInvalidateAccount(acc.getId());
-                        return allowed;
+                        return CompletableFuture.allOf(usageF, txF).thenApply(v -> {
+                          if (cache != null) cache.invalidate(acc.getId());
+                          if (redisSync != null) redisSync.publishInvalidateAccount(acc.getId());
+                          return allowed;
+                        });
                       });
                     });
                   });
-                });
-          });
-        })
-    );
+            });
+          })
+      );
+    });
   }
 
   @Override
@@ -820,6 +899,27 @@ public final class DefaultBankService implements BankService, Service {
     });
   }
 
+  private CompletableFuture<Boolean> enforceMaxOtherBankMemberships(UUID inviteeUuid) {
+    if (inviteeUuid == null) return CompletableFuture.completedFuture(false);
+
+    int max = maxOtherBankMemberships;
+    if (max < 0) return CompletableFuture.completedFuture(true); // unlimited
+
+    // Fast-path: if online + tracked, count from RAM/cache (no DB)
+    if (presence != null) {
+      OptionalInt cachedCount = presence.countOtherBankMembershipsIfTracked(inviteeUuid);
+      if (cachedCount.isPresent()) {
+        return CompletableFuture.completedFuture(cachedCount.getAsInt() < max);
+      }
+    }
+
+    // Fallback: offline or not tracked => DB (async)
+    return repo.countOtherBankMemberships(inviteeUuid).thenApply(count -> {
+      long c = count == null ? 0L : count;
+      return c < max;
+    });
+  }
+
   private static BankMemberEntity findMemberInList(List<BankMemberEntity> members, UUID uuid) {
     if (uuid == null) return null;
     if (members == null || members.isEmpty()) return null;
@@ -847,4 +947,26 @@ public final class DefaultBankService implements BankService, Service {
   private static String normalizeId(String s) {
     return s == null ? "" : s.trim().toLowerCase(Locale.ROOT);
   }
+
+  private CompletableFuture<BankCtx> requireEnabledBankCtx(String bankId) {
+    String bankIdLower = normalizeId(bankId);
+    if (bankIdLower.isBlank()) return failedArg("bankId is blank");
+
+    BankDefinition def = banks.bank(bankIdLower).orElse(null);
+    if (def == null || !def.enabled()) return CompletableFuture.failedFuture(new IllegalStateException("bank not available"));
+
+    return CompletableFuture.completedFuture(new BankCtx(bankIdLower, def));
+  }
+
+  private static MantissaAmount requirePositiveAmount(MantissaAmount amount) {
+    MantissaAmount requested = amount == null ? MantissaAmount.zero() : MantissaAmount.normalize(amount);
+    if (requested.isNegative() || requested.compareTo(MantissaAmount.zero()) == 0) return null;
+    return requested;
+  }
+
+  private static <T> CompletableFuture<T> failedArg(String msg) {
+    return CompletableFuture.failedFuture(new IllegalArgumentException(msg));
+  }
+
+  private record BankCtx(String bankIdLower, BankDefinition def) {}
 }

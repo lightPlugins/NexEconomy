@@ -2,6 +2,7 @@ package io.nexstudios.nexeconomy.service.bank;
 
 import io.nexstudios.nexeconomy.definition.MantissaAmount;
 import io.nexstudios.nexeconomy.service.bank.definition.BankDefinition;
+import io.nexstudios.nexeconomy.service.bank.repo.BankRepositoryService;
 import io.nexstudios.nexeconomy.service.bank.repo.InviteLookupRow;
 import io.nexstudios.nexlogic.bukkit.services.entity.nexeconomy.BankAccountEntity;
 import io.nexstudios.nexlogic.bukkit.services.entity.nexeconomy.BankInviteEntity;
@@ -14,6 +15,10 @@ import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
 
 public interface BankService extends Service {
+
+  void reload();
+
+  CompletableFuture<List<BankRepositoryService.BankAccountRef>> otherBanks(UUID memberUuid);
 
   CompletableFuture<Optional<BankDefinition>> bank(String bankId);
 

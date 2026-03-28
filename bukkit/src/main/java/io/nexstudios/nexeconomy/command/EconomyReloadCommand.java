@@ -61,8 +61,9 @@ public class EconomyReloadCommand implements Service {
     currencyRegistry.reload();
     playerCache.ensureMissingCurrenciesForAllOnline();
     placeholderService.reload();
-    if (bankRegistry != null) bankRegistry.reload();
-    if (bankCache != null) bankCache.reload();
+    bankRegistry.reload();
+    bankCache.reload();
+    bankService.reload();
     bankService.ensureMissingUnlockedBanksForAllOnline();
 
     player.sendMessage(componentService.builder(player, "general.reload", "NotDefined", true).build());

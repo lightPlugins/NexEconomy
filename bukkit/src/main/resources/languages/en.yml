@@ -108,6 +108,7 @@ bank:
     unknown-role: '<red>This bank role does not exist.</red>'
     already-a-member: '<red>This player is already a member of this bank.</red>'
     internal: '<red>Something went wrong with the bank system: <dark_red><error></dark_red></red>'
+    cannot-invite-self: '<red>You cannot invite yourself to your own bank.</red>'
 
   uuid:
     invalid: '<red>That does not look like a valid UUID: <dark_red><value></dark_red></red>'
@@ -143,7 +144,19 @@ bank:
     success: '<gray>You have left <yellow><bank></yellow>.'
     owner-cannot-leave: '<red>You cannot leave your own bank.</red>'
 
+  transactions:
+    header: '<gray>Last <yellow>10</yellow> transactions for <yellow><bank></yellow> (owner: <yellow><owner></yellow>):</gray>'
+    other:
+      header: '<gray>Last <yellow>10</yellow> transactions for <yellow><bank></yellow> (owner: <yellow><owner></yellow>):</gray>'
+      empty: '<gray>No transactions found for <yellow><bank></yellow> (owner: <yellow><owner></yellow>).</gray>'
+    empty: '<gray>No transactions found for <yellow><bank></yellow>.</gray>'
+    row: '<dark_gray>● <gray><time> <dark_gray>| <gray>by <yellow><actor></yellow> <dark_gray>| <amount>'
+
   other:
+    list:
+      empty: '<gray>You are currently not a member of any other bank.</gray>'
+      header: '<gray>You are a member of <yellow><amount></yellow> other bank(s):</gray>'
+      row: '<dark_gray>● <gray>Bank:</gray> <yellow><bank></yellow> <dark_gray>|</dark_gray> <gray>Owner:</gray> <yellow><owner></yellow> <dark_gray>(</dark_gray><yellow><owner-uuid></yellow><dark_gray>)</dark_gray>'
     accept:
       none: '<red>You do not have any pending bank invites from <dark_red><owner></dark_red></red><red>.</red>'
       success: '<gray>You accepted the bank invite from <yellow><owner></yellow>.</gray>'

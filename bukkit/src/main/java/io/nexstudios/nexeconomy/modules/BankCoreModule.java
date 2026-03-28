@@ -10,6 +10,8 @@ import io.nexstudios.nexeconomy.service.bank.repo.BankRepositoryService;
 import io.nexstudios.nexeconomy.service.bank.repo.DefaultBankRepositoryServiceService;
 import io.nexstudios.nexeconomy.service.bank.sync.BankRedisSyncService;
 import io.nexstudios.nexeconomy.service.bank.sync.DefaultBankRedisSyncServiceService;
+import io.nexstudios.nexeconomy.service.bank.transaction.BankTransactionService;
+import io.nexstudios.nexeconomy.service.bank.transaction.DefaultBankTransactionService;
 import io.nexstudios.serviceregistry.di.ServiceAccessor;
 import io.nexstudios.serviceregistry.di.ServiceModule;
 import org.jetbrains.annotations.NotNull;
@@ -24,6 +26,7 @@ public final class BankCoreModule implements ServiceModule {
     services.register(BankAccountCacheService.class, BankAccountCacheService.class);
     services.register(BankAccountPresenceService.class, BankAccountPresenceService.class);
     services.register(BankRedisSyncService.class, DefaultBankRedisSyncServiceService.class);
+    services.register(BankTransactionService.class, DefaultBankTransactionService.class);
     services.register(BankService.class, DefaultBankService.class);
   }
 }

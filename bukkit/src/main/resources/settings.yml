@@ -17,3 +17,8 @@ bank-cache:
   max-entries: 10000
   # How many entries to sample per cleanup run. Higher = more accurate eviction, more CPU.
   cleanup-batch: 512
+
+# Configuration for the bank module.
+bank:
+  # Maximum number of banks per player can have membership in.
+  max-other-banks: 10
