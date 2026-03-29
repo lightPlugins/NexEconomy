@@ -3,7 +3,6 @@ package io.nexstudios.nexeconomy.service.bank.repo;
 import io.nexstudios.nexeconomy.definition.MantissaAmount;
 import io.nexstudios.nexlogic.bukkit.services.entity.nexeconomy.BankAccountEntity;
 import io.nexstudios.nexlogic.bukkit.services.entity.nexeconomy.BankInviteEntity;
-import io.nexstudios.nexlogic.bukkit.services.entity.nexeconomy.BankLevelEntity;
 import io.nexstudios.nexlogic.bukkit.services.entity.nexeconomy.BankMemberEntity;
 import io.nexstudios.nexlogic.bukkit.services.entity.nexeconomy.BankTransactionEntity;
 import io.nexstudios.nexlogic.bukkit.services.entity.nexeconomy.BankWithdrawUsageEntity;
@@ -21,6 +20,8 @@ public interface BankRepositoryService extends Service {
   CompletableFuture<List<InviteLookupRow>> findInvitesForInvitee(UUID inviteeUuid);
 
   CompletableFuture<Optional<BankAccountEntity>> findAccount(String bankIdLower, UUID ownerUuid);
+
+  CompletableFuture<Optional<BankAccountEntity>> findBankAccountById(UUID bankAccountId);
 
   CompletableFuture<BankAccountEntity> createAccountIfMissing(String bankIdLower, UUID ownerUuid);
 
@@ -65,7 +66,6 @@ public interface BankRepositoryService extends Service {
 
   CompletableFuture<List<BankTransactionEntity>> listRecentTransactions(UUID bankAccountId, int limit);
 
-
   CompletableFuture<List<UUID>> findOwnerUuidsForMember(UUID memberUuid);
 
   CompletableFuture<List<UUID>> findOwnerUuidsForMember(String bankIdLower, UUID memberUuid);
@@ -87,10 +87,6 @@ public interface BankRepositoryService extends Service {
 
   CompletableFuture<Boolean> unlockPlayer(UUID playerUuid, UUID unlockedByUuid);
 
-  // Bank Level Management
-  CompletableFuture<Optional<BankLevelEntity>> findBankLevel(UUID bankAccountId);
-
-  CompletableFuture<BankLevelEntity> upsertBankLevel(UUID bankAccountId, int level);
-
-  CompletableFuture<BankLevelEntity> getOrCreateBankLevel(UUID bankAccountId);
+  // Bank Level Management - stored in BankAccountEntity.level
+  CompletableFuture<Boolean> updateBankLevel(UUID bankAccountId, int level);
 }

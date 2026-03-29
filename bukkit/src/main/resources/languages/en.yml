@@ -208,7 +208,7 @@ bank:
   level:
     current: '<gray>Bank <yellow><bank></yellow> is at level <yellow><level></yellow>. Max balance: <yellow><max-balance></yellow>. Next level: <yellow><next-level></yellow> (Cost: <yellow><next-cost></yellow>).</gray>'
     upgraded: '<gray>Bank <yellow><bank></yellow> has been upgraded to level <yellow><level></yellow> for <yellow><cost></yellow>.</gray>'
-    insufficient-funds: '<red>Insufficient funds to upgrade. Required: <yellow><required></yellow>, Available: <yellow><available></yellow>.</red>'
+    insufficient-funds: '<red>Insufficient funds to upgrade. You need <yellow><required></yellow> <gray><currency></gray>.</red>'
     max-level-reached: '<red>Bank <yellow><bank></yellow> has already reached maximum level.</red>'
     permission-denied: '<red>You do not have permission to upgrade this bank.</red>'
     already-at-level: '<red>Bank <yellow><bank></yellow> is already at level <yellow><level></yellow>.</red>'

@@ -6,11 +6,11 @@ import io.nexstudios.nexeconomy.service.bank.definition.BankDefinition;
 import io.nexstudios.nexeconomy.service.bank.registry.BankRegistryService;
 import io.nexstudios.nexeconomy.service.bank.repo.BankRepositoryService;
 import io.nexstudios.nexeconomy.service.registry.CurrencyRegistryService;
-import io.nexstudios.nexlogic.bukkit.services.entity.nexeconomy.BankLevelEntity;
 import io.nexstudios.serviceregistry.di.Dependencies;
 import io.nexstudios.serviceregistry.di.Service;
 import io.nexstudios.serviceregistry.di.ServiceAccessor;
 
+import java.math.BigDecimal;
 import java.util.HashMap;
 import java.util.Map;
 import java.util.Optional;
@@ -19,7 +19,7 @@ import java.util.concurrent.CompletableFuture;
 
 /**
  * Default implementation of BankLevelService.
- * Manages bank level progression with caching and persistence.
+ * Manages bank level progression stored directly in BankAccountEntity.level.
  */
 @Dependencies({
     BankRegistryService.class,
@@ -30,13 +30,11 @@ public final class DefaultBankLevelService implements BankLevelService, Service 
 
   private final BankRegistryService bankRegistry;
   private final BankRepositoryService repo;
-  private final CurrencyRegistryService currencyRegistry;
   private final Map<UUID, Integer> levelCache = new HashMap<>();
 
   public DefaultBankLevelService(ServiceAccessor accessor) {
     this.bankRegistry = accessor.getService(BankRegistryService.class);
     this.repo = accessor.getService(BankRepositoryService.class);
-    this.currencyRegistry = accessor.getService(CurrencyRegistryService.class);
   }
 
   @Override
@@ -47,15 +45,17 @@ public final class DefaultBankLevelService implements BankLevelService, Service 
       return CompletableFuture.completedFuture(cached);
     }
 
-    // Load from database - read-only, never persist/merge on read
-    return repo.findBankLevel(bankAccountId)
-        .thenApply(entity -> {
-          int level = entity.map(BankLevelEntity::getCurrentLevel).orElse(1);
+    // Load from database via BankAccountEntity.level
+    return repo.findBankAccountById(bankAccountId)
+        .thenApply(account -> {
+          int level = account.map(a -> {
+            Integer lvl = a.getLevel();
+            return (lvl == null || lvl <= 0) ? 1 : lvl;
+          }).orElse(1);
           levelCache.put(bankAccountId, level);
           return level;
         })
         .exceptionally(ex -> {
-          // If any error reading level, default to 1 and cache it
           levelCache.put(bankAccountId, 1);
           return 1;
         });
@@ -63,6 +63,13 @@ public final class DefaultBankLevelService implements BankLevelService, Service 
 
   @Override
   public CompletableFuture<Boolean> upgrade(UUID bankAccountId, int targetLevel) {
+    if (bankAccountId == null) {
+      return CompletableFuture.failedFuture(new IllegalArgumentException("bankAccountId is null"));
+    }
+    if (targetLevel < 1) {
+      return CompletableFuture.failedFuture(new IllegalArgumentException("targetLevel must be >= 1"));
+    }
+
     return CompletableFuture.supplyAsync(() -> {
       synchronized (levelCache) {
         Integer current = levelCache.getOrDefault(bankAccountId, 1);
@@ -72,7 +79,7 @@ public final class DefaultBankLevelService implements BankLevelService, Service 
           return false;
         }
 
-        // Update cache immediately for consistency
+        // Update cache immediately
         levelCache.put(bankAccountId, targetLevel);
         return true;
       }
@@ -81,19 +88,20 @@ public final class DefaultBankLevelService implements BankLevelService, Service 
         return CompletableFuture.completedFuture(false);
       }
 
-      // Persist to database - DO NOT hide errors
-      return repo.upsertBankLevel(bankAccountId, targetLevel)
-          .thenApply(entity -> {
-            boolean success = entity != null && entity.getCurrentLevel() == targetLevel;
+      // Persist to database via BankAccountEntity
+      return repo.updateBankLevel(bankAccountId, targetLevel)
+          .thenApply(success -> {
             if (!success) {
-              System.err.println("[NexEconomy] WARNING: upsertBankLevel returned null or wrong level for account " + bankAccountId);
+              System.err.println("[NexEconomy] WARNING: updateBankLevel failed for account " + bankAccountId);
             }
             return success;
           })
           .exceptionally(ex -> {
-            // DB error - DO NOT treat as success
-            System.err.println("[NexEconomy] ERROR: upsertBankLevel failed for account " + bankAccountId + ": " + ex.getMessage());
-            ex.printStackTrace();
+            String msg = ex instanceof Throwable ? ex.toString() : "Unknown error";
+            System.err.println("[NexEconomy] ERROR: updateBankLevel failed for account " + bankAccountId + ": " + msg);
+            if (ex instanceof Throwable) {
+              ((Throwable) ex).printStackTrace();
+            }
             // Restore cache to previous value since DB failed
             synchronized (levelCache) {
               Integer current = levelCache.getOrDefault(bankAccountId, 1);
@@ -108,18 +116,15 @@ public final class DefaultBankLevelService implements BankLevelService, Service 
 
   @Override
   public CompletableFuture<Boolean> canUpgrade(UUID bankAccountId, String bankId, int targetLevel) {
-    // Validate inputs
     if (bankAccountId == null || bankId == null || bankId.isBlank() || targetLevel < 1) {
       return CompletableFuture.completedFuture(false);
     }
 
     return getLevel(bankAccountId).thenApply(currentLevel -> {
-      // Cannot upgrade to same or lower level
       if (targetLevel <= currentLevel) {
         return false;
       }
 
-      // Cannot upgrade beyond max level
       int maxLevel = getMaxLevel(bankId);
       return targetLevel <= maxLevel;
     });
@@ -135,7 +140,19 @@ public final class DefaultBankLevelService implements BankLevelService, Service 
     BankDefinition bankDef = def.get();
     for (BankDefinition.LevelDefinition levelDef : bankDef.levels()) {
       if (levelDef.level() == level) {
-        return AmountNotation.parseVirtualMantissaAmount(levelDef.upgradeCostRaw());
+        String costRaw = levelDef.upgradeCostRaw();
+        // Try virtual mantissa notation first (aa, da, zz, etc.)
+        MantissaAmount cost = AmountNotation.parseVirtualMantissaAmount(costRaw);
+        if (cost != null) {
+          return cost;
+        }
+        // Fallback to vault notation (25k, 1m, etc.)
+        BigDecimal vaultAmount = AmountNotation.parseVaultHuman(costRaw);
+        if (vaultAmount != null) {
+          return MantissaAmount.of(vaultAmount, 0);
+        }
+        // If both parsing fails, return zero
+        return MantissaAmount.zero();
       }
     }
 
@@ -152,12 +169,34 @@ public final class DefaultBankLevelService implements BankLevelService, Service 
     BankDefinition bankDef = def.get();
 
     if (level == 1) {
-      return AmountNotation.parseVirtualMantissaAmount(bankDef.defaultMaxBalanceRaw());
+      String raw = bankDef.defaultMaxBalanceRaw();
+      // Try virtual mantissa notation first (aa, da, zz, etc.)
+      MantissaAmount amount = AmountNotation.parseVirtualMantissaAmount(raw);
+      if (amount != null) {
+        return amount;
+      }
+      // Fallback to vault notation (25k, 1m, etc.)
+      BigDecimal vaultAmount = AmountNotation.parseVaultHuman(raw);
+      if (vaultAmount != null) {
+        return MantissaAmount.of(vaultAmount, 0);
+      }
+      return MantissaAmount.zero();
     }
 
     for (BankDefinition.LevelDefinition levelDef : bankDef.levels()) {
       if (levelDef.level() == level) {
-        return AmountNotation.parseVirtualMantissaAmount(levelDef.maxBalanceRaw());
+        String raw = levelDef.maxBalanceRaw();
+        // Try virtual mantissa notation first (aa, da, zz, etc.)
+        MantissaAmount amount = AmountNotation.parseVirtualMantissaAmount(raw);
+        if (amount != null) {
+          return amount;
+        }
+        // Fallback to vault notation (25k, 1m, etc.)
+        BigDecimal vaultAmount = AmountNotation.parseVaultHuman(raw);
+        if (vaultAmount != null) {
+          return MantissaAmount.of(vaultAmount, 0);
+        }
+        return MantissaAmount.zero();
       }
     }
 
@@ -180,37 +219,6 @@ public final class DefaultBankLevelService implements BankLevelService, Service 
         .mapToInt(BankDefinition.LevelDefinition::level)
         .max()
         .orElse(1);
-  }
-
-  /**
-   * Initializes bank level entity if it doesn't exist.
-   * Called only when truly needed (on first upgrade attempt).
-   * Creates entity with level=1 if missing.
-   */
-  public CompletableFuture<BankLevelEntity> initializeBankLevel(UUID bankAccountId) {
-    if (bankAccountId == null) {
-      return CompletableFuture.failedFuture(new IllegalArgumentException("bankAccountId is null"));
-    }
-
-    return repo.findBankLevel(bankAccountId).thenCompose(existing -> {
-      if (existing.isPresent()) {
-        return CompletableFuture.completedFuture(existing.get());
-      }
-
-      // Only create if truly missing - try upsertBankLevel with error handling
-      return repo.upsertBankLevel(bankAccountId, 1)
-          .exceptionally(ex -> {
-            // If upsert fails, return a default entity (not persisted)
-            // This prevents the exception from propagating
-            return BankLevelEntity.builder()
-                .id(java.util.UUID.randomUUID())
-                .bankAccountId(bankAccountId)
-                .currentLevel(1)
-                .createdAt(java.time.Instant.now())
-                .updatedAt(java.time.Instant.now())
-                .build();
-          });
-    });
   }
 }
 

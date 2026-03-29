@@ -48,6 +48,8 @@ public final class VaultEconomyBridgeService implements Service {
     this.repo = accessor.getService(EconomyRepository.class);
     this.economy = accessor.getService(EconomyService.class);
 
+    logger.logger().info("Initializing VaultEconomyBridgeService...");
+
     FileReaderService fileReaderService = accessor.getService(FileReaderService.class);
     this.settings = fileReaderService.load(Path.of("settings.yml"), "settings.yml", true);
 

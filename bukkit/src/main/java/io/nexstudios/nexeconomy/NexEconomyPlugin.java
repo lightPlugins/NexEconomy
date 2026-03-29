@@ -65,8 +65,6 @@ public class NexEconomyPlugin extends NexPaperPlugin {
   protected void load() {
     getLogger().info("NexEconomy is loading...");
 
-    services().getService(VaultEconomyBridgeService.class);
-
   }
 
   @Override

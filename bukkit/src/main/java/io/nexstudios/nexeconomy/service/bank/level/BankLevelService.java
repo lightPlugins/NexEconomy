@@ -1,7 +1,6 @@
 package io.nexstudios.nexeconomy.service.bank.level;
 
 import io.nexstudios.nexeconomy.definition.MantissaAmount;
-import io.nexstudios.nexlogic.bukkit.services.entity.nexeconomy.BankLevelEntity;
 import io.nexstudios.serviceregistry.di.Service;
 
 import java.util.UUID;
@@ -9,12 +8,13 @@ import java.util.concurrent.CompletableFuture;
 
 /**
  * Service for managing bank level progression and upgrades.
+ * Bank levels are stored in BankAccountEntity.level field.
  */
 public interface BankLevelService extends Service {
 
   /**
    * Get the current level of a bank account.
-   * Returns 1 if no level entity exists (default level).
+   * Returns 1 if no level is set (default level).
    */
   CompletableFuture<Integer> getLevel(UUID bankAccountId);
 
@@ -47,11 +47,4 @@ public interface BankLevelService extends Service {
    * Get the maximum level defined for a bank.
    */
   int getMaxLevel(String bankId);
-
-  /**
-   * Initialize bank level entity if it doesn't exist.
-   * Creates a new level record with level = 1.
-   */
-  CompletableFuture<BankLevelEntity> initializeBankLevel(UUID bankAccountId);
 }
-

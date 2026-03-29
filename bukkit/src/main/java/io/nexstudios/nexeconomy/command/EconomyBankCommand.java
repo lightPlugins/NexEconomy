@@ -17,6 +17,7 @@ import io.nexstudios.nexeconomy.service.bank.level.BankLevelService;
 import io.nexstudios.nexeconomy.service.bank.repo.BankRepositoryService;
 import io.nexstudios.nexeconomy.service.bank.repo.InviteLookupRow;
 import io.nexstudios.nexeconomy.service.bank.transaction.BankTransactionService;
+import io.nexstudios.nexeconomy.service.economy.EconomyService;
 import io.nexstudios.nexeconomy.service.registry.CurrencyRegistryService;
 import io.nexstudios.nexlogic.bukkit.services.entity.nexeconomy.BankTransactionEntity;
 import io.nexstudios.serviceregistry.di.Dependencies;
@@ -47,7 +48,8 @@ import java.util.stream.Collectors;
     BankService.class,
     CurrencyRegistryService.class,
     BankTransactionService.class,
-    BankLevelService.class
+    BankLevelService.class,
+    EconomyService.class
 })
 public final class EconomyBankCommand implements Service {
 
@@ -61,6 +63,7 @@ public final class EconomyBankCommand implements Service {
   private final CurrencyRegistryService currencies;
   private final BankTransactionService txService;
   private final BankLevelService levelService;
+  private final EconomyService economy;
 
   public EconomyBankCommand(ServiceAccessor accessor) {
     this.components = accessor.getService(ComponentService.class);
@@ -68,6 +71,7 @@ public final class EconomyBankCommand implements Service {
     this.currencies = accessor.getService(CurrencyRegistryService.class);
     this.txService = accessor.getService(BankTransactionService.class);
     this.levelService = accessor.getService(BankLevelService.class);
+    this.economy = accessor.getService(EconomyService.class);
   }
 
   @Command(value = "balance <bank>", permission = "nexeconomy.bank.balance")
@@ -1082,6 +1086,8 @@ public final class EconomyBankCommand implements Service {
           return CompletableFuture.completedFuture(null);
         }
 
+        String bankName = bankDef.get().nameMiniMessage();
+
         return levelService.getLevel(bankAccountId).thenCompose(currentLevel -> {
           int maxLevel = levelService.getMaxLevel(bankId);
           MantissaAmount maxBalance = levelService.getMaxBalance(bankId, currentLevel);
@@ -1095,7 +1101,7 @@ public final class EconomyBankCommand implements Service {
 
           sender.sendMessage(components.builder(sender, "bank.level.current", "NotDefined", true)
               .resolver(TagResolver.resolver(
-                  Placeholder.parsed("bank", bankId),
+                  Placeholder.parsed("bank", bankName),
                   Placeholder.parsed("level", String.valueOf(currentLevel)),
                   Placeholder.parsed("max-balance", shown),
                   Placeholder.parsed("next-level", nextLevel),
@@ -1136,6 +1142,8 @@ public final class EconomyBankCommand implements Service {
           return CompletableFuture.completedFuture(null);
         }
 
+        String bankName = bankDef.get().nameMiniMessage();
+
         return levelService.getLevel(bankAccountId).thenCompose(currentLevel -> {
           int targetLevel = currentLevel + 1;
 
@@ -1144,70 +1152,70 @@ public final class EconomyBankCommand implements Service {
               int maxLevel = levelService.getMaxLevel(bankId);
               if (currentLevel >= maxLevel) {
                 sender.sendMessage(components.builder(sender, "bank.level.max-level-reached", "NotDefined", true)
-                    .resolver(TagResolver.resolver(Placeholder.parsed("bank", bankId)))
+                    .resolver(TagResolver.resolver(Placeholder.parsed("bank", bankName)))
                     .build());
               }
               return CompletableFuture.completedFuture(null);
             }
 
+
+
             MantissaAmount cost = levelService.getUpgradeCost(bankId, targetLevel);
 
-            return bankService.balance(bankId, ownerUuid).thenCompose(balance -> {
-              if (balance.compareTo(cost) < 0) {
-                sender.sendMessage(components.builder(sender, "bank.level.insufficient-funds", "NotDefined", true)
-                    .resolver(TagResolver.resolver(
-                        Placeholder.parsed("bank", bankId),
-                        Placeholder.parsed("required", AmountNotation.formatShort(cost, 2)),
-                        Placeholder.parsed("available", AmountNotation.formatShort(balance, 2))
-                    ))
+            // 1. Check permission first
+            String permission = bankDef.get().levels().stream()
+                .filter(l -> l.level() == targetLevel)
+                .map(BankDefinition.LevelDefinition::permission)
+                .findFirst()
+                .orElse(null);
+
+            if (permission != null && !permission.isEmpty() && !sender.hasPermission(permission)) {
+              sender.sendMessage(components.builder(sender, "bank.level.permission-denied", "NotDefined", true)
+                  .resolver(TagResolver.resolver(Placeholder.parsed("bank",  bankName)))
+                  .build());
+              return CompletableFuture.completedFuture(null);
+            }
+
+            // 2. Deduct money from player (if enough available)
+            return resolveCurrency(bankId).thenCompose(currencyDef -> {
+              if (currencyDef == null) {
+                sender.sendMessage(components.builder(sender, "bank.errors.internal", "NotDefined", true)
+                    .resolver(TagResolver.resolver(Placeholder.parsed("error", "Currency not found")))
                     .build());
                 return CompletableFuture.completedFuture(null);
               }
 
-              String permission = bankDef.get().levels().stream()
-                  .filter(l -> l.level() == targetLevel)
-                  .map(BankDefinition.LevelDefinition::permission)
-                  .findFirst()
-                  .orElse(null);
-
-              if (permission != null && !permission.isEmpty() && !sender.hasPermission(permission)) {
-                sender.sendMessage(components.builder(sender, "bank.level.permission-denied", "NotDefined", true)
-                    .resolver(TagResolver.resolver(Placeholder.parsed("bank", bankId)))
-                    .build());
-                return CompletableFuture.completedFuture(null);
-              }
-
-              return levelService.upgrade(bankAccountId, targetLevel).thenCompose(success -> {
-                if (!success) {
-                  sender.sendMessage(components.builder(sender, "bank.errors.internal", "NotDefined", true)
-                      .resolver(TagResolver.resolver(Placeholder.parsed("error", "Upgrade failed")))
+              return economy.remove(sender, currencyDef.id(), cost).thenCompose(removed -> {
+                if (!removed) {
+                  sender.sendMessage(components.builder(sender, "bank.level.insufficient-funds", "NotDefined", true)
+                      .resolver(TagResolver.resolver(
+                          Placeholder.parsed("bank", bankName),
+                          Placeholder.parsed("required", AmountNotation.formatShort(cost, currencyDef.fractionDigits())),
+                          Placeholder.parsed("currency", currencyDef.symbolPlural())
+                      ))
                       .build());
                   return CompletableFuture.completedFuture(null);
                 }
 
-                // Deduct the upgrade cost from bank balance
-                UUID actorUuid = sender.getUniqueId();
-                return bankService.withdraw(bankId, ownerUuid, actorUuid, cost)
-                    .thenApply(newBalance -> {
-                      if (newBalance == null || newBalance.isNegative()) {
-                        sender.sendMessage(components.builder(sender, "bank.errors.internal", "NotDefined", true)
-                            .resolver(TagResolver.resolver(
-                                Placeholder.parsed("error", "Could not withdraw upgrade cost from bank")
-                            ))
-                            .build());
-                        return null;
-                      }
+                // 3. Upgrade the bank level (only if money was successfully deducted)
+                return levelService.upgrade(bankAccountId, targetLevel).thenApply(success -> {
+                  if (!success) {
+                    sender.sendMessage(components.builder(sender, "bank.errors.internal", "NotDefined", true)
+                        .resolver(TagResolver.resolver(Placeholder.parsed("error", "Upgrade failed")))
+                        .build());
+                    return null;
+                  }
 
-                      sender.sendMessage(components.builder(sender, "bank.level.upgraded", "NotDefined", true)
-                          .resolver(TagResolver.resolver(
-                              Placeholder.parsed("bank", bankId),
-                              Placeholder.parsed("level", String.valueOf(targetLevel)),
-                              Placeholder.parsed("cost", AmountNotation.formatShort(cost, 2))
-                          ))
-                          .build());
+                  sender.sendMessage(components.builder(sender, "bank.level.upgraded", "NotDefined", true)
+                      .resolver(TagResolver.resolver(
+                          Placeholder.parsed("bank", bankName),
+                          Placeholder.parsed("level", String.valueOf(targetLevel)),
+                          Placeholder.parsed("cost", AmountNotation.formatShort(cost, currencyDef.fractionDigits()))
+                      ))
+                      .build());
 
-                      return null;
-                    });
+                  return null;
+                });
               });
             });
           });
@@ -1225,3 +1233,20 @@ public final class EconomyBankCommand implements Service {
     return s == null ? "" : s.trim().toLowerCase(Locale.ROOT);
   }
 }
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
