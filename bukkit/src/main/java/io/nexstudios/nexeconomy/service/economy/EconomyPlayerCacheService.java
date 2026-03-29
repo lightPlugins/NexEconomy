@@ -101,7 +101,14 @@ public final class EconomyPlayerCacheService implements Service {
         return econ;
       });
 
-      return f.whenComplete((result, error) -> inFlightLoads.remove(uuid));
+      // Remove future from map regardless of success/failure to prevent deadlocks
+      return f.whenComplete((result, error) -> {
+        inFlightLoads.remove(uuid);
+        if (error != null) {
+          // Log error but don't silently swallow it
+          System.err.println("Failed to load balance for player " + uuid + ": " + error.getMessage());
+        }
+      });
     });
   }
 
@@ -134,7 +141,13 @@ public final class EconomyPlayerCacheService implements Service {
         return econ;
       });
 
-      return f.whenComplete((result, error) -> townyInFlightLoads.remove(uuid));
+      // CRITICAL FIX: Remove future from map regardless of success/failure to prevent deadlocks
+      return f.whenComplete((result, error) -> {
+        townyInFlightLoads.remove(uuid);
+        if (error != null) {
+          System.err.println("Failed to load towny balance for " + uuid + ": " + error.getMessage());
+        }
+      });
     });
   }
 

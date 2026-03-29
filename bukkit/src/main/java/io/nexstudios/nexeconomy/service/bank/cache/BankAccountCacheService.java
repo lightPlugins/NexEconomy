@@ -192,7 +192,13 @@ public final class BankAccountCacheService implements Service {
         return view;
       });
 
-      return f.whenComplete((r, e) -> inFlight.remove(key));
+      // Ensure inFlight future is removed even on exception to prevent deadlocks
+      return f.whenComplete((r, e) -> {
+        inFlight.remove(key);
+        if (e != null) {
+          System.err.println("Failed to load bank account " + key + ": " + e.getMessage());
+        }
+      });
     });
   }
 
@@ -229,6 +235,7 @@ public final class BankAccountCacheService implements Service {
   }
 
   private void refreshAsync(Key key, UUID ownerUuid) {
+    // Properly handle concurrent invalidate() calls during refresh
     inFlight.computeIfAbsent(key, ignored ->
         loadFresh(key.bankIdLower(), ownerUuid).thenApply(view -> {
           put(key, view);
@@ -236,9 +243,19 @@ public final class BankAccountCacheService implements Service {
         }).whenComplete((r, e) -> {
           inFlight.remove(key);
 
-          Entry entry = byKey.get(key);
-          if (entry != null) {
-            entry.refreshing().set(false);
+          if (e == null) {
+            // Only set refreshing to false on success
+            Entry entry = byKey.get(key);
+            if (entry != null) {
+              entry.refreshing().set(false);
+            }
+          } else {
+            // On error, reset refreshing flag to allow retry
+            Entry entry = byKey.get(key);
+            if (entry != null) {
+              entry.refreshing().set(false);
+            }
+            System.err.println("Failed to refresh bank account " + key + ": " + e.getMessage());
           }
         })
     );

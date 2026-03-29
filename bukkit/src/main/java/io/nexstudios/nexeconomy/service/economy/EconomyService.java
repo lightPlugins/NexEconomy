@@ -125,9 +125,16 @@ public final class EconomyService implements Service {
     MantissaAmount value = normalizeForCurrency(def, amount);
 
     return cache.loadOrCreateOnline(target).thenApply(econ -> {
-      econ.getOrCreate(cur, MantissaAmount.zero()).set(value);
-      flush.requestFlush(econ);
-      return true;
+      // CRITICAL FIX: Lock against concurrent modification race conditions
+      var lock = EconomyLocks.lockFor(target.getUniqueId());
+      lock.lock();
+      try {
+        econ.getOrCreate(cur, MantissaAmount.zero()).set(value);
+        flush.requestFlush(econ);
+        return true;
+      } finally {
+        lock.unlock();
+      }
     });
   }
 
@@ -139,19 +146,26 @@ public final class EconomyService implements Service {
     MantissaAmount d = normalizeForCurrency(def, delta);
 
     return cache.loadOrCreateOnline(target).thenApply(econ -> {
-      EconomyPlayer.BalanceEntry entry = econ.getOrCreate(cur, MantissaAmount.zero());
+      // CRITICAL FIX: Lock against concurrent modification race conditions
+      var lock = EconomyLocks.lockFor(target.getUniqueId());
+      lock.lock();
+      try {
+        EconomyPlayer.BalanceEntry entry = econ.getOrCreate(cur, MantissaAmount.zero());
 
-      // Vault
-      if (def != null && def.type() == CurrencyType.VAULT) {
-        BigDecimal nextHuman = entry.amount() == null ? BigDecimal.ZERO : entry.amount().toHuman();
-        nextHuman = nextHuman.add(d.toHuman());
-        entry.set(MantissaAmount.of(clampVaultHuman(def, nextHuman), 0));
-      } else {
-        entry.add(d);
+        // Vault
+        if (def != null && def.type() == CurrencyType.VAULT) {
+          BigDecimal nextHuman = entry.amount() == null ? BigDecimal.ZERO : entry.amount().toHuman();
+          nextHuman = nextHuman.add(d.toHuman());
+          entry.set(MantissaAmount.of(clampVaultHuman(def, nextHuman), 0));
+        } else {
+          entry.add(d);
+        }
+
+        flush.requestFlush(econ);
+        return true;
+      } finally {
+        lock.unlock();
       }
-
-      flush.requestFlush(econ);
-      return true;
     });
   }
 
@@ -163,20 +177,27 @@ public final class EconomyService implements Service {
     MantissaAmount d = normalizeForCurrency(def, delta);
 
     return cache.loadOrCreateOnline(target).thenApply(econ -> {
-      EconomyPlayer.BalanceEntry entry = econ.getOrCreate(cur, MantissaAmount.zero());
-      MantissaAmount current = entry.amount() == null ? MantissaAmount.zero() : entry.amount();
+      // CRITICAL FIX: Lock against TOCTOU race condition (prevents money duplication)
+      var lock = EconomyLocks.lockFor(target.getUniqueId());
+      lock.lock();
+      try {
+        EconomyPlayer.BalanceEntry entry = econ.getOrCreate(cur, MantissaAmount.zero());
+        MantissaAmount current = entry.amount() == null ? MantissaAmount.zero() : entry.amount();
 
-      if (current.compareTo(d) < 0) return false;
+        if (current.compareTo(d) < 0) return false;
 
-      if (def != null && def.type() == CurrencyType.VAULT) {
-        BigDecimal nextHuman = current.toHuman().subtract(d.toHuman());
-        entry.set(MantissaAmount.of(scaleVaultHuman(def, nextHuman), 0));
-      } else {
-        entry.subtract(d);
+        if (def != null && def.type() == CurrencyType.VAULT) {
+          BigDecimal nextHuman = current.toHuman().subtract(d.toHuman());
+          entry.set(MantissaAmount.of(scaleVaultHuman(def, nextHuman), 0));
+        } else {
+          entry.subtract(d);
+        }
+
+        flush.requestFlush(econ);
+        return true;
+      } finally {
+        lock.unlock();
       }
-
-      flush.requestFlush(econ);
-      return true;
     });
   }
 
