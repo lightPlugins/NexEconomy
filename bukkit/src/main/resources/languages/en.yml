@@ -3,6 +3,7 @@ general:
   no-permission: '<red>You do not have permission to perform this command.</red>'
   reload: '<gray>Configuration reloaded <yellow>successfully<gray>!'#
   wrong-amount: '<red>Please enter a valid amount.</red>'
+  not-negative-number: '<red>The amount cannot be negative.</red>'
   switch-language: '<gray>Language switched to <yellow><nex_language><gray>!'
   response-error: '<red>An error occurred while processing your request. <dark_red><error></red>'
   cross-server-error: '<red>Cross-server communication failed. Is <dark_red>Redis <red>enabled and active ?'

@@ -234,7 +234,12 @@ public final class EconomyMainCommand implements Service {
 
     String overall = (rows == null || rows.isEmpty())
         ? "0"
-        : AmountNotation.formatShort(rows.getFirst().amount(), def.fractionDigits());
+        : AmountNotation.formatShort(
+            rows.stream()
+                .filter(r -> r != null && r.amount() != null)
+                .map(EconomyLeaderboardService.Row::amount)
+                .reduce(MantissaAmount.zero(), MantissaAmount::add),
+            def.fractionDigits());
 
     Bukkit.getScheduler().runTask(plugin, () -> {
       componentService.getComponents(
@@ -297,7 +302,10 @@ public final class EconomyMainCommand implements Service {
       parsed = AmountNotation.parseVirtualMantissaAmount(amount);
     }
 
-    if (def == null || parsed == null) return 0;
+    if (def == null || parsed == null || parsed.isNegative()) {
+      player.sendMessage(componentService.builder(player, "general.not-negative-number", "NotDefined", true).build());
+      return 0;
+    }
 
     economy.set(targetPlayer, def.id(), parsed).thenAccept(ok -> {
       if (!ok) return;
@@ -345,7 +353,10 @@ public final class EconomyMainCommand implements Service {
       parsed = AmountNotation.parseVirtualMantissaAmount(amount);
     }
 
-    if (def == null || parsed == null || parsed.isNegative() || parsed.compareTo(MantissaAmount.zero()) == 0) return 0;
+    if (def == null || parsed == null || parsed.isNegative() || parsed.compareTo(MantissaAmount.zero()) == 0) {
+      player.sendMessage(componentService.builder(player, "general.wrong-amount", "NotDefined", true).build());
+      return 0;
+    }
 
     // Max-Balance enforcement: only add remaining until max is reached
     economy.balance(targetPlayer, def.id()).thenCompose(current -> {
@@ -453,7 +464,10 @@ public final class EconomyMainCommand implements Service {
       parsed = AmountNotation.parseVirtualMantissaAmount(amount);
     }
 
-    if (def == null || parsed == null || parsed.isNegative() || parsed.compareTo(MantissaAmount.zero()) == 0) return 0;
+    if (def == null || parsed == null || parsed.isNegative() || parsed.compareTo(MantissaAmount.zero()) == 0) {
+      player.sendMessage(componentService.builder(player, "general.wrong-amount", "NotDefined", true).build());
+      return 0;
+    }
 
     economy.remove(targetPlayer, def.id(), parsed).thenAccept(ok -> {
       String shown = AmountNotation.formatShort(parsed, def.fractionDigits());
