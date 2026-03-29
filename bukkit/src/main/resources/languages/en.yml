@@ -67,6 +67,7 @@ currency:
     pay-capped: '<gray>Max balance cap: requested <yellow><requested> <gray><currency>, paid only <yellow><paid> <gray><currency> to <yellow><target><gray> (max: <yellow><max><gray>).'
     pay-capped-target: '<gray>Your received payment was capped: requested <yellow><requested> <gray><currency>, received <yellow><paid> <gray><currency> from <yellow><player><gray> (max: <yellow><max><gray>).'
   baltop:
+    loading: '<gray>Loading top 10 leaderboard for <yellow><currency><gray>...'
     header:
       - '<gray><strikethrough>-----</strikethrough><yellow>●<gray><strikethrough>-----</strikethrough> <yellow><bold><italic>NEX<gray>Economy <reset><gray><strikethrough>-----</strikethrough><yellow>●<gray><strikethrough>-----</strikethrough>'
       - ' <gray>Top 10 Players with the largest'
@@ -148,6 +149,11 @@ bank:
     self: '<gray>Your balance in <yellow><bank></yellow> is <yellow><amount></yellow> <gray><currency></gray>.'
     other: '<gray>The balance of <yellow><bank></yellow> <gray>(owner: <yellow><owner></yellow>) is <yellow><amount></yellow> <gray><currency></gray>.'
 
+  interest:
+    earned: '<gray>Your bank <yellow><bank></yellow> has earned <yellow><amount></yellow> <gray><currency> in interest!'
+    earned-capped: '<gray>Your bank <yellow><bank></yellow> has earned <yellow><earned></yellow> <gray><earned-currency>, but was capped to <yellow><capped></yellow> <gray><capped-currency> due to max balance limit.'
+    max-balance-reached: '<red>Your bank <yellow><bank></yellow> has reached maximum balance. No interest earned.'
+
   members:
     self: '<gray>The members of <yellow><bank></yellow> are: <yellow><members></yellow>.'
     other: '<gray>The members of <yellow><bank></yellow> <gray>(owner: <yellow><owner></yellow>) are: <yellow><members></yellow>.'
@@ -198,3 +204,11 @@ bank:
       empty: '<gray>You currently have no pending bank invites.</gray>'
       header: '<gray>You have <yellow><amount></yellow> pending bank invite(s):</gray>'
       row: '<dark_gray>● <gray>Bank:</gray> <yellow><bank></yellow> <dark_gray>|</dark_gray> <gray>Owner:</gray> <yellow><owner></yellow> <dark_gray>(</dark_gray><yellow><owner-uuid></yellow><dark_gray>)</dark_gray> <dark_gray>|</dark_gray> <gray>Role:</gray> <yellow><role></yellow> <dark_gray>|</dark_gray> <gray>Invited by:</gray> <yellow><invited-by></yellow>'
+
+  level:
+    current: '<gray>Bank <yellow><bank></yellow> is at level <yellow><level></yellow>. Max balance: <yellow><max-balance></yellow>. Next level: <yellow><next-level></yellow> (Cost: <yellow><next-cost></yellow>).</gray>'
+    upgraded: '<gray>Bank <yellow><bank></yellow> has been upgraded to level <yellow><level></yellow> for <yellow><cost></yellow>.</gray>'
+    insufficient-funds: '<red>Insufficient funds to upgrade. Required: <yellow><required></yellow>, Available: <yellow><available></yellow>.</red>'
+    max-level-reached: '<red>Bank <yellow><bank></yellow> has already reached maximum level.</red>'
+    permission-denied: '<red>You do not have permission to upgrade this bank.</red>'
+    already-at-level: '<red>Bank <yellow><bank></yellow> is already at level <yellow><level></yellow>.</red>'

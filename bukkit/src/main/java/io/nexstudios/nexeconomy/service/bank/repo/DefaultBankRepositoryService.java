@@ -16,6 +16,7 @@ import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.CompletionStage;
 import java.util.function.Function;
 
 @Dependencies({
@@ -803,6 +804,115 @@ public final class DefaultBankRepositoryService implements BankRepositoryService
 
       em.remove(existing);
       return true;
+    });
+  }
+
+  @Override
+  public CompletableFuture<Optional<BankLevelEntity>> findBankLevel(UUID bankAccountId) {
+    if (bankAccountId == null) return CompletableFuture.completedFuture(Optional.empty());
+
+    return dbAsync.executeAsyncInTransaction(em -> {
+      List<BankLevelEntity> list = em.createQuery(
+              "select l from BankLevelEntity l where l.bankAccountId = :bankAccountId",
+              BankLevelEntity.class
+          )
+          .setParameter("bankAccountId", bankAccountId)
+          .setMaxResults(1)
+          .getResultList();
+
+      return list.isEmpty() ? Optional.empty() : Optional.of(list.getFirst());
+    });
+  }
+
+  @Override
+  public CompletableFuture<BankLevelEntity> upsertBankLevel(UUID bankAccountId, int level) {
+    if (bankAccountId == null) return CompletableFuture.failedFuture(new IllegalArgumentException("bankAccountId is null"));
+    if (level < 1) return CompletableFuture.failedFuture(new IllegalArgumentException("level must be >= 1"));
+
+    return dbAsync.executeAsyncInTransaction(em -> {
+      System.out.println("[NexEconomy-DEBUG] upsertBankLevel called: accountId=" + bankAccountId + " level=" + level);
+      
+      List<BankLevelEntity> list = em.createQuery(
+              "select l from BankLevelEntity l where l.bankAccountId = :bankAccountId",
+              BankLevelEntity.class
+          )
+          .setParameter("bankAccountId", bankAccountId)
+          .setMaxResults(1)
+          .setLockMode(LockModeType.PESSIMISTIC_WRITE)
+          .getResultList();
+
+      BankLevelEntity entity;
+      Instant now = Instant.now();
+
+      if (list.isEmpty()) {
+        // Create new entity
+        System.out.println("[NexEconomy-DEBUG] Creating NEW BankLevel: accountId=" + bankAccountId + " level=" + level);
+        entity = BankLevelEntity.builder()
+            .id(UUID.randomUUID())
+            .bankAccountId(bankAccountId)
+            .currentLevel(level)
+            .rowVersion(0L)
+            .createdAt(now)
+            .updatedAt(now)
+            .build();
+        // Use persist() ONLY for new entities
+        em.persist(entity);
+        System.out.println("[NexEconomy-DEBUG] Persisted NEW entity: id=" + entity.getId());
+      } else {
+        // Update existing entity
+        System.out.println("[NexEconomy-DEBUG] Updating EXISTING BankLevel: accountId=" + bankAccountId + " oldLevel=" + list.getFirst().getCurrentLevel() + " newLevel=" + level);
+        entity = list.getFirst();
+        entity.setCurrentLevel(level);
+        entity.setUpdatedAt(now);
+        // Must use merge() to persist changes to managed entity
+        entity = em.merge(entity);
+        System.out.println("[NexEconomy-DEBUG] Merged existing entity: id=" + entity.getId());
+      }
+
+      System.out.println("[NexEconomy-DEBUG] upsertBankLevel completed successfully");
+      return entity;
+    }).exceptionally(ex -> {
+      System.err.println("[NexEconomy-DEBUG] upsertBankLevel FAILED: " + ex.getMessage());
+      ex.printStackTrace();
+      throw new RuntimeException(ex);
+    });
+  }
+
+  @Override
+  public CompletableFuture<BankLevelEntity> getOrCreateBankLevel(UUID bankAccountId) {
+    if (bankAccountId == null) return CompletableFuture.failedFuture(new IllegalArgumentException("bankAccountId is null"));
+
+    // Execute entire operation in single transaction to avoid detached entity issues
+    return dbAsync.executeAsyncInTransaction(em -> {
+      List<BankLevelEntity> list = em.createQuery(
+              "select l from BankLevelEntity l where l.bankAccountId = :bankAccountId",
+              BankLevelEntity.class
+          )
+          .setParameter("bankAccountId", bankAccountId)
+          .setMaxResults(1)
+          .getResultList();
+
+      BankLevelEntity entity;
+      Instant now = Instant.now();
+
+      if (list.isEmpty()) {
+        // Create new entity with default level 1
+        entity = BankLevelEntity.builder()
+            .id(UUID.randomUUID())
+            .bankAccountId(bankAccountId)
+            .currentLevel(1)
+            .rowVersion(0L)
+            .createdAt(now)
+            .updatedAt(now)
+            .build();
+        // Use persist() for new entities - never merge() for new!
+        em.persist(entity);
+      } else {
+        // Return existing entity - already managed by this transaction
+        entity = list.getFirst();
+      }
+
+      return entity;
     });
   }
 

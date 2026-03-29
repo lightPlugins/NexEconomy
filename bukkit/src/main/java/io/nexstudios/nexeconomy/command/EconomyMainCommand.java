@@ -25,6 +25,7 @@ import org.bukkit.plugin.Plugin;
 
 import java.math.BigDecimal;
 import java.util.Optional;
+import java.util.concurrent.CompletableFuture;
 
 @CommandRoot(
     name = "currency", aliases = {"money", "eco"},
@@ -162,13 +163,73 @@ public final class EconomyMainCommand implements Service {
 
     Optional<EconomyLeaderboardService.SnapshotView> viewOpt = leaderboard.getTop(cur, 10);
     if (viewOpt.isEmpty()) {
-      player.sendMessage(componentService.builder(player, "general.response-error", "NotDefined", true)
-          .resolver(TagResolver.resolver(Placeholder.parsed("error", "Leaderboard is loading")))
+      // CRITICAL FIX: Send "loading" message instead of error, then wait for async loading
+      player.sendMessage(componentService.builder(player, "currency.baltop.loading", "NotDefined", true)
+          .resolver(TagResolver.resolver(Placeholder.parsed("currency", def.symbolPlural())))
           .build());
+
+      // Wait for leaderboard to load asynchronously with timeout
+      CompletableFuture<Optional<EconomyLeaderboardService.SnapshotView>> loadingFuture = 
+          waitForLeaderboard(cur, 10, 5000); // 5 second timeout
+
+      loadingFuture.thenAccept(viewOptAsync -> {
+        if (viewOptAsync.isEmpty()) {
+          player.sendMessage(componentService.builder(player, "general.response-error", "NotDefined", true)
+              .resolver(TagResolver.resolver(Placeholder.parsed("error", "Leaderboard still loading, please try again")))
+              .build());
+          return;
+        }
+
+        displayLeaderboard(player, viewOptAsync.get(), def);
+      }).exceptionally(ex -> {
+        player.sendMessage(componentService.builder(player, "general.response-error", "NotDefined", true)
+            .resolver(TagResolver.resolver(Placeholder.parsed("error", "Failed to load leaderboard")))
+            .build());
+        return null;
+      });
+
       return 1;
     }
 
-    var view = viewOpt.get();
+    // Display immediately if already loaded
+    displayLeaderboard(player, viewOpt.get(), def);
+    return 1;
+  }
+
+  private CompletableFuture<Optional<EconomyLeaderboardService.SnapshotView>> waitForLeaderboard(String currency, int limit, long timeoutMs) {
+    long startTime = System.currentTimeMillis();
+    CompletableFuture<Optional<EconomyLeaderboardService.SnapshotView>> future = new CompletableFuture<>();
+
+    // Poll for leaderboard data with exponential backoff
+    pollLeaderboard(currency, limit, startTime, timeoutMs, future);
+
+    return future;
+  }
+
+  private void pollLeaderboard(String currency, int limit, long startTime, long timeoutMs, CompletableFuture<Optional<EconomyLeaderboardService.SnapshotView>> future) {
+    long elapsed = System.currentTimeMillis() - startTime;
+
+    Optional<EconomyLeaderboardService.SnapshotView> viewOpt = leaderboard.getTop(currency, limit);
+    if (viewOpt.isPresent()) {
+      // Data loaded, complete the future
+      future.complete(viewOpt);
+      return;
+    }
+
+    if (elapsed >= timeoutMs) {
+      // Timeout reached, complete with empty
+      future.complete(Optional.empty());
+      return;
+    }
+
+    // Schedule next poll with exponential backoff (start at 50ms, cap at 500ms)
+    long delay = Math.min(50 * (1 + elapsed / 500), 500);
+    Bukkit.getScheduler().runTaskLaterAsynchronously(plugin, () -> {
+      pollLeaderboard(currency, limit, startTime, timeoutMs, future);
+    }, delay / 50); // Convert to ticks (20 ticks = 1 second)
+  }
+
+  private void displayLeaderboard(Player player, EconomyLeaderboardService.SnapshotView view, CurrencyDefinition def) {
     var rows = view.top();
 
     String overall = (rows == null || rows.isEmpty())
@@ -212,8 +273,6 @@ public final class EconomyMainCommand implements Service {
       componentService.getComponents(player, "currency.baltop.footer", "NotDefined", false)
           .forEach(player::sendMessage);
     });
-
-    return 1;
   }
 
   @Command(value = "set <currency> <target> <amount>", permission = "nexeconomy.admin")

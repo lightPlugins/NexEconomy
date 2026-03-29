@@ -11,6 +11,7 @@ import io.nexstudios.nexeconomy.command.*;
 import io.nexstudios.nexeconomy.modules.BankCoreModule;
 import io.nexstudios.nexeconomy.modules.EconomyCoreModule;
 import io.nexstudios.nexeconomy.provider.VaultEconomyBridgeService;
+import io.nexstudios.nexeconomy.service.bank.interest.BankInterestService;
 import io.nexstudios.nexeconomy.service.bank.listener.BankPlayerListener;
 import io.nexstudios.nexeconomy.service.bank.sync.BankRedisSyncService;
 import io.nexstudios.nexeconomy.service.economy.EconomyFlushService;
@@ -93,6 +94,7 @@ public class NexEconomyPlugin extends NexPaperPlugin {
 
     services().getService(EconomyRedisSyncService.class).start();
     services().getService(BankRedisSyncService.class).start();
+    services().getService(BankInterestService.class).start();
 
     registerListeners(
         new EconomyPlayerListener(services()),
@@ -106,8 +108,10 @@ public class NexEconomyPlugin extends NexPaperPlugin {
   protected void stop() {
     getLogger().info("NexEconomy Shutting down...");
     EconomyFlushService flush = services().getService(EconomyFlushService.class);
+    BankInterestService bankInterest = services().getService(BankInterestService.class);
 
     flush.stop();
+    bankInterest.stop();
     // unregister placeholders
     services().findService(EconomyPlaceholderService.class).ifPresent(EconomyPlaceholderService::close);
 

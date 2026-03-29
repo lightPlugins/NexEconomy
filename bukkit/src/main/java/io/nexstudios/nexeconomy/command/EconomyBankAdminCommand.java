@@ -17,13 +17,14 @@ import net.kyori.adventure.text.minimessage.tag.resolver.TagResolver;
 import org.bukkit.Bukkit;
 import org.bukkit.OfflinePlayer;
 import org.bukkit.entity.Player;
+import org.jetbrains.annotations.Nullable;
 
 import java.util.Locale;
 import java.util.UUID;
 
 @CommandRoot(
     name = "bank",
-    description = "Bank admin commands"
+    description = "Bank commands"
 )
 @Dependencies({
     BankService.class,
@@ -155,11 +156,11 @@ public final class EconomyBankAdminCommand implements Service {
     return 1;
   }
 
-  @Command(value = "admin lockaccounts <player> [reason]", permission = "nexeconomy.bank.admin.lockaccounts")
+  @Command(value = "admin lockaccounts <player> <reason>", permission = "nexeconomy.bank.admin.lockaccounts")
   public int lockAccounts(
       NexPaperCommandSource source,
-      @Arg("player") String player,
-      @Arg("reason") String reason
+      @Arg("player") @Suggest(PlayerSuggestion.class) String player,
+      @Arg("reason") @Nullable String reason
   ) {
     Player sender = (Player) source.sender();
     if (sender == null) return 0;

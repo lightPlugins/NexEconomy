@@ -12,6 +12,8 @@ import io.nexstudios.nexeconomy.definition.CurrencyDefinition;
 import io.nexstudios.nexeconomy.definition.CurrencyType;
 import io.nexstudios.nexeconomy.definition.MantissaAmount;
 import io.nexstudios.nexeconomy.service.bank.BankService;
+import io.nexstudios.nexeconomy.service.bank.definition.BankDefinition;
+import io.nexstudios.nexeconomy.service.bank.level.BankLevelService;
 import io.nexstudios.nexeconomy.service.bank.repo.BankRepositoryService;
 import io.nexstudios.nexeconomy.service.bank.repo.InviteLookupRow;
 import io.nexstudios.nexeconomy.service.bank.transaction.BankTransactionService;
@@ -44,7 +46,8 @@ import java.util.stream.Collectors;
     ComponentService.class,
     BankService.class,
     CurrencyRegistryService.class,
-    BankTransactionService.class
+    BankTransactionService.class,
+    BankLevelService.class
 })
 public final class EconomyBankCommand implements Service {
 
@@ -57,12 +60,14 @@ public final class EconomyBankCommand implements Service {
   private final BankService bankService;
   private final CurrencyRegistryService currencies;
   private final BankTransactionService txService;
+  private final BankLevelService levelService;
 
   public EconomyBankCommand(ServiceAccessor accessor) {
     this.components = accessor.getService(ComponentService.class);
     this.bankService = accessor.getService(BankService.class);
     this.currencies = accessor.getService(CurrencyRegistryService.class);
     this.txService = accessor.getService(BankTransactionService.class);
+    this.levelService = accessor.getService(BankLevelService.class);
   }
 
   @Command(value = "balance <bank>", permission = "nexeconomy.bank.balance")
@@ -1054,6 +1059,167 @@ public final class EconomyBankCommand implements Service {
   private record TxListView(List<BankTransactionEntity> transactions, CurrencyDefinition currency) {}
   private record AmountView(MantissaAmount amount, CurrencyDefinition currency) {}
   private record BalanceView(MantissaAmount balance, CurrencyDefinition currency) {}
+
+  @Command(value = "level <bank>", permission = "nexeconomy.bank.level")
+  public int levelCommand(
+      NexPaperCommandSource source,
+      @Arg("bank") @Suggest(BankSuggestion.class) String bank
+  ) {
+    Player sender = (Player) source.sender();
+    if (sender == null) return 0;
+
+    String bankId = normalize(bank);
+    if (bankId.isBlank()) return 0;
+
+    UUID ownerUuid = sender.getUniqueId();
+
+    bankService.getOrCreateAccount(bankId, ownerUuid).thenCompose(bankAccount -> {
+      UUID bankAccountId = bankAccount.getId();
+
+      return bankService.bank(bankId).thenCompose(bankDef -> {
+        if (bankDef.isEmpty()) {
+          sender.sendMessage(components.builder(sender, "bank.errors.bank-not-available", "NotDefined", true).build());
+          return CompletableFuture.completedFuture(null);
+        }
+
+        return levelService.getLevel(bankAccountId).thenCompose(currentLevel -> {
+          int maxLevel = levelService.getMaxLevel(bankId);
+          MantissaAmount maxBalance = levelService.getMaxBalance(bankId, currentLevel);
+          MantissaAmount nextCost = currentLevel < maxLevel 
+              ? levelService.getUpgradeCost(bankId, currentLevel + 1)
+              : MantissaAmount.zero();
+
+          String shown = AmountNotation.formatShort(maxBalance, 2);
+          String costShown = AmountNotation.formatShort(nextCost, 2);
+          String nextLevel = currentLevel >= maxLevel ? "MAX" : String.valueOf(currentLevel + 1);
+
+          sender.sendMessage(components.builder(sender, "bank.level.current", "NotDefined", true)
+              .resolver(TagResolver.resolver(
+                  Placeholder.parsed("bank", bankId),
+                  Placeholder.parsed("level", String.valueOf(currentLevel)),
+                  Placeholder.parsed("max-balance", shown),
+                  Placeholder.parsed("next-level", nextLevel),
+                  Placeholder.parsed("next-cost", costShown)
+              ))
+              .build());
+
+          return CompletableFuture.completedFuture(null);
+        });
+      });
+    }).exceptionally(ex -> {
+      sendBankError(sender, ex);
+      return null;
+    });
+
+    return 1;
+  }
+
+  @Command(value = "upgrade <bank>", permission = "nexeconomy.bank.upgrade")
+  public int upgradeCommand(
+      NexPaperCommandSource source,
+      @Arg("bank") @Suggest(BankSuggestion.class) String bank
+  ) {
+    Player sender = (Player) source.sender();
+    if (sender == null) return 0;
+
+    String bankId = normalize(bank);
+    if (bankId.isBlank()) return 0;
+
+    UUID ownerUuid = sender.getUniqueId();
+
+    bankService.getOrCreateAccount(bankId, ownerUuid).thenCompose(bankAccount -> {
+      UUID bankAccountId = bankAccount.getId();
+
+      return bankService.bank(bankId).thenCompose(bankDef -> {
+        if (bankDef.isEmpty()) {
+          sender.sendMessage(components.builder(sender, "bank.errors.bank-not-available", "NotDefined", true).build());
+          return CompletableFuture.completedFuture(null);
+        }
+
+        return levelService.getLevel(bankAccountId).thenCompose(currentLevel -> {
+          int targetLevel = currentLevel + 1;
+
+          return levelService.canUpgrade(bankAccountId, bankId, targetLevel).thenCompose(canUpgradeCheck -> {
+            if (!canUpgradeCheck) {
+              int maxLevel = levelService.getMaxLevel(bankId);
+              if (currentLevel >= maxLevel) {
+                sender.sendMessage(components.builder(sender, "bank.level.max-level-reached", "NotDefined", true)
+                    .resolver(TagResolver.resolver(Placeholder.parsed("bank", bankId)))
+                    .build());
+              }
+              return CompletableFuture.completedFuture(null);
+            }
+
+            MantissaAmount cost = levelService.getUpgradeCost(bankId, targetLevel);
+
+            return bankService.balance(bankId, ownerUuid).thenCompose(balance -> {
+              if (balance.compareTo(cost) < 0) {
+                sender.sendMessage(components.builder(sender, "bank.level.insufficient-funds", "NotDefined", true)
+                    .resolver(TagResolver.resolver(
+                        Placeholder.parsed("bank", bankId),
+                        Placeholder.parsed("required", AmountNotation.formatShort(cost, 2)),
+                        Placeholder.parsed("available", AmountNotation.formatShort(balance, 2))
+                    ))
+                    .build());
+                return CompletableFuture.completedFuture(null);
+              }
+
+              String permission = bankDef.get().levels().stream()
+                  .filter(l -> l.level() == targetLevel)
+                  .map(BankDefinition.LevelDefinition::permission)
+                  .findFirst()
+                  .orElse(null);
+
+              if (permission != null && !permission.isEmpty() && !sender.hasPermission(permission)) {
+                sender.sendMessage(components.builder(sender, "bank.level.permission-denied", "NotDefined", true)
+                    .resolver(TagResolver.resolver(Placeholder.parsed("bank", bankId)))
+                    .build());
+                return CompletableFuture.completedFuture(null);
+              }
+
+              return levelService.upgrade(bankAccountId, targetLevel).thenCompose(success -> {
+                if (!success) {
+                  sender.sendMessage(components.builder(sender, "bank.errors.internal", "NotDefined", true)
+                      .resolver(TagResolver.resolver(Placeholder.parsed("error", "Upgrade failed")))
+                      .build());
+                  return CompletableFuture.completedFuture(null);
+                }
+
+                // Deduct the upgrade cost from bank balance
+                UUID actorUuid = sender.getUniqueId();
+                return bankService.withdraw(bankId, ownerUuid, actorUuid, cost)
+                    .thenApply(newBalance -> {
+                      if (newBalance == null || newBalance.isNegative()) {
+                        sender.sendMessage(components.builder(sender, "bank.errors.internal", "NotDefined", true)
+                            .resolver(TagResolver.resolver(
+                                Placeholder.parsed("error", "Could not withdraw upgrade cost from bank")
+                            ))
+                            .build());
+                        return null;
+                      }
+
+                      sender.sendMessage(components.builder(sender, "bank.level.upgraded", "NotDefined", true)
+                          .resolver(TagResolver.resolver(
+                              Placeholder.parsed("bank", bankId),
+                              Placeholder.parsed("level", String.valueOf(targetLevel)),
+                              Placeholder.parsed("cost", AmountNotation.formatShort(cost, 2))
+                          ))
+                          .build());
+
+                      return null;
+                    });
+              });
+            });
+          });
+        });
+      });
+    }).exceptionally(ex -> {
+      sendBankError(sender, ex);
+      return null;
+    });
+
+    return 1;
+  }
 
   private static String normalize(String s) {
     return s == null ? "" : s.trim().toLowerCase(Locale.ROOT);

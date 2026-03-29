@@ -7,6 +7,8 @@ import io.nexstudios.languageservice.service.component.ComponentService;
 import io.nexstudios.languageservice.service.language.LanguageService;
 import io.nexstudios.nexeconomy.service.bank.BankService;
 import io.nexstudios.nexeconomy.service.bank.cache.BankAccountCacheService;
+import io.nexstudios.nexeconomy.service.bank.interest.BankInterestService;
+import io.nexstudios.nexeconomy.service.bank.interest.DefaultBankInterestService;
 import io.nexstudios.nexeconomy.service.bank.registry.BankRegistryService;
 import io.nexstudios.nexeconomy.service.placeholder.EconomyPlaceholderService;
 import io.nexstudios.nexeconomy.service.registry.CurrencyRegistryService;
@@ -28,7 +30,8 @@ import org.bukkit.entity.Player;
     EconomyPlaceholderService.class,
     BankService.class,
     BankRegistryService.class,
-    BankAccountCacheService.class
+    BankAccountCacheService.class,
+    BankInterestService.class
 })
 public class EconomyReloadCommand implements Service {
 
@@ -40,6 +43,7 @@ public class EconomyReloadCommand implements Service {
   private final BankService bankService;
   private final BankRegistryService bankRegistry;
   private final BankAccountCacheService bankCache;
+  private final BankInterestService bankInterestService;
 
   public EconomyReloadCommand(ServiceAccessor accessor) {
     this.componentService = accessor.getService(ComponentService.class);
@@ -50,6 +54,7 @@ public class EconomyReloadCommand implements Service {
     this.bankService = accessor.getService(BankService.class);
     this.bankRegistry = accessor.getService(BankRegistryService.class);
     this.bankCache = accessor.getService(BankAccountCacheService.class);
+    this.bankInterestService = accessor.getService(BankInterestService.class);
   }
 
   @Command(value = "reload", permission = "nexeconomy.admin")
@@ -65,6 +70,7 @@ public class EconomyReloadCommand implements Service {
     bankCache.reload();
     bankService.reload();
     bankService.ensureMissingUnlockedBanksForAllOnline();
+    bankInterestService.reload();
 
     player.sendMessage(componentService.builder(player, "general.reload", "NotDefined", true).build());
     return 1;

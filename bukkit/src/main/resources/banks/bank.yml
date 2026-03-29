@@ -14,6 +14,24 @@ unlocked-by-default: true
 # Default maximum balance for this bank. (level 1)
 default-max-balance: '1k'
 
+# Interest rate configuration for this bank.
+# Interest is applied to the bank balance at configured times each day.
+interest:
+  # Enable or disable interest for this bank.
+  enabled: true
+
+  # Interest rate as a percentage (0.02 = 2% per interval).
+  # Applied to the current bank balance.
+  rate: "2%"
+
+  # List of times (HH:mm:ss format) when interest is applied each day.
+  # Example: ["03:00:00", "15:00:00"] applies interest at 3 AM and 3 PM daily.
+  times:
+    - "03:00:00"
+
+  # Timezone for interpreting the times above (e.g. "Europe/Berlin", "America/New_York").
+  timezone: "Europe/Berlin"
+
 member-system:
   # Enables the shared bank member system (roles, permissions, limits).
   enabled: true
@@ -90,19 +108,6 @@ member-system:
       canUpgrade: true
       canViewLog: false
 
-interest-system:
-  # WARNING: In a multi-server network, enable this on ONE server only.
-  # If multiple servers apply interest, players may receive interest multiple times.
-  enabled: true
-
-  # Interest percentage applied per run (e.g. 0.02 = +2%).
-  percentage: 0.02
-
-  # Time of day when interest is applied (HH:mm:ss).
-  time: "03:00:00"
-
-  # Timezone used to interpret "time".
-  timezone: "Europe/Berlin"
 
 level-system:
   # Level upgrades for this bank.

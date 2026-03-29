@@ -13,7 +13,9 @@ import org.bukkit.Bukkit;
 import org.bukkit.plugin.Plugin;
 import org.bukkit.scheduler.BukkitTask;
 
+import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
 import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
@@ -152,7 +154,9 @@ public final class EconomyFlushService implements Service {
   }
 
   public void flushAllDirty() {
-    for (EconomyPlayer p : cache.allOnlineCached()) {
+    // CRITICAL FIX: Create snapshot to prevent ConcurrentModificationException if cache changes during iteration
+    List<EconomyPlayer> snapshot = new ArrayList<>(cache.allOnlineCached());
+    for (EconomyPlayer p : snapshot) {
       flushAccountDirty(p, EconomyBalanceEntity.EconomyAccountType.PLAYER);
     }
   }
@@ -201,7 +205,13 @@ public final class EconomyFlushService implements Service {
         redisSync.publishInvalidateAccount(uuid, type);
       }
     }).exceptionally(ex -> {
-      logger.logger().warning("Failed to flush account " + uuid + " (type=" + type + "): " + ex.getMessage());
+      // CRITICAL FIX: Prevent silent data loss - log as severe and mark for retry
+      logger.logger().severe("CRITICAL: Failed to flush account " + uuid + " (type=" + type + "): " + ex.getMessage() + ". Data will be retried.");
+      
+      // Attempt to reschedule the flush after a delay
+      if (started && plugin.isEnabled()) {
+        requestFlushTyped(econ, type);
+      }
       return null;
     });
   }
