@@ -3,6 +3,7 @@ package io.nexstudios.nexeconomy.service.bank.repo;
 import io.nexstudios.nexeconomy.definition.MantissaAmount;
 import io.nexstudios.nexlogic.bukkit.services.entity.nexeconomy.BankAccountEntity;
 import io.nexstudios.nexlogic.bukkit.services.entity.nexeconomy.BankInviteEntity;
+import io.nexstudios.nexlogic.bukkit.services.entity.nexeconomy.BankLevelEntity;
 import io.nexstudios.nexlogic.bukkit.services.entity.nexeconomy.BankMemberEntity;
 import io.nexstudios.nexlogic.bukkit.services.entity.nexeconomy.BankTransactionEntity;
 import io.nexstudios.nexlogic.bukkit.services.entity.nexeconomy.BankWithdrawUsageEntity;
@@ -85,4 +86,11 @@ public interface BankRepositoryService extends Service {
   CompletableFuture<Boolean> lockPlayer(UUID playerUuid, UUID lockedByUuid, String reason);
 
   CompletableFuture<Boolean> unlockPlayer(UUID playerUuid, UUID unlockedByUuid);
+
+  // Bank Level Management
+  CompletableFuture<Optional<BankLevelEntity>> findBankLevel(UUID bankAccountId);
+
+  CompletableFuture<BankLevelEntity> upsertBankLevel(UUID bankAccountId, int level);
+
+  CompletableFuture<BankLevelEntity> getOrCreateBankLevel(UUID bankAccountId);
 }

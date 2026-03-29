@@ -204,3 +204,11 @@ bank:
       empty: '<gray>You currently have no pending bank invites.</gray>'
       header: '<gray>You have <yellow><amount></yellow> pending bank invite(s):</gray>'
       row: '<dark_gray>● <gray>Bank:</gray> <yellow><bank></yellow> <dark_gray>|</dark_gray> <gray>Owner:</gray> <yellow><owner></yellow> <dark_gray>(</dark_gray><yellow><owner-uuid></yellow><dark_gray>)</dark_gray> <dark_gray>|</dark_gray> <gray>Role:</gray> <yellow><role></yellow> <dark_gray>|</dark_gray> <gray>Invited by:</gray> <yellow><invited-by></yellow>'
+
+  level:
+    current: '<gray>Bank <yellow><bank></yellow> is at level <yellow><level></yellow>. Max balance: <yellow><max-balance></yellow>. Next level: <yellow><next-level></yellow> (Cost: <yellow><next-cost></yellow>).</gray>'
+    upgraded: '<gray>Bank <yellow><bank></yellow> has been upgraded to level <yellow><level></yellow> for <yellow><cost></yellow>.</gray>'
+    insufficient-funds: '<red>Insufficient funds to upgrade. Required: <yellow><required></yellow>, Available: <yellow><available></yellow>.</red>'
+    max-level-reached: '<red>Bank <yellow><bank></yellow> has already reached maximum level.</red>'
+    permission-denied: '<red>You do not have permission to upgrade this bank.</red>'
+    already-at-level: '<red>Bank <yellow><bank></yellow> is already at level <yellow><level></yellow>.</red>'

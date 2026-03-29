@@ -6,6 +6,8 @@ import io.nexstudios.nexeconomy.service.bank.cache.BankAccountCacheService;
 import io.nexstudios.nexeconomy.service.bank.cache.BankAccountPresenceService;
 import io.nexstudios.nexeconomy.service.bank.interest.BankInterestService;
 import io.nexstudios.nexeconomy.service.bank.interest.DefaultBankInterestService;
+import io.nexstudios.nexeconomy.service.bank.level.BankLevelService;
+import io.nexstudios.nexeconomy.service.bank.level.DefaultBankLevelService;
 import io.nexstudios.nexeconomy.service.bank.registry.BankRegistryService;
 import io.nexstudios.nexeconomy.service.bank.registry.DefaultBankRegistryService;
 import io.nexstudios.nexeconomy.service.bank.repo.BankRepositoryService;
@@ -22,14 +24,25 @@ public final class BankCoreModule implements ServiceModule {
 
   @Override
   public void install(@NotNull ServiceAccessor services) {
-
+    // Register base services first (no internal dependencies)
     services.register(BankRegistryService.class, DefaultBankRegistryService.class);
     services.register(BankRepositoryService.class, DefaultBankRepositoryService.class);
+
+    // Register BankLevelService (depends on BankRepositoryService)
+    services.register(BankLevelService.class, DefaultBankLevelService.class);
+
+    // Register cache services (BankAccountCacheService depends on BankLevelService)
     services.register(BankAccountCacheService.class, BankAccountCacheService.class);
     services.register(BankAccountPresenceService.class, BankAccountPresenceService.class);
+
+    // Register sync and transaction services
     services.register(BankRedisSyncService.class, DefaultBankRedisSyncServiceService.class);
     services.register(BankTransactionService.class, DefaultBankTransactionService.class);
+
+    // Register interest service
     services.register(BankInterestService.class, DefaultBankInterestService.class);
+
+    // Register main bank service last (depends on everything else)
     services.register(BankService.class, DefaultBankService.class);
   }
 }
