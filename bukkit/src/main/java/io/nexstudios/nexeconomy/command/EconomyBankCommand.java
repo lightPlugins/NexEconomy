@@ -6,6 +6,7 @@ import io.nexstudios.commandservice.service.commands.annotations.CommandRoot;
 import io.nexstudios.commandservice.service.commands.annotations.Suggest;
 import io.nexstudios.commandservice.service.commands.source.NexPaperCommandSource;
 import io.nexstudios.languageservice.service.component.ComponentService;
+import io.nexstudios.menuservice.common.api.ViewerRef;
 import io.nexstudios.nexeconomy.command.suggestions.*;
 import io.nexstudios.nexeconomy.definition.AmountNotation;
 import io.nexstudios.nexeconomy.definition.CurrencyDefinition;
@@ -14,6 +15,7 @@ import io.nexstudios.nexeconomy.definition.MantissaAmount;
 import io.nexstudios.nexeconomy.service.bank.BankService;
 import io.nexstudios.nexeconomy.service.bank.definition.BankDefinition;
 import io.nexstudios.nexeconomy.service.bank.level.BankLevelService;
+import io.nexstudios.nexeconomy.service.bank.menu.BankOverviewMenu;
 import io.nexstudios.nexeconomy.service.bank.repo.BankRepositoryService;
 import io.nexstudios.nexeconomy.service.bank.repo.InviteLookupRow;
 import io.nexstudios.nexeconomy.service.bank.transaction.BankTransactionService;
@@ -64,6 +66,7 @@ public final class EconomyBankCommand implements Service {
   private final BankTransactionService txService;
   private final BankLevelService levelService;
   private final EconomyService economy;
+  private final ServiceAccessor services;
 
   public EconomyBankCommand(ServiceAccessor accessor) {
     this.components = accessor.getService(ComponentService.class);
@@ -72,6 +75,16 @@ public final class EconomyBankCommand implements Service {
     this.txService = accessor.getService(BankTransactionService.class);
     this.levelService = accessor.getService(BankLevelService.class);
     this.economy = accessor.getService(EconomyService.class);
+    this.services = accessor;
+  }
+
+  @Command(value = "overview", permission = "nexeconomy.bank.overview")
+  public int openBankOverview(NexPaperCommandSource source) {
+    Player sender = (Player) source.sender();
+    if (sender == null) return 0;
+
+    BankOverviewMenu.open(services, ViewerRef.of(sender.getUniqueId(), sender.getName()));
+    return 1;
   }
 
   @Command(value = "balance <bank>", permission = "nexeconomy.bank.balance")

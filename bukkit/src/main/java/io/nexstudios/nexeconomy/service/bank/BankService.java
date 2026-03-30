@@ -18,6 +18,8 @@ public interface BankService extends Service {
 
   void reload();
 
+  CompletableFuture<List<BankRepositoryService.BankAccountRef>> allBanks(UUID playerUuid);
+
   CompletableFuture<List<BankRepositoryService.BankAccountRef>> otherBanks(UUID memberUuid);
 
   CompletableFuture<Optional<BankDefinition>> bank(String bankId);

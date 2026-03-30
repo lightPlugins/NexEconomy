@@ -165,6 +165,56 @@ public final class DefaultBankService implements BankService, Service {
   }
 
   @Override
+  public CompletableFuture<List<BankRepositoryService.BankAccountRef>> allBanks(UUID playerUuid) {
+    if (playerUuid == null) return CompletableFuture.completedFuture(List.of());
+
+    // 1) Presence-first (online + tracked)
+    if (presence != null) {
+      Optional<Set<UUID>> idsOpt = presence.bankAccountIdsIfTracked(playerUuid);
+      if (idsOpt.isPresent()) {
+        ArrayList<BankRepositoryService.BankAccountRef> out = new ArrayList<>();
+
+        for (UUID bankAccountId : idsOpt.get()) {
+          if (bankAccountId == null) continue;
+
+          BankAccountCacheService.View v = cache == null ? null : cache.get(bankAccountId);
+          if (v == null || v.account() == null || v.account().getBankIdLower() == null || v.account().getOwnerUuid() == null) {
+            // not fully resolvable -> fallback to DB
+            out.clear();
+            break;
+          }
+
+          // Add ALL banks (owner + member) - no filter like otherBanks
+          out.add(new BankRepositoryService.BankAccountRef(
+              bankAccountId,
+              v.account().getBankIdLower(),
+              v.account().getOwnerUuid()
+          ));
+        }
+
+        if (!out.isEmpty()) {
+          return CompletableFuture.completedFuture(List.copyOf(out));
+        }
+        if (idsOpt.get().isEmpty()) {
+          return CompletableFuture.completedFuture(List.of());
+        }
+      }
+    }
+
+    // 2) DB fallback (async)
+    return repo.findBankAccountsForMember(playerUuid).thenApply(refs -> {
+      if (refs == null || refs.isEmpty()) return List.of();
+
+      ArrayList<BankRepositoryService.BankAccountRef> out = new ArrayList<>(refs.size());
+      for (BankRepositoryService.BankAccountRef r : refs) {
+        if (r == null || r.bankAccountId() == null || r.ownerUuid() == null) continue;
+        // Add ALL banks (no owner filter)
+        out.add(r);
+      }
+      return List.copyOf(out);
+    });
+  }
+
   public CompletableFuture<List<BankRepositoryService.BankAccountRef>> otherBanks(UUID memberUuid) {
     if (memberUuid == null) return CompletableFuture.completedFuture(List.of());
 

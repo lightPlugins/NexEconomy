@@ -213,3 +213,5 @@ bank:
     max-level-reached: '<red>Bank <yellow><bank></yellow> has already reached maximum level.</red>'
     permission-denied: '<red>You do not have permission to upgrade this bank.</red>'
     already-at-level: '<red>Bank <yellow><bank></yellow> is already at level <yellow><level></yellow>.</red>'
+
+inventories:

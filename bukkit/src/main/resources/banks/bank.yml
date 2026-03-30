@@ -127,15 +127,6 @@ level-system:
     upgrade-cost: '5000'
 
   - level: 3
-
-    # Maximum allowed bank balance at this level.
-    # Supports amount notation like "10k" (mantissa is optional).
-    # the corresponding currency is used for this level.
     max-balance: '500k'
-
-    # Permission required to upgrade to this level.
     need-permission: "nexeconomy.bank.level.3"
-
-    # Cost to upgrade to this level (usually in the bank currency or a defined upgrade currency).
-    # (mantissa is optional).
     upgrade-cost: '25k'
