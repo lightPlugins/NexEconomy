@@ -15,6 +15,7 @@ dependencies {
     compileOnly("io.nexstudios.configservice:platform:v1.0.0")
     compileOnly("io.nexstudios.languageservice:bukkit:v1.0.0")
     compileOnly("io.nexstudios.commandservice:bukkit:v1.0.0")
+    compileOnly("io.nexstudios.dialogservice:bukkit:v1.0.0")
 
     compileOnly("io.nexstudios.nexlogic:nexlogic-bukkit:v1.0.0")
 

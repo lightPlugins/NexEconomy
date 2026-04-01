@@ -71,6 +71,7 @@ public interface BankRepositoryService extends Service {
   CompletableFuture<List<UUID>> findOwnerUuidsForMember(String bankIdLower, UUID memberUuid);
 
   record BankAccountRef(UUID bankAccountId, String bankIdLower, UUID ownerUuid) {}
+
   CompletableFuture<List<BankAccountRef>> findBankAccountsForMember(UUID memberUuid);
 
   CompletableFuture<Long> countOtherBankMemberships(UUID memberUuid);

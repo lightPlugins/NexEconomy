@@ -13,16 +13,17 @@ import io.nexstudios.menuservice.common.api.page.control.PageControlButton;
 import io.nexstudios.menuservice.common.api.page.control.PageSortControl;
 import io.nexstudios.menuservice.common.api.registry.DuplicateStrategy;
 import io.nexstudios.nexeconomy.service.bank.BankService;
+import io.nexstudios.nexeconomy.service.bank.menu.BankDetailMenu;
 import io.nexstudios.nexeconomy.service.bank.repo.BankRepositoryService;
 import io.nexstudios.nexlogic.common.services.logging.LoggerService;
 import io.nexstudios.serviceregistry.di.Dependencies;
 import io.nexstudios.serviceregistry.di.ServiceAccessor;
 import net.kyori.adventure.text.Component;
 import net.kyori.adventure.text.format.NamedTextColor;
+import net.kyori.adventure.text.minimessage.MiniMessage;
 import org.bukkit.Bukkit;
 import org.bukkit.Material;
 import org.bukkit.OfflinePlayer;
-import org.bukkit.entity.Player;
 import org.bukkit.inventory.ItemStack;
 import org.jetbrains.annotations.NotNull;
 
@@ -44,13 +45,14 @@ public class BankOverviewMenu {
   private static final String AREA_ID = "entries";
 
   private static LoggerService logger;
+  private static ServiceAccessor servicesRef;
 
   public static void register(@NotNull ServiceAccessor services) {
     MenuService menuService = services.getService(MenuService.class);
     ItemService items = services.getService(ItemService.class);
     BankService bankService = services.getService(BankService.class);
-    ComponentService components = services.getService(ComponentService.class);
     logger = services.getService(LoggerService.class);
+    servicesRef = services;
 
     var def = MenuDefinitionBuilder.create()
         .key(KEY)
@@ -58,22 +60,19 @@ public class BankOverviewMenu {
         .rows(6)
         .refreshInterval(Duration.ofSeconds(1))
         .interactionPolicy(InteractionPolicies.locked())
-        .populator(ctx -> {
-          ctx.slot(SLOT_SORT_BUTTON).setPlannedItem(() -> MenuItem.of(buildSortButton(items)));
-        })
+        .populator(ctx -> ctx.slot(SLOT_SORT_BUTTON).setPlannedItem(() -> MenuItem.of(buildSortButton(items))))
         .addSortControl(AREA_ID, buildSortControl())
         .addControlButton(buildSortControlButton(items))
-        .addPagedArea(buildPagedArea(items, bankService, components))
+        .addPagedArea(buildPagedArea(items, bankService))
         .build();
 
     menuService.registry().register(def, DuplicateStrategy.REPLACE);
   }
 
-  private static PagedAreaDefinition<BankEntry> buildPagedArea(ItemService items, BankService bankService, ComponentService components) {
+  private static PagedAreaDefinition<BankEntry> buildPagedArea(ItemService items, BankService bankService) {
     PageSource<BankEntry> source = (menuKey, viewer) -> {
       try {
         UUID viewerUuid = getViewerUuid(viewer);
-        org.bukkit.Bukkit.getLogger().info("[BankOverviewMenu] Loading banks for viewer: " + viewerUuid);
         
         List<BankEntry> entries = new ArrayList<>();
         
@@ -83,25 +82,37 @@ public class BankOverviewMenu {
           if (allBanks != null) {
             for (BankRepositoryService.BankAccountRef ref : allBanks) {
               if (ref == null) continue;
+              
               boolean isOwner = ref.ownerUuid().equals(viewerUuid);
+              Category category = isOwner ? Category.OWN_BANK : Category.MEMBER_BANK;
+              
+              // OPTIMIZATION: Pre-load the bank definition here (single pass through all banks)
+              // instead of loading it again in renderBank() for each item
+              String displayName = ref.bankIdLower();
+              try {
+                var bankDefOpt = bankService.bank(ref.bankIdLower()).get();
+                if (bankDefOpt.isPresent()) {
+                  displayName = bankDefOpt.get().nameMiniMessage();
+                }
+              } catch (Exception e) {
+                logger.logger().warning("Failed to load bank definition for: " + ref.bankIdLower());
+              }
+              
               entries.add(new BankEntry(
                   ref.bankIdLower(),
                   ref.ownerUuid(),
-                  isOwner ? Category.OWN_BANK : Category.MEMBER_BANK
+                  category,
+                  displayName
               ));
             }
           }
-          org.bukkit.Bukkit.getLogger().info("[BankOverviewMenu] Loaded " + (allBanks != null ? allBanks.size() : 0) + " banks");
         } catch (Exception e) {
-          org.bukkit.Bukkit.getLogger().warning("[BankOverviewMenu] Error loading banks: " + e.getMessage());
-          e.printStackTrace();
+          logger.logger().warning("Failed to load banks for overview: " + e.getMessage());
         }
-        
-        org.bukkit.Bukkit.getLogger().info("[BankOverviewMenu] Total entries: " + entries.size() + " banks");
+
         return entries;
       } catch (Exception e) {
-        org.bukkit.Bukkit.getLogger().warning("[BankOverviewMenu] Failed to load banks: " + e.getMessage());
-        e.printStackTrace();
+        logger.logger().warning("Failed to build bank overview entries: " + e.getMessage());
         return new ArrayList<>();
       }
     };
@@ -120,24 +131,29 @@ public class BankOverviewMenu {
         AREA_ID,
         bounds,
         source,
-        (entry, index) -> () -> MenuItem.of(renderBank(items, entry, index)),
+        (entry, index) -> () -> MenuItem.of(renderBank(items, entry)),
         nav,
-        Optional.empty()
+        Optional.of((entry, index, clickCtx) -> {
+          clickCtx.cancel();
+          if (servicesRef != null) {
+            BankDetailMenu.open(servicesRef, clickCtx.viewer(), entry.bankName(), entry.ownerUuid(), entry.category() == Category.OWN_BANK);
+          }
+        })
     );
   }
 
-  private static ItemStack renderBank(ItemService items, BankEntry bank, int index) {
+  private static ItemStack renderBank(ItemService items, BankEntry bank) {
     OfflinePlayer owner = Bukkit.getOfflinePlayer(bank.ownerUuid());
     String ownerName = owner.getName() != null ? owner.getName() : bank.ownerUuid().toString();
 
-    NamedTextColor typeColor = bank.category() == Category.OWN_BANK ? NamedTextColor.GREEN : NamedTextColor.BLUE;
     String typeLabel = bank.category() == Category.OWN_BANK ? "Own Bank" : "Member Bank";
 
+    // OPTIMIZATION: Display name is now pre-loaded in PageSource, no DB call needed here
     return items.builder(Material.PAPER)
         .amount(1)
-        .name(Component.text(bank.bankName(), NamedTextColor.GOLD))
+        .name(MiniMessage.miniMessage().deserialize(bank.displayName()))
         .lore(l -> l
-            .line("&7Type: " + typeColor + typeLabel)
+            .line("&7Type: <green>" + typeLabel)
             .line("&7Owner: &f" + ownerName)
             .line("&eClick to manage")
         )
@@ -193,12 +209,10 @@ public class BankOverviewMenu {
       @Override
       public Comparator<BankEntry> comparatorFor(String modeId, MenuKey menuKey, ViewerRef viewer) {
         // Filter by category, then sort by name
-        return Comparator.comparing((BankEntry b) -> {
-          return switch (modeId) {
-            case "owner" -> b.category() == Category.OWN_BANK ? 0 : 1;
-            case "member" -> b.category() == Category.MEMBER_BANK ? 0 : 1;
-            default -> 2; // All - no filtering
-          };
+        return Comparator.comparing((BankEntry b) -> switch (modeId) {
+          case "owner" -> b.category() == Category.OWN_BANK ? 0 : 1;
+          case "member" -> b.category() == Category.MEMBER_BANK ? 0 : 1;
+          default -> 2; // All - no filtering
         }).thenComparing(BankEntry::bankName, String.CASE_INSENSITIVE_ORDER);
       }
     };
@@ -229,6 +243,6 @@ public class BankOverviewMenu {
     Category(String id) { this.id = id; }
   }
 
-  private record BankEntry(String bankName, UUID ownerUuid, Category category) {}
+  private record BankEntry(String bankName, UUID ownerUuid, Category category, String displayName) {}
 
 }

@@ -3,6 +3,7 @@ package io.nexstudios.nexeconomy;
 import io.nexstudios.commandservice.CommandServiceModule;
 import io.nexstudios.commandservice.service.commands.CommandService;
 import io.nexstudios.configservice.ConfigServiceModule;
+import io.nexstudios.dialogservice.DialogService;
 import io.nexstudios.framework.paper.NexPaperPlugin;
 import io.nexstudios.itemservice.bukkit.ItemServiceModule;
 import io.nexstudios.languageservice.LanguageServiceModule;
@@ -11,9 +12,9 @@ import io.nexstudios.menuservice.bukkit.service.menu.MenuServiceModule;
 import io.nexstudios.nexeconomy.command.*;
 import io.nexstudios.nexeconomy.modules.BankCoreModule;
 import io.nexstudios.nexeconomy.modules.EconomyCoreModule;
-import io.nexstudios.nexeconomy.provider.VaultEconomyBridgeService;
 import io.nexstudios.nexeconomy.service.bank.interest.BankInterestService;
 import io.nexstudios.nexeconomy.service.bank.listener.BankPlayerListener;
+import io.nexstudios.nexeconomy.service.bank.menu.BankDetailMenu;
 import io.nexstudios.nexeconomy.service.bank.menu.BankOverviewMenu;
 import io.nexstudios.nexeconomy.service.bank.sync.BankRedisSyncService;
 import io.nexstudios.nexeconomy.service.economy.EconomyFlushService;
@@ -46,6 +47,8 @@ public class NexEconomyPlugin extends NexPaperPlugin {
     services.install(new ConfigServiceModule(getDataPath(), getClassLoader()));
     // install LanguageService (require ConfigService loaded)
     services.install(new LanguageServiceModule(this));
+    // install Dialog Service
+    services.install(new DialogService());
     // install ItemService
     services.install(new ItemServiceModule(this));
     // install Command Service
@@ -82,6 +85,7 @@ public class NexEconomyPlugin extends NexPaperPlugin {
     // install Menu API
     services().install(new MenuServiceModule(this));
     BankOverviewMenu.register(services());
+    BankDetailMenu.register(services());
 
     // register commands
     services().getService(CommandService.class).registerAll(
