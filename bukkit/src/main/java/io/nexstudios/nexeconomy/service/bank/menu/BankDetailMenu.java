@@ -5,13 +5,7 @@ import io.nexstudios.dialogservice.api.TextRequestDialog;
 import io.nexstudios.dialogservice.service.ConfirmDialogService;
 import io.nexstudios.dialogservice.service.TextRequestDialogService;
 import io.nexstudios.itemservice.bukkit.service.item.ItemService;
-import io.nexstudios.menuservice.common.api.CloseReason;
-import io.nexstudios.menuservice.common.api.MenuInteractionHooks;
-import io.nexstudios.menuservice.common.api.MenuKey;
-import io.nexstudios.menuservice.common.api.MenuService;
-import io.nexstudios.menuservice.common.api.MenuSlot;
-import io.nexstudios.menuservice.common.api.MenuView;
-import io.nexstudios.menuservice.common.api.ViewerRef;
+import io.nexstudios.menuservice.common.api.*;
 import io.nexstudios.menuservice.common.api.builder.MenuDefinitionBuilder;
 import io.nexstudios.menuservice.common.api.interaction.InteractionPolicies;
 import io.nexstudios.menuservice.common.api.item.MenuItem;
@@ -26,6 +20,8 @@ import io.nexstudios.nexeconomy.service.bank.repo.BankRepositoryService;
 import io.nexstudios.nexeconomy.service.bank.level.BankLevelService;
 import io.nexstudios.nexeconomy.service.economy.EconomyService;
 import io.nexstudios.nexeconomy.service.registry.CurrencyRegistryService;
+import io.nexstudios.nexlogic.bukkit.services.entity.nexeconomy.BankMemberEntity;
+import io.nexstudios.nexlogic.bukkit.services.entity.nexeconomy.BankWithdrawUsageEntity;
 import io.nexstudios.serviceregistry.di.Dependencies;
 import io.nexstudios.serviceregistry.di.ServiceAccessor;
 import net.kyori.adventure.text.Component;
@@ -194,14 +190,14 @@ public final class BankDetailMenu {
       }
     }
 
-    List<io.nexstudios.nexlogic.bukkit.services.entity.nexeconomy.BankMemberEntity> members;
+    List<BankMemberEntity> members;
     try {
       members = bankService.members(context.bankId(), context.ownerUuid()).join();
     } catch (Exception ex) {
       members = List.of();
     }
 
-    io.nexstudios.nexlogic.bukkit.services.entity.nexeconomy.BankMemberEntity viewerMember = findMember(members, viewerUuid);
+    BankMemberEntity viewerMember = findMember(members, viewerUuid);
     BankDefinition.RoleDefinition role = resolveRole(definition, context, viewerUuid, viewerMember);
 
     boolean canDeposit = role != null && role.canDeposit();
@@ -265,7 +261,7 @@ public final class BankDetailMenu {
     );
   }
 
-  private static void setInfoPanel(io.nexstudios.menuservice.common.api.MenuPopulateContext ctx, ItemService items, BankData data) {
+  private static void setInfoPanel(MenuPopulateContext ctx, ItemService items, BankData data) {
     String ownerName = nameOrUuid(data.context().ownerUuid());
     String roleName = data.role() == null ? "unknown" : data.role().nameMiniMessage();
     String bankBalance = AmountNotation.formatShort(data.bankBalance(), data.currency().fractionDigits());
@@ -290,7 +286,7 @@ public final class BankDetailMenu {
     ctx.slot(SLOT_INFO).setPlannedItem(() -> MenuItem.of(stack));
   }
 
-  private static void setDepositButtons(io.nexstudios.menuservice.common.api.MenuPopulateContext ctx, ItemService items, BankData data) {
+  private static void setDepositButtons(MenuPopulateContext ctx, ItemService items, BankData data) {
     if (!data.depositEnabled()) {
       setBarrier(ctx, items, SLOT_DEPOSIT, "Deposit", data.depositDisabledReason());
       setBarrier(ctx, items, SLOT_DEPOSIT_ALL, "Deposit all", data.depositDisabledReason());
@@ -313,7 +309,7 @@ public final class BankDetailMenu {
     }
   }
 
-  private static void setWithdrawButtons(io.nexstudios.menuservice.common.api.MenuPopulateContext ctx, ItemService items, BankData data) {
+  private static void setWithdrawButtons(MenuPopulateContext ctx, ItemService items, BankData data) {
     if (!data.withdrawEnabled()) {
       setBarrier(ctx, items, SLOT_WITHDRAW, "Withdraw", data.withdrawDisabledReason());
       setBarrier(ctx, items, SLOT_WITHDRAW_ALL, "Withdraw all", data.withdrawDisabledReason());
@@ -335,13 +331,13 @@ public final class BankDetailMenu {
     }
   }
 
-  private static void setButton(io.nexstudios.menuservice.common.api.MenuPopulateContext ctx,
+  private static void setButton(MenuPopulateContext ctx,
                                 ItemService items,
                                 int slot,
                                 Material material,
                                 String name,
                                 String lore,
-                                io.nexstudios.menuservice.common.api.MenuSlot.MenuClickHandler clickHandler) {
+                                MenuSlot.MenuClickHandler clickHandler) {
     ItemStack stack = items.builder(material)
         .amount(1)
         .name(Component.text(name))
@@ -359,7 +355,7 @@ public final class BankDetailMenu {
     }
   }
 
-  private static void setBarrier(io.nexstudios.menuservice.common.api.MenuPopulateContext ctx, ItemService items, int slot, String name, String reason) {
+  private static void setBarrier(MenuPopulateContext ctx, ItemService items, int slot, String name, String reason) {
     setButton(ctx, items, slot, Material.BARRIER, name, reason, null);
   }
 
@@ -504,12 +500,23 @@ public final class BankDetailMenu {
     MantissaAmount remaining = bankBalance;
 
     if (!isUnlimited(hourlyLimit)) {
-      MantissaAmount used = zeroSafe(repo.addWithdrawUsage(accountRef.bankAccountId(), viewerUuid, io.nexstudios.nexlogic.bukkit.services.entity.nexeconomy.BankWithdrawUsageEntity.WindowType.HOURLY, hourStart, MantissaAmount.zero()).join());
+      MantissaAmount used = zeroSafe(repo.addWithdrawUsage(
+          accountRef.bankAccountId(),
+          viewerUuid,
+          BankWithdrawUsageEntity.WindowType.HOURLY,
+          hourStart,
+          MantissaAmount.zero()
+      ).join());
       remaining = min(remaining, max(hourlyLimit.subtract(used), MantissaAmount.zero()));
     }
 
     if (!isUnlimited(dailyLimit)) {
-      MantissaAmount used = zeroSafe(repo.addWithdrawUsage(accountRef.bankAccountId(), viewerUuid, io.nexstudios.nexlogic.bukkit.services.entity.nexeconomy.BankWithdrawUsageEntity.WindowType.DAILY, dayStart, MantissaAmount.zero()).join());
+      MantissaAmount used = zeroSafe(repo.addWithdrawUsage(
+          accountRef.bankAccountId(),
+          viewerUuid,
+          BankWithdrawUsageEntity.WindowType.DAILY,
+          dayStart, MantissaAmount.zero()
+      ).join());
       remaining = min(remaining, max(dailyLimit.subtract(used), MantissaAmount.zero()));
     }
 
@@ -596,7 +603,7 @@ public final class BankDetailMenu {
   private static BankDefinition.RoleDefinition resolveRole(BankDefinition def,
                                                            BankContext context,
                                                            UUID viewerUuid,
-                                                           io.nexstudios.nexlogic.bukkit.services.entity.nexeconomy.BankMemberEntity member) {
+                                                           BankMemberEntity member) {
     BankDefinition.MemberSystem memberSystem = def.memberSystem();
     Map<String, BankDefinition.RoleDefinition> roles = memberSystem == null || memberSystem.rolesByIdLower() == null
         ? Map.of()
@@ -616,10 +623,9 @@ public final class BankDetailMenu {
     return roles.get("member");
   }
 
-  private static io.nexstudios.nexlogic.bukkit.services.entity.nexeconomy.BankMemberEntity findMember(List<io.nexstudios.nexlogic.bukkit.services.entity.nexeconomy.BankMemberEntity> members,
-                                                                                                      UUID viewerUuid) {
+  private static BankMemberEntity findMember(List<BankMemberEntity> members, UUID viewerUuid) {
     if (members == null || viewerUuid == null) return null;
-    for (io.nexstudios.nexlogic.bukkit.services.entity.nexeconomy.BankMemberEntity member : members) {
+    for (BankMemberEntity member : members) {
       if (member == null) continue;
       if (viewerUuid.equals(member.getMemberUuid())) return member;
     }
