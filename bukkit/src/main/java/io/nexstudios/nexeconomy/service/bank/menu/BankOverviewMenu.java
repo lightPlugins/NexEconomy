@@ -8,13 +8,15 @@ import io.nexstudios.menuservice.common.api.ViewerRef;
 import io.nexstudios.menuservice.common.api.builder.MenuDefinitionBuilder;
 import io.nexstudios.menuservice.common.api.interaction.InteractionPolicies;
 import io.nexstudios.menuservice.common.api.item.MenuItem;
+import io.nexstudios.menuservice.common.api.item.PlannedMenuItemSupplier;
 import io.nexstudios.menuservice.common.api.page.*;
 import io.nexstudios.menuservice.common.api.page.control.PageControlButton;
 import io.nexstudios.menuservice.common.api.page.control.PageSortControl;
 import io.nexstudios.menuservice.common.api.registry.DuplicateStrategy;
+import io.nexstudios.nexeconomy.NexEconomyPlugin;
 import io.nexstudios.nexeconomy.service.bank.BankService;
-import io.nexstudios.nexeconomy.service.bank.menu.BankDetailMenu;
 import io.nexstudios.nexeconomy.service.bank.repo.BankRepositoryService;
+import io.nexstudios.nexlogic.bukkit.services.heads.HeadService;
 import io.nexstudios.nexlogic.common.services.logging.LoggerService;
 import io.nexstudios.serviceregistry.di.Dependencies;
 import io.nexstudios.serviceregistry.di.ServiceAccessor;
@@ -46,6 +48,7 @@ public class BankOverviewMenu {
 
   private static LoggerService logger;
   private static ServiceAccessor servicesRef;
+  private static HeadService headService;
 
   public static void register(@NotNull ServiceAccessor services) {
     MenuService menuService = services.getService(MenuService.class);
@@ -53,6 +56,7 @@ public class BankOverviewMenu {
     BankService bankService = services.getService(BankService.class);
     logger = services.getService(LoggerService.class);
     servicesRef = services;
+    headService = NexEconomyPlugin.getNexLogicService().getService(HeadService.class);
 
     var def = MenuDefinitionBuilder.create()
         .key(KEY)
@@ -69,7 +73,7 @@ public class BankOverviewMenu {
     menuService.registry().register(def, DuplicateStrategy.REPLACE);
   }
 
-  private static PagedAreaDefinition<BankEntry> buildPagedArea(ItemService items, BankService bankService) {
+  private static PagedAreaDefinition<BankEntry> buildPagedArea(ItemService itemService, BankService bankService) {
     PageSource<BankEntry> source = (menuKey, viewer) -> {
       try {
         UUID viewerUuid = getViewerUuid(viewer);
@@ -117,21 +121,28 @@ public class BankOverviewMenu {
       }
     };
 
-    // Bounds: 7x4 = 28 Items pro Seite
+    // Bounds: 7x4 = 28 Items, starting at slot 0, aligned to left
     PageBounds bounds = new PageBounds(1, 1, 7, 4, PageAlignment.LEFT);
 
-    // Navigation unten: prev (45), refresh (49), next (53)
-    PageNavigation nav = new PageNavigation(
-        OptionalInt.of(45),
-        OptionalInt.of(53),
-        OptionalInt.of(49)
-    );
+    // Navigation: prev (45), refresh (49), next (53)
+    PageNavigation nav = PageNavigation.builder()
+        .previousSlot(45)
+        .nextSlot(53)
+        .previousItem(new ItemStack(Material.SPECTRAL_ARROW))
+        .nextItem(new ItemStack(Material.SPECTRAL_ARROW))
+        .showCurrentPageAmount(true)
+        .hidePreviousOnFirstPage(true)
+        .hideNextOnLastPage(true)
+        .build();
 
     return new PagedAreaDefinition<>(
         AREA_ID,
         bounds,
         source,
-        (entry, index) -> () -> MenuItem.of(renderBank(items, entry)),
+        (entry, index) -> PlannedMenuItemSupplier.withHead(
+            MenuItem.of(renderBankPlaceholder(itemService, entry)),
+            headService.loadHead(entry.ownerUuid())
+        ),
         nav,
         Optional.of((entry, index, clickCtx) -> {
           clickCtx.cancel();
@@ -142,14 +153,13 @@ public class BankOverviewMenu {
     );
   }
 
-  private static ItemStack renderBank(ItemService items, BankEntry bank) {
+  private static ItemStack renderBankPlaceholder(ItemService items, BankEntry bank) {
     OfflinePlayer owner = Bukkit.getOfflinePlayer(bank.ownerUuid());
     String ownerName = owner.getName() != null ? owner.getName() : bank.ownerUuid().toString();
 
     String typeLabel = bank.category() == Category.OWN_BANK ? "Own Bank" : "Member Bank";
 
-    // OPTIMIZATION: Display name is now pre-loaded in PageSource, no DB call needed here
-    return items.builder(Material.PAPER)
+    return items.builder(Material.PLAYER_HEAD)
         .amount(1)
         .name(MiniMessage.miniMessage().deserialize(bank.displayName()))
         .lore(l -> l

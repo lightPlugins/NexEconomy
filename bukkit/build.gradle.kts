@@ -9,14 +9,13 @@ dependencies {
 
     compileOnly("jakarta.persistence:jakarta.persistence-api:3.1.0")
 
-    compileOnly("io.nexstudios:framework-paper:v1.0.2")
-    compileOnly("io.nexstudios.itemservice:bukkit:v1.0.0")
-    compileOnly("io.nexstudios.menuservice:bukkit:v1.0.1")
-    compileOnly("io.nexstudios.configservice:platform:v1.0.0")
-    compileOnly("io.nexstudios.languageservice:bukkit:v1.0.0")
-    compileOnly("io.nexstudios.commandservice:bukkit:v1.0.0")
-    compileOnly("io.nexstudios.dialogservice:bukkit:v1.0.0")
-    compileOnly("io.nexstudios.headservice:bukkit:v1.0.0")
+    //compileOnly("io.nexstudios:framework-paper:v1.0.2")
+    //compileOnly("io.nexstudios.itemservice:bukkit:v1.0.0")
+    //compileOnly("io.nexstudios.menuservice:bukkit:v1.0.2")
+    //compileOnly("io.nexstudios.configservice:platform:v1.0.0")
+    //compileOnly("io.nexstudios.languageservice:bukkit:v1.0.0")
+    //compileOnly("io.nexstudios.commandservice:bukkit:v1.0.0")
+    //compileOnly("io.nexstudios.dialogservice:bukkit:v1.0.0")
 
     compileOnly("io.nexstudios.nexlogic:nexlogic-bukkit:v1.0.0")
 

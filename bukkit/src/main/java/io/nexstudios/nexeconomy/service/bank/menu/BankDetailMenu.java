@@ -10,6 +10,7 @@ import io.nexstudios.menuservice.common.api.builder.MenuDefinitionBuilder;
 import io.nexstudios.menuservice.common.api.interaction.InteractionPolicies;
 import io.nexstudios.menuservice.common.api.item.MenuItem;
 import io.nexstudios.menuservice.common.api.registry.DuplicateStrategy;
+import io.nexstudios.nexeconomy.NexEconomyPlugin;
 import io.nexstudios.nexeconomy.definition.AmountNotation;
 import io.nexstudios.nexeconomy.definition.CurrencyDefinition;
 import io.nexstudios.nexeconomy.definition.CurrencyType;
@@ -22,6 +23,7 @@ import io.nexstudios.nexeconomy.service.economy.EconomyService;
 import io.nexstudios.nexeconomy.service.registry.CurrencyRegistryService;
 import io.nexstudios.nexlogic.bukkit.services.entity.nexeconomy.BankMemberEntity;
 import io.nexstudios.nexlogic.bukkit.services.entity.nexeconomy.BankWithdrawUsageEntity;
+import io.nexstudios.nexlogic.bukkit.services.heads.HeadService;
 import io.nexstudios.serviceregistry.di.Dependencies;
 import io.nexstudios.serviceregistry.di.ServiceAccessor;
 import net.kyori.adventure.text.Component;
@@ -67,11 +69,13 @@ public final class BankDetailMenu {
 
   private static final Map<UUID, BankContext> CONTEXTS = new ConcurrentHashMap<>();
   private static ServiceAccessor servicesRef;
+  private static HeadService headService;
 
   private BankDetailMenu() {}
 
   public static void register(@NotNull ServiceAccessor services) {
     servicesRef = services;
+    headService = NexEconomyPlugin.getNexLogicService().getService(HeadService.class);
 
     MenuService menuService = services.getService(MenuService.class);
     ItemService items = services.getService(ItemService.class);
@@ -103,7 +107,7 @@ public final class BankDetailMenu {
     services.getService(MenuService.class).open(viewer, KEY);
   }
 
-  private static void populate(io.nexstudios.menuservice.common.api.MenuPopulateContext ctx, ItemService items) {
+  private static void populate(MenuPopulateContext ctx, ItemService items) {
     ViewerRef viewer = ctx.viewer();
     Player player = Bukkit.getPlayer(viewer.uniqueId());
     BankContext context = CONTEXTS.get(viewer.uniqueId());
@@ -267,7 +271,7 @@ public final class BankDetailMenu {
     String bankBalance = AmountNotation.formatShort(data.bankBalance(), data.currency().fractionDigits());
     String walletBalance = AmountNotation.formatShort(data.walletBalance(), data.currency().fractionDigits());
 
-    ItemStack stack = items.builder(Material.PAPER)
+    ItemStack stack = items.builder(Material.PLAYER_HEAD)
         .amount(1)
         .name(MiniMessage.miniMessage().deserialize(data.definition().nameMiniMessage()))
         .lore(l -> l
@@ -283,7 +287,7 @@ public final class BankDetailMenu {
         )
         .build();
 
-    ctx.slot(SLOT_INFO).setPlannedItem(() -> MenuItem.of(stack));
+    ctx.slot(SLOT_INFO).setPlannedHead(MenuItem.of(stack), headService.loadHead(data.context().ownerUuid()));
   }
 
   private static void setDepositButtons(MenuPopulateContext ctx, ItemService items, BankData data) {
