@@ -20,7 +20,7 @@ import java.util.concurrent.CompletableFuture;
  * <p>This interface is intentionally rich so UI layers can stay thin.
  */
 @SuppressWarnings("unused")
-public interface BankProvider extends Service {
+public interface BankProviderService extends Service {
 
   CompletableFuture<BankResponse<BankDefinition>> bank(String bankId);
 

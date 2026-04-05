@@ -1,7 +1,7 @@
 package io.nexstudios.nexeconomy.modules;
 
-import io.nexstudios.nexeconomy.provider.bank.BankProvider;
-import io.nexstudios.nexeconomy.provider.bank.DefaultBankProvider;
+import io.nexstudios.nexeconomy.provider.bank.BankProviderService;
+import io.nexstudios.nexeconomy.provider.bank.DefaultBankProviderService;
 import io.nexstudios.nexeconomy.service.bank.BankService;
 import io.nexstudios.nexeconomy.service.bank.DefaultBankService;
 import io.nexstudios.nexeconomy.service.bank.cache.BankAccountCacheService;
@@ -48,6 +48,6 @@ public final class BankCoreModule implements ServiceModule {
     services.register(BankService.class, DefaultBankService.class);
 
     // Register the public bank API for later use in commands/menus/holograms
-    services.register(BankProvider.class, DefaultBankProvider.class);
+    services.register(BankProviderService.class, DefaultBankProviderService.class);
   }
 }

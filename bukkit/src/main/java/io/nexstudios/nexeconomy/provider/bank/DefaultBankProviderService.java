@@ -39,7 +39,7 @@ import java.util.concurrent.CompletableFuture;
     BankRedisSyncService.class,
     BankTransactionService.class
 })
-public final class DefaultBankProvider implements BankProvider, Service {
+public final class DefaultBankProviderService implements BankProviderService, Service {
 
   private final BankService bankService;
   private final BankLevelService levelService;
@@ -48,7 +48,7 @@ public final class DefaultBankProvider implements BankProvider, Service {
   private final BankRedisSyncService redisSync;
   private final BankTransactionService transactionService;
 
-  public DefaultBankProvider(ServiceAccessor accessor) {
+  public DefaultBankProviderService(ServiceAccessor accessor) {
     this.bankService = accessor.getService(BankService.class);
     this.levelService = accessor.getService(BankLevelService.class);
     this.repo = accessor.getService(BankRepositoryService.class);
