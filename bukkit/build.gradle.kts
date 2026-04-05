@@ -6,6 +6,7 @@ plugins {
 
 dependencies {
     paperweight.paperDevBundle("1.21.11-R0.1-SNAPSHOT")
+    compileOnly("net.kyori:adventure-text-serializer-ansi:4.26.1")
 
     compileOnly("jakarta.persistence:jakarta.persistence-api:3.1.0")
 
@@ -25,6 +26,8 @@ dependencies {
 
     testImplementation("org.junit.jupiter:junit-jupiter:5.11.4")
     testRuntimeOnly("org.junit.platform:junit-platform-launcher")
+    testRuntimeOnly("net.kyori:adventure-text-serializer-ansi:4.26.1")
+    testImplementation("net.kyori:adventure-text-serializer-ansi:4.26.1")
 
 }
 tasks.jar {
