@@ -16,6 +16,7 @@ import io.nexstudios.nexeconomy.service.bank.interest.BankInterestService;
 import io.nexstudios.nexeconomy.service.bank.listener.BankPlayerListener;
 import io.nexstudios.nexeconomy.service.bank.menu.BankDetailMenu;
 import io.nexstudios.nexeconomy.service.bank.menu.BankOverviewMenu;
+import io.nexstudios.nexeconomy.service.bank.menu.BankTransactionMenu;
 import io.nexstudios.nexeconomy.service.bank.sync.BankRedisSyncService;
 import io.nexstudios.nexeconomy.service.economy.EconomyFlushService;
 import io.nexstudios.nexeconomy.service.economy.EconomyRedisSyncService;
@@ -104,6 +105,7 @@ public class NexEconomyPlugin extends NexPaperPlugin {
 
     BankOverviewMenu.register(services());
     BankDetailMenu.register(services());
+    BankTransactionMenu.register(services());
 
     registerListeners(
         new EconomyPlayerListener(services()),

@@ -66,6 +66,7 @@ public final class BankDetailMenu {
   private static final int SLOT_INFO = 4;
   private static final int SLOT_DEPOSIT = 20;
   private static final int SLOT_DEPOSIT_ALL = 21;
+  private static final int SLOT_TRANSACTIONS = 22;
   private static final int SLOT_WITHDRAW = 23;
   private static final int SLOT_WITHDRAW_ALL = 24;
   private static final int SLOT_BACK = 49;
@@ -105,7 +106,6 @@ public final class BankDetailMenu {
         .populator(ctx -> populate(ctx, items))
         .build();
 
-    logger.logger().info("register DetailedMenu " + KEY);
     menuService.registry().register(def, DuplicateStrategy.REPLACE);
   }
 
@@ -144,6 +144,7 @@ public final class BankDetailMenu {
 
     setInfoPanel(ctx, items, data);
     setDepositButtons(ctx, items, data);
+    setTransactionButton(ctx, items, data);
     setWithdrawButtons(ctx, items, data);
     setButton(ctx, items, SLOT_BACK, Material.ARROW, "Back", "Return to overview", clickCtx -> {
       clickCtx.cancel();
@@ -223,7 +224,6 @@ public final class BankDetailMenu {
         maxBalance = levelService.getMaxBalance(context.bankId(), level);
       }
     } catch (Exception ignored) {
-      maxBalance = MantissaAmount.zero();
     }
 
     MantissaAmount remainingCapacity = maxBalance == null ? MantissaAmount.zero() : maxBalance.subtract(bankBalance == null ? MantissaAmount.zero() : bankBalance);
@@ -318,6 +318,15 @@ public final class BankDetailMenu {
       String reason = data.bankFull() ? "This bank is full." : data.walletBalance().compareTo(MantissaAmount.zero()) <= 0 ? "Your wallet is empty." : "No deposit capacity left.";
       setBarrier(ctx, items, SLOT_DEPOSIT_ALL, "Deposit all", reason);
     }
+  }
+
+  private static void setTransactionButton(MenuPopulateContext ctx, ItemService items, BankData data) {
+    setButton(ctx, items, SLOT_TRANSACTIONS, Material.BOOK, "Transactions", "View bank transaction history", clickCtx -> {
+      clickCtx.cancel();
+      if (servicesRef != null) {
+        BankTransactionMenu.open(servicesRef, clickCtx.viewer(), data.context().bankId(), data.context().ownerUuid(), data.context().ownerBank(), data.currency());
+      }
+    });
   }
 
   private static void setWithdrawButtons(MenuPopulateContext ctx, ItemService items, BankData data) {

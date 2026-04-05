@@ -6,6 +6,7 @@ import io.nexstudios.menuservice.common.api.MenuKey;
 import io.nexstudios.menuservice.common.api.MenuService;
 import io.nexstudios.menuservice.common.api.ViewerRef;
 import io.nexstudios.menuservice.common.api.builder.MenuDefinitionBuilder;
+import io.nexstudios.menuservice.common.api.interaction.ClickAction;
 import io.nexstudios.menuservice.common.api.interaction.InteractionPolicies;
 import io.nexstudios.menuservice.common.api.item.MenuItem;
 import io.nexstudios.menuservice.common.api.item.PlannedMenuItemSupplier;
@@ -179,21 +180,38 @@ public class BankOverviewMenu {
       @Override
       public MenuItem render(RenderContext ctx) {
         String mode = ctx.activeModeId().orElse(ctx.control().defaultModeId());
-        String label = ctx.control().labelForMode(mode);
 
         return MenuItem.of(items.builder(Material.COMPARATOR)
             .amount(1)
-            .name(Component.text("Sort: " + label, NamedTextColor.GOLD))
+            .name(Component.text("Sort: " + ctx.control().labelForMode(mode), NamedTextColor.GOLD))
             .lore(l -> l
-                .line("&7Klick: Modus wechseln")
-                .line("&8Aktiv: &f" + mode)
+                .line("&7Available options:")
+                .line("&" + ("all".equals(mode) ? "c" : "7") + "▶ " + ctx.control().labelForMode("all"))
+                .line("&" + ("owner".equals(mode) ? "c" : "7") + "▶ " + ctx.control().labelForMode("owner"))
+                .line("&" + ("member".equals(mode) ? "c" : "7") + "▶ " + ctx.control().labelForMode("member"))
+                .line("&8Click to cycle")
             )
             .build());
       }
 
       @Override
       public void onClick(ClickContext ctx) {
-        ctx.stateStore().cycleToNextMode(ctx.viewer(), ctx.menuKey(), ctx.areaId(), ctx.control());
+        if (ctx.action() == ClickAction.RIGHT_CLICK) {
+          ctx.stateStore().cycleToPreviousMode(
+              ctx.viewer(),
+              ctx.menuKey(),
+              ctx.areaId(),
+              ctx.control()
+          );
+        } else if(ctx.action() == ClickAction.LEFT_CLICK) {
+          ctx.stateStore().cycleToNextMode(
+              ctx.viewer(),
+              ctx.menuKey(),
+              ctx.areaId(),
+              ctx.control()
+          );
+        }
+
         ctx.requestAreaRefresh();
       }
     };
