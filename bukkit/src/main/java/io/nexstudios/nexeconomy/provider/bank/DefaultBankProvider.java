@@ -70,12 +70,12 @@ public final class DefaultBankProvider implements BankProvider, Service {
       if (ex != null) {
         Throwable root = rootCause(ex);
         BankResponse.Status status = mapStatus(root);
-        return BankResponse.failure(status, messageFor(status, root), ctx, (BankDefinition) null);
+        return BankResponse.failure(status, messageFor(status, root), ctx, null);
       }
 
       BankDefinition def = opt.isEmpty() ? null : opt.orElse(null);
       if (def == null) {
-        return BankResponse.failure(BankResponse.Status.BANK_NOT_FOUND, "Bank not found.", ctx, (BankDefinition) null);
+        return BankResponse.failure(BankResponse.Status.BANK_NOT_FOUND, "Bank not found.", ctx, null);
       }
       return BankResponse.success("Bank loaded.", ctx, def);
     });

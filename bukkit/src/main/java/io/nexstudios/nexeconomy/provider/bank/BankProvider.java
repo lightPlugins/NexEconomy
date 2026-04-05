@@ -8,6 +8,7 @@ import io.nexstudios.nexlogic.bukkit.services.entity.nexeconomy.BankAccountEntit
 import io.nexstudios.nexlogic.bukkit.services.entity.nexeconomy.BankInviteEntity;
 import io.nexstudios.nexlogic.bukkit.services.entity.nexeconomy.BankMemberEntity;
 import io.nexstudios.nexlogic.bukkit.services.entity.nexeconomy.BankTransactionEntity;
+import io.nexstudios.serviceregistry.di.Service;
 
 import java.util.List;
 import java.util.UUID;
@@ -19,7 +20,7 @@ import java.util.concurrent.CompletableFuture;
  * <p>This interface is intentionally rich so UI layers can stay thin.
  */
 @SuppressWarnings("unused")
-public interface BankProvider {
+public interface BankProvider extends Service {
 
   CompletableFuture<BankResponse<BankDefinition>> bank(String bankId);
 
