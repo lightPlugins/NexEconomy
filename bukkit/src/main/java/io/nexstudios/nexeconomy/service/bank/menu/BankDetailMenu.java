@@ -24,8 +24,10 @@ import io.nexstudios.nexeconomy.service.registry.CurrencyRegistryService;
 import io.nexstudios.nexlogic.bukkit.services.entity.nexeconomy.BankMemberEntity;
 import io.nexstudios.nexlogic.bukkit.services.entity.nexeconomy.BankWithdrawUsageEntity;
 import io.nexstudios.nexlogic.bukkit.services.heads.HeadService;
+import io.nexstudios.nexlogic.common.services.logging.LoggerService;
 import io.nexstudios.serviceregistry.di.Dependencies;
 import io.nexstudios.serviceregistry.di.ServiceAccessor;
+import lombok.extern.slf4j.Slf4j;
 import net.kyori.adventure.text.Component;
 import net.kyori.adventure.text.minimessage.MiniMessage;
 import org.bukkit.Bukkit;
@@ -46,6 +48,7 @@ import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentHashMap;
 
+@Slf4j
 @Dependencies({
     ItemService.class,
     MenuService.class,
@@ -70,11 +73,13 @@ public final class BankDetailMenu {
   private static final Map<UUID, BankContext> CONTEXTS = new ConcurrentHashMap<>();
   private static ServiceAccessor servicesRef;
   private static HeadService headService;
+  private static LoggerService logger;
 
   private BankDetailMenu() {}
 
   public static void register(@NotNull ServiceAccessor services) {
     servicesRef = services;
+    logger = services.getService(LoggerService.class);
     headService = NexEconomyPlugin.getNexLogicService().getService(HeadService.class);
 
     MenuService menuService = services.getService(MenuService.class);
@@ -93,12 +98,14 @@ public final class BankDetailMenu {
         .interactionHooks(new MenuInteractionHooks() {
           @Override
           public void onClose(MenuKey key, ViewerRef viewer, CloseReason reason) {
+            logger.logger().info("Menu closed with reason: " + reason);
             CONTEXTS.remove(viewer.uniqueId());
           }
         })
         .populator(ctx -> populate(ctx, items))
         .build();
 
+    logger.logger().info("register DetailedMenu " + KEY);
     menuService.registry().register(def, DuplicateStrategy.REPLACE);
   }
 

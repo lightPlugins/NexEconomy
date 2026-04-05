@@ -84,8 +84,6 @@ public class NexEconomyPlugin extends NexPaperPlugin {
 
     // install Menu API
     services().install(new MenuServiceModule(this));
-    BankOverviewMenu.register(services());
-    BankDetailMenu.register(services());
 
     // register commands
     services().getService(CommandService.class).registerAll(
@@ -103,6 +101,9 @@ public class NexEconomyPlugin extends NexPaperPlugin {
     services().getService(EconomyRedisSyncService.class).start();
     services().getService(BankRedisSyncService.class).start();
     services().getService(BankInterestService.class).start();
+
+    BankOverviewMenu.register(services());
+    BankDetailMenu.register(services());
 
     registerListeners(
         new EconomyPlayerListener(services()),
