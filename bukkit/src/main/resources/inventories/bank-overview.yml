@@ -1,0 +1,75 @@
+# Configuration for the BankOverviewMenu.
+# This file is intentionally kept as a standalone menu configuration so the menu
+# can later be wired into the menu/service setup without changing the layout data.
+
+menu:
+
+  # Title shown at the top of the inventory.
+  title: "<yellow>Bank Overview</yellow>"
+
+  # Inventory rows.
+  rows: 6
+
+  # Refresh interval in seconds for live content updates.
+  refresh-interval: "1"
+
+layout:
+  # Slot for the sort control button.
+  sort-button-slot: 8
+
+  # Paged area used for bank entries.
+  entries:
+    bounds:
+      x: 1
+      y: 1
+      width: 7
+      height: 4
+      alignment: "LEFT"
+
+    navigation:
+      previous-slot: 45
+      next-slot: 53
+      show-current-page-amount: true
+      hide-previous-on-first-page: true
+      hide-next-on-last-page: true
+
+items:
+  sort-button:
+    item: "minecraft:comparator"
+    name: "<gold>Sort</gold>"
+    lore:
+      - "<gray>Use the control button to cycle through sort modes.</gray>"
+      - "<dark_gray>Left click: next mode</dark_gray>"
+      - "<dark_gray>Right click: previous mode</dark_gray>"
+      - " "
+      - "#modes#"
+
+  # If you use player_head as item for bank entries, the menu will automatically replace the skull owner with the bank owner's texture.
+  bank-entry:
+    item: "minecraft:player_head"
+    display-name: "<owner-name>'s Bank"
+    lore:
+      - "<gray>Type: <green><type-label></green>"
+      - "<gray>Owner: <white><owner-name></white>"
+      - "<gray>Balance: <white><balance></white>"
+      - "<yellow>Click to manage</yellow>"
+
+  navigation:
+    previous:
+      item: "minecraft:arrow"
+      display-name: "<yellow>Previous Page</yellow>"
+      lore: []
+    next:
+      item: "minecraft:arrow"
+      display-name: "<yellow>Next Page</yellow>"
+      lore: []
+
+sorting:
+  default-mode: "owner"
+  default-color: "<gray>"
+  active-color: "<yellow>"
+
+  modes:
+    owner: "Owned Banks -> Member Banks"
+    member: "Member Banks -> Owned Banks"
+
