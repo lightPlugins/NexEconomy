@@ -15,7 +15,7 @@ import io.nexstudios.nexeconomy.definition.MantissaAmount;
 import io.nexstudios.nexeconomy.service.bank.BankService;
 import io.nexstudios.nexeconomy.service.bank.definition.BankDefinition;
 import io.nexstudios.nexeconomy.service.bank.level.BankLevelService;
-import io.nexstudios.nexeconomy.service.bank.menu.BankOverviewMenu;
+import io.nexstudios.nexeconomy.service.bank.menu.bank.BankOverviewMenu;
 import io.nexstudios.nexeconomy.service.bank.repo.BankRepositoryService;
 import io.nexstudios.nexeconomy.service.bank.repo.InviteLookupRow;
 import io.nexstudios.nexeconomy.service.bank.transaction.BankTransactionService;

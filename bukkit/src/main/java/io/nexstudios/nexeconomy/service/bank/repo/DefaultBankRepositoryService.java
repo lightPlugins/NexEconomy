@@ -244,6 +244,44 @@ public final class DefaultBankRepositoryService implements BankRepositoryService
   }
 
   @Override
+  public CompletableFuture<MantissaAmount> loadWithdrawUsage(
+      UUID bankAccountId,
+      UUID memberUuid,
+      BankWithdrawUsageEntity.WindowType windowType,
+      long windowStartEpochSeconds
+  ) {
+    if (bankAccountId == null) return CompletableFuture.completedFuture(MantissaAmount.zero());
+    if (memberUuid == null) return CompletableFuture.completedFuture(MantissaAmount.zero());
+    if (windowType == null) return CompletableFuture.completedFuture(MantissaAmount.zero());
+    if (windowStartEpochSeconds <= 0) return CompletableFuture.completedFuture(MantissaAmount.zero());
+
+    return dbAsync.executeAsyncInTransaction(em -> {
+      List<BankWithdrawUsageEntity> list = em.createQuery(
+              """
+              select u from BankWithdrawUsageEntity u
+              where u.bankAccountId = :acc
+                and u.memberUuid = :mem
+                and u.windowType = :type
+                and u.windowStartEpoch = :start
+              """,
+              BankWithdrawUsageEntity.class
+          )
+          .setParameter("acc", bankAccountId)
+          .setParameter("mem", memberUuid)
+          .setParameter("type", windowType)
+          .setParameter("start", windowStartEpochSeconds)
+          .setMaxResults(1)
+          .getResultList();
+
+      BankWithdrawUsageEntity row = list.isEmpty() ? null : list.getFirst();
+      if (row == null) return MantissaAmount.zero();
+
+      MantissaAmount used = MantissaAmount.parseStorage(row.getUsedMantissa(), row.getUsedExp3());
+      return used == null ? MantissaAmount.zero() : used;
+    });
+  }
+
+  @Override
   public CompletableFuture<Void> appendTransaction(
       UUID bankAccountId,
       BankTransactionEntity.Type type,

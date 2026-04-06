@@ -55,6 +55,13 @@ public interface BankRepositoryService extends Service {
       MantissaAmount delta
   );
 
+  CompletableFuture<MantissaAmount> loadWithdrawUsage(
+      UUID bankAccountId,
+      UUID memberUuid,
+      BankWithdrawUsageEntity.WindowType windowType,
+      long windowStartEpochSeconds
+  );
+
   CompletableFuture<Void> appendTransaction(
       UUID bankAccountId,
       BankTransactionEntity.Type type,

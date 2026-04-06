@@ -1,0 +1,146 @@
+# Configuration for the BankDetailMenu.
+# This menu follows the same structure as bank-overview.yml so layout and item styling
+# can be adjusted without touching the Java code.
+
+menu:
+  # Title shown at the top of the inventory.
+  title: "<yellow>Bank Details</yellow>"
+
+  # Inventory rows.
+  rows: 6
+
+  # Refresh interval in seconds for live content updates.
+  refresh-interval: "1"
+
+layout:
+  slots:
+    info: 4
+    deposit: 19
+    deposit-all: 20
+    transactions: 22
+    withdraw: 24
+    withdraw-all: 25
+    back: 49
+
+items:
+  fill:
+    item: "minecraft:black_stained_glass_pane"
+    display-name: " "
+    lore: []
+
+  info:
+    item: "minecraft:player_head"
+    display-name: "<dark_gray>» <yellow><bank-name></yellow> <gray>Details"
+    lore:
+      - ""
+      - "<yellow>│ <gray>Bank ID: <yellow><bank-id></yellow>"
+      - "<yellow>│ <gray>Owner: <yellow><owner-name></yellow>"
+      - "<yellow>│ <gray>Type: <yellow><bank-type></yellow>"
+      - "<yellow>│ <gray>Role: <yellow><role-name></yellow>"
+      - "<yellow>│ <gray>Bank balance: <yellow><bank-balance> <gray>/ <yellow><max-balance></yellow>"
+      - "<yellow>│ <gray>Remaining capacity: <yellow><remaining-capacity></yellow>"
+      - "<yellow>│ <gray>Hourly limit: <yellow><hourly-used> <gray>/ <yellow><hourly-limit></yellow> <gray>(<dark_gray>Withdraw<gray>)"
+      - "<yellow>│ <gray>Daily limit: <yellow><daily-used> <gray>/ <yellow><daily-limit></yellow> <gray>(<dark_gray>Withdraw<gray>)"
+      - "<yellow>│ <gray>Wallet balance: <yellow><wallet-balance></yellow>"
+      - ""
+      - "<dark_gray>Deposit: <yellow><deposit-status></yellow><dark_gray> | Withdraw: <yellow><withdraw-status></yellow>"
+
+  deposit:
+    item: "minecraft:iron_ingot"
+    display-name: "<dark_gray>» <yellow>Deposit"
+    lore:
+      - ""
+      - "<yellow>│ <gray>Status: <yellow><deposit-status></yellow>"
+      - "<yellow>│ <gray>Wallet balance: <yellow><wallet-balance></yellow>"
+      - "<yellow>│ <gray>Remaining capacity: <yellow><remaining-capacity></yellow>"
+      - ""
+      - "<dark_gray>Click to enter an amount</dark_gray>"
+
+  deposit-disabled:
+    item: "minecraft:barrier"
+    display-name: "<dark_gray>» <gray>Deposit"
+    lore:
+      - ""
+      - "<yellow>│ <gray>Status: <red><deposit-status></red>"
+      - "<yellow>│ <gray>Reason: <red><deposit-disabled-reason></red>"
+      - ""
+      - "<dark_gray>Deposit is currently unavailable</dark_gray>"
+
+  deposit-all:
+    item: "minecraft:iron_block"
+    display-name: "<dark_gray>» <yellow>Deposit all"
+    lore:
+      - ""
+      - "<yellow>│ <gray>Deposit your full wallet balance"
+      - "<yellow>│ <gray>Wallet balance: <yellow><wallet-balance></yellow>"
+      - ""
+      - "<dark_gray>Click to confirm</dark_gray>"
+
+  deposit-all-disabled:
+    item: "minecraft:barrier"
+    display-name: "<dark_gray>» <gray>Deposit all"
+    lore:
+      - ""
+      - "<yellow>│ <gray>Status: <red><deposit-status></red>"
+      - "<yellow>│ <gray>Reason: <red><deposit-disabled-reason></red>"
+      - ""
+      - "<dark_gray>Deposit all is currently unavailable</dark_gray>"
+
+  transactions:
+    item: "minecraft:book"
+    display-name: "<dark_gray>» <yellow>Transactions"
+    lore:
+      - ""
+      - "<yellow>│ <gray>View the bank transaction history"
+      - "<yellow>│ <gray>Bank balance: <yellow><bank-balance></yellow>"
+      - ""
+      - "<dark_gray>Click to open the history menu</dark_gray>"
+
+  withdraw:
+    item: "minecraft:gold_ingot"
+    display-name: "<dark_gray>» <yellow>Withdraw"
+    lore:
+      - ""
+      - "<yellow>│ <gray>Status: <yellow><withdraw-status></yellow>"
+      - "<yellow>│ <gray>Bank balance: <yellow><bank-balance></yellow>"
+      - "<yellow>│ <gray>Remaining capacity: <yellow><remaining-capacity></yellow>"
+      - ""
+      - "<dark_gray>Click to enter an amount</dark_gray>"
+
+  withdraw-disabled:
+    item: "minecraft:barrier"
+    display-name: "<dark_gray>» <gray>Withdraw"
+    lore:
+      - ""
+      - "<yellow>│ <gray>Status: <red><withdraw-status></red>"
+      - "<yellow>│ <gray>Reason: <red><withdraw-disabled-reason></red>"
+      - ""
+      - "<dark_gray>Withdraw is currently unavailable</dark_gray>"
+
+  withdraw-all:
+    item: "minecraft:gold_block"
+    display-name: "<dark_gray>» <yellow>Withdraw all"
+    lore:
+      - ""
+      - "<yellow>│ <gray>Withdraw as much as the role allows"
+      - "<yellow>│ <gray>Bank balance: <yellow><bank-balance></yellow>"
+      - ""
+      - "<dark_gray>Click to confirm</dark_gray>"
+
+  withdraw-all-disabled:
+    item: "minecraft:barrier"
+    display-name: "<dark_gray>» <gray>Withdraw all"
+    lore:
+      - ""
+      - "<yellow>│ <gray>Status: <red><withdraw-status></red>"
+      - "<yellow>│ <gray>Reason: <red><withdraw-disabled-reason></red>"
+      - ""
+      - "<dark_gray>Withdraw all is currently unavailable</dark_gray>"
+
+  back:
+    item: "minecraft:arrow"
+    display-name: "<yellow>Back</yellow>"
+    lore:
+      - ""
+      - "<dark_gray>Return to the bank overview</dark_gray>"
+

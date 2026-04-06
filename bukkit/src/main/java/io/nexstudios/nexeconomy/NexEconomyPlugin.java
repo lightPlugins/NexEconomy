@@ -14,9 +14,10 @@ import io.nexstudios.nexeconomy.modules.BankCoreModule;
 import io.nexstudios.nexeconomy.modules.EconomyCoreModule;
 import io.nexstudios.nexeconomy.service.bank.interest.BankInterestService;
 import io.nexstudios.nexeconomy.service.bank.listener.BankPlayerListener;
-import io.nexstudios.nexeconomy.service.bank.menu.BankDetailMenu;
-import io.nexstudios.nexeconomy.service.bank.menu.BankOverviewMenu;
-import io.nexstudios.nexeconomy.service.bank.menu.BankTransactionMenu;
+import io.nexstudios.nexeconomy.service.bank.menu.bank.BankDetailMenu;
+import io.nexstudios.nexeconomy.service.bank.menu.bank.BankOverviewMenu;
+import io.nexstudios.nexeconomy.service.bank.menu.bank.BankTransactionMenu;
+import io.nexstudios.nexeconomy.service.bank.menu.register.RegisterMenuService;
 import io.nexstudios.nexeconomy.service.bank.sync.BankRedisSyncService;
 import io.nexstudios.nexeconomy.service.economy.EconomyFlushService;
 import io.nexstudios.nexeconomy.service.economy.EconomyRedisSyncService;
@@ -83,8 +84,9 @@ public class NexEconomyPlugin extends NexPaperPlugin {
     // init language files
     services().getService(LanguageService.class).reload();
 
-    // install Menu API
+    // install Menu API / Registry
     services().install(new MenuServiceModule(this));
+    services().register(RegisterMenuService.class, RegisterMenuService.class).loadMenus();
 
     // register commands
     services().getService(CommandService.class).registerAll(
@@ -102,10 +104,6 @@ public class NexEconomyPlugin extends NexPaperPlugin {
     services().getService(EconomyRedisSyncService.class).start();
     services().getService(BankRedisSyncService.class).start();
     services().getService(BankInterestService.class).start();
-
-    BankOverviewMenu.register(services());
-    BankDetailMenu.register(services());
-    BankTransactionMenu.register(services());
 
     registerListeners(
         new EconomyPlayerListener(services()),
@@ -149,5 +147,11 @@ public class NexEconomyPlugin extends NexPaperPlugin {
 
     nexLogicService = nexLogic.services();
     getLogger().info("Successfully hooked into NexLogic!");
+  }
+
+  public void registerMenus() {
+    BankOverviewMenu.register(services());
+    BankDetailMenu.register(services());
+    BankTransactionMenu.register(services());
   }
 }

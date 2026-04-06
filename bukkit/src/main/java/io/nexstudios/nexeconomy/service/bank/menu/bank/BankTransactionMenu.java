@@ -1,4 +1,4 @@
-package io.nexstudios.nexeconomy.service.bank.menu;
+package io.nexstudios.nexeconomy.service.bank.menu.bank;
 
 import io.nexstudios.itemservice.bukkit.service.item.ItemService;
 import io.nexstudios.menuservice.common.api.*;
@@ -14,6 +14,7 @@ import io.nexstudios.menuservice.common.api.registry.DuplicateStrategy;
 import io.nexstudios.nexeconomy.definition.AmountNotation;
 import io.nexstudios.nexeconomy.definition.CurrencyDefinition;
 import io.nexstudios.nexeconomy.definition.MantissaAmount;
+import io.nexstudios.nexeconomy.service.bank.BankService;
 import io.nexstudios.nexeconomy.service.bank.transaction.BankTransactionService;
 import io.nexstudios.nexlogic.bukkit.services.entity.nexeconomy.BankTransactionEntity;
 import io.nexstudios.nexlogic.common.services.logging.LoggerService;
@@ -34,15 +35,19 @@ import java.time.ZonedDateTime;
 import java.time.format.DateTimeFormatter;
 import java.math.BigDecimal;
 import java.util.Comparator;
+import java.util.Map;
 import java.util.List;
 import java.util.Locale;
 import java.util.Optional;
 import java.util.UUID;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.ConcurrentHashMap;
 
 @Slf4j
 @Dependencies({
     ItemService.class,
     MenuService.class,
+    BankService.class,
     BankTransactionService.class,
     LoggerService.class
 })
@@ -59,6 +64,8 @@ public class BankTransactionMenu {
   private static LoggerService logger;
   private static ServiceAccessor servicesRef;
   private static final java.util.Map<UUID, TransactionContext> CONTEXTS = new java.util.concurrent.ConcurrentHashMap<>();
+  private static final Map<UUID, List<TransactionEntry>> SNAPSHOTS = new ConcurrentHashMap<>();
+  private static final Map<UUID, CompletableFuture<List<TransactionEntry>>> LOADS = new ConcurrentHashMap<>();
 
   private BankTransactionMenu() {}
 
@@ -81,7 +88,9 @@ public class BankTransactionMenu {
         .interactionHooks(new MenuInteractionHooks() {
           @Override
           public void onClose(MenuKey key, ViewerRef viewer, CloseReason reason) {
-            // no local state to clean up
+            CONTEXTS.remove(viewer.uniqueId(), CONTEXTS.get(viewer.uniqueId()));
+            SNAPSHOTS.remove(viewer.uniqueId());
+            LOADS.remove(viewer.uniqueId());
           }
         })
         .addSortControl(AREA_ID, buildSortControl())
@@ -117,7 +126,10 @@ public class BankTransactionMenu {
                           @NotNull UUID ownerUuid,
                           boolean ownerBank,
                           CurrencyDefinition currency) {
-    CONTEXTS.put(viewer.uniqueId(), new TransactionContext(bankId, ownerUuid, ownerBank, currency));
+    TransactionContext context = new TransactionContext(bankId, ownerUuid, ownerBank, currency);
+    CONTEXTS.put(viewer.uniqueId(), context);
+    SNAPSHOTS.remove(viewer.uniqueId());
+    loadTransactionsAsync(viewer, context);
     services.getService(MenuService.class).open(viewer, KEY);
   }
 
@@ -136,24 +148,15 @@ public class BankTransactionMenu {
           return List.of();
         }
 
-        List<BankTransactionEntity> transactions = transService.transactionsVisibleTo(
-            ctx.bankId(),
-            ctx.ownerUuid(),
-            viewer.uniqueId(),
-            100
-        ).get();
-
-        if (transactions == null) {
-          return List.of();
+        List<TransactionEntry> cached = SNAPSHOTS.get(viewer.uniqueId());
+        if (cached != null) {
+          return cached;
         }
 
-        return transactions.stream()
-            .filter(java.util.Objects::nonNull)
-            .map(tx -> new TransactionEntry(tx, ctx.currency()))
-            .toList();
+        loadTransactionsAsync(viewer, ctx);
+        return List.of();
       } catch (Exception e) {
         logger.logger().warning("Failed to build transaction entries: " + e.getMessage());
-        e.printStackTrace();
         return List.of();
       }
     };
@@ -222,15 +225,6 @@ public class BankTransactionMenu {
     return nameOrUuid(actorUuid);
   }
 
-  private static String getAmount(BankTransactionEntity tx) {
-    if (tx == null) return "0";
-    String mantissa = tx.getAmountMantissa();
-    int exp3 = tx.getAmountExp3();
-    if (mantissa == null) return "0";
-    MantissaAmount amount = MantissaAmount.of(new BigDecimal(mantissa), exp3);
-    return AmountNotation.formatShort(amount, 0);
-  }
-
   private static String getAmount(TransactionEntry entry) {
     if (entry == null || entry.transaction() == null) return "0";
 
@@ -240,6 +234,11 @@ public class BankTransactionMenu {
     if (mantissa == null) return "0";
 
     MantissaAmount amount = MantissaAmount.of(new BigDecimal(mantissa), exp3);
+    BankService bankService = servicesRef == null ? null : servicesRef.getService(BankService.class);
+    if (bankService != null) {
+      return bankService.formatBalanceWithCurrency(amount, entry.currency());
+    }
+
     String shown = AmountNotation.formatShort(amount, fractionDigits(entry.currency()));
     String symbol = symbolFor(entry.currency(), amount.toHuman());
     return symbol.isBlank() ? shown : shown + " " + symbol;
@@ -266,6 +265,66 @@ public class BankTransactionMenu {
     OfflinePlayer off = Bukkit.getOfflinePlayer(uuid);
     String name = off.getName();
     return name == null || name.isBlank() ? uuid.toString() : name;
+  }
+
+  private static void loadTransactionsAsync(ViewerRef viewer, TransactionContext ctx) {
+    if (viewer == null || ctx == null || servicesRef == null) return;
+
+    UUID viewerUuid = viewer.uniqueId();
+    if (LOADS.containsKey(viewerUuid) || SNAPSHOTS.containsKey(viewerUuid)) {
+      return;
+    }
+
+    BankTransactionService transService = servicesRef.getService(BankTransactionService.class);
+    if (transService == null) {
+      if (logger != null) {
+        logger.logger().warning("BankTransactionService not available");
+      }
+      return;
+    }
+
+    CompletableFuture<List<TransactionEntry>> load = transService.transactionsVisibleTo(
+            ctx.bankId(),
+            ctx.ownerUuid(),
+            viewerUuid,
+            100
+        )
+        .thenApply(transactions -> {
+          if (transactions == null) return List.of();
+          return transactions.stream()
+              .filter(java.util.Objects::nonNull)
+              .map(tx -> new TransactionEntry(tx, ctx.currency()))
+              .toList();
+        });
+
+    LOADS.put(viewerUuid, load);
+    load.whenComplete((entries, error) -> {
+      LOADS.remove(viewerUuid, load);
+
+      if (error != null) {
+        if (logger != null) {
+          logger.logger().warning("Failed to load transactions: " + error.getMessage());
+        }
+        return;
+      }
+
+      TransactionContext current = CONTEXTS.get(viewerUuid);
+      if (!ctx.equals(current)) {
+        return;
+      }
+
+      SNAPSHOTS.put(viewerUuid, entries == null ? List.of() : List.copyOf(entries));
+      refreshOpenView(viewer);
+    });
+  }
+
+  private static void refreshOpenView(ViewerRef viewer) {
+    if (servicesRef == null || viewer == null) return;
+
+    MenuService menuService = servicesRef.getService(MenuService.class);
+    if (menuService == null) return;
+
+    menuService.findOpenView(viewer).ifPresent(MenuView::requestRefresh);
   }
 
   private static int fractionDigits(CurrencyDefinition currency) {

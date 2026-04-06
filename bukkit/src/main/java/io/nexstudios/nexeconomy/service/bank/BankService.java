@@ -1,5 +1,7 @@
 package io.nexstudios.nexeconomy.service.bank;
 
+import io.nexstudios.nexeconomy.definition.AmountNotation;
+import io.nexstudios.nexeconomy.definition.CurrencyDefinition;
 import io.nexstudios.nexeconomy.definition.MantissaAmount;
 import io.nexstudios.nexeconomy.service.bank.definition.BankDefinition;
 import io.nexstudios.nexeconomy.service.bank.repo.BankRepositoryService;
@@ -13,6 +15,7 @@ import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
+import java.math.BigDecimal;
 
 public interface BankService extends Service {
 
@@ -61,5 +64,24 @@ public interface BankService extends Service {
   CompletableFuture<Boolean> unlockAllBankAccountsForPlayer(UUID playerUuid, UUID unlockedByUuid);
 
   CompletableFuture<Boolean> isAnyBankAccountLockedForPlayer(UUID playerUuid);
+
+  default String formatBalance(MantissaAmount amount, int fractionDigits) {
+    return AmountNotation.formatShort(amount, Math.max(0, fractionDigits));
+  }
+
+  default String currencySymbol(CurrencyDefinition currency, MantissaAmount amount) {
+    if (currency == null) return "";
+
+    MantissaAmount value = amount == null ? MantissaAmount.zero() : amount;
+    return value.toHuman().compareTo(BigDecimal.ONE) == 0
+        ? currency.symbolSingular()
+        : currency.symbolPlural();
+  }
+
+  default String formatBalanceWithCurrency(MantissaAmount amount, CurrencyDefinition currency) {
+    String balance = formatBalance(amount, currency == null ? 0 : currency.fractionDigits());
+    String symbol = currencySymbol(currency, amount);
+    return symbol.isBlank() ? balance : balance + " " + symbol;
+  }
 
 }

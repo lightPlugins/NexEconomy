@@ -6,6 +6,7 @@ import io.nexstudios.nexeconomy.definition.MantissaAmount;
 import io.nexstudios.nexeconomy.service.bank.repo.BankRepositoryService;
 import io.nexstudios.nexlogic.bukkit.services.entity.nexeconomy.BankAccountEntity;
 import io.nexstudios.nexlogic.bukkit.services.entity.nexeconomy.BankMemberEntity;
+import io.nexstudios.nexlogic.bukkit.services.entity.nexeconomy.BankWithdrawUsageEntity;
 import io.nexstudios.serviceregistry.di.Dependencies;
 import io.nexstudios.serviceregistry.di.Service;
 import io.nexstudios.serviceregistry.di.ServiceAccessor;
@@ -34,6 +35,15 @@ public final class BankAccountCacheService implements Service {
       List<BankMemberEntity> members
   ) {}
 
+  private record WithdrawUsageKey(
+      UUID bankAccountId,
+      UUID memberUuid,
+      BankWithdrawUsageEntity.WindowType windowType,
+      long windowStartEpochSeconds
+  ) {}
+
+  private record WithdrawUsageEntry(MantissaAmount usage, long loadedAtMs) {}
+
   private record Entry(View view, long loadedAtMs, AtomicBoolean refreshing, AtomicLong lastAccessMs) {
     static Entry of(View view) {
       long now = System.currentTimeMillis();
@@ -53,6 +63,8 @@ public final class BankAccountCacheService implements Service {
   private static final int MIN_CLEANUP_BATCH = 64;
   private static final int MAX_CLEANUP_BATCH = 10_000;
 
+  private static final long DEFAULT_WITHDRAW_USAGE_TTL_MS = 5_000L;
+
   private final BankRepositoryService repo;
   private final FileConfiguration settings;
 
@@ -64,6 +76,7 @@ public final class BankAccountCacheService implements Service {
   private final ConcurrentHashMap<UUID, Entry> byAccountId = new ConcurrentHashMap<>();
 
   private final ConcurrentHashMap<Key, CompletableFuture<View>> inFlight = new ConcurrentHashMap<>();
+  private final ConcurrentHashMap<WithdrawUsageKey, WithdrawUsageEntry> withdrawUsageByKey = new ConcurrentHashMap<>();
 
   private final AtomicBoolean cleanupRunning = new AtomicBoolean(false);
 
@@ -150,6 +163,7 @@ public final class BankAccountCacheService implements Service {
     Key key = new Key(normalize(bank), owner);
     byKey.remove(key, e);
     inFlight.remove(key);
+    invalidateWithdrawUsage(bankAccountId);
   }
 
   public void invalidate(String bankIdLower, UUID ownerUuid) {
@@ -160,8 +174,42 @@ public final class BankAccountCacheService implements Service {
     inFlight.remove(key);
 
     if (e != null && e.view() != null && e.view().account() != null && e.view().account().getId() != null) {
-      byAccountId.remove(e.view().account().getId(), e);
+      UUID accountId = e.view().account().getId();
+      byAccountId.remove(accountId, e);
+      invalidateWithdrawUsage(accountId);
     }
+  }
+
+  public void invalidateWithdrawUsage(UUID bankAccountId) {
+    if (bankAccountId == null) return;
+    withdrawUsageByKey.keySet().removeIf(key -> key != null && bankAccountId.equals(key.bankAccountId()));
+  }
+
+  public CompletableFuture<MantissaAmount> loadWithdrawUsage(
+      UUID bankAccountId,
+      UUID memberUuid,
+      BankWithdrawUsageEntity.WindowType windowType,
+      long windowStartEpochSeconds
+  ) {
+    if (bankAccountId == null) return CompletableFuture.completedFuture(MantissaAmount.zero());
+    if (memberUuid == null) return CompletableFuture.completedFuture(MantissaAmount.zero());
+    if (windowType == null) return CompletableFuture.completedFuture(MantissaAmount.zero());
+    if (windowStartEpochSeconds <= 0) return CompletableFuture.completedFuture(MantissaAmount.zero());
+
+    WithdrawUsageKey key = new WithdrawUsageKey(bankAccountId, memberUuid, windowType, windowStartEpochSeconds);
+    WithdrawUsageEntry cached = withdrawUsageByKey.get(key);
+    long now = System.currentTimeMillis();
+    if (cached != null && (now - cached.loadedAtMs()) <= DEFAULT_WITHDRAW_USAGE_TTL_MS) {
+      MantissaAmount usage = cached.usage();
+      return CompletableFuture.completedFuture(usage == null ? MantissaAmount.zero() : usage);
+    }
+
+    return repo.loadWithdrawUsage(bankAccountId, memberUuid, windowType, windowStartEpochSeconds)
+        .thenApply(usage -> {
+          MantissaAmount safe = usage == null ? MantissaAmount.zero() : usage;
+          withdrawUsageByKey.put(key, new WithdrawUsageEntry(safe, System.currentTimeMillis()));
+          return safe;
+        });
   }
 
   public CompletableFuture<View> loadOrCreate(String bankIdLower, UUID ownerUuid) {

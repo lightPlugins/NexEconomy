@@ -864,10 +864,18 @@ public final class DefaultBankService implements BankService, Service {
     CompletableFuture<Void> f = CompletableFuture.completedFuture(null);
 
     if (!isUnlimited(hourlyLimit)) {
-      f = f.thenCompose(v -> repo.addWithdrawUsage(bankAccountId, memberUuid, BankWithdrawUsageEntity.WindowType.HOURLY, hourStartEpoch, delta).thenApply(x -> null));
+      f = f.thenCompose(v -> repo.addWithdrawUsage(bankAccountId, memberUuid, BankWithdrawUsageEntity.WindowType.HOURLY, hourStartEpoch, delta)
+          .thenApply(x -> {
+            if (cache != null) cache.invalidateWithdrawUsage(bankAccountId);
+            return null;
+          }));
     }
     if (!isUnlimited(dailyLimit)) {
-      f = f.thenCompose(v -> repo.addWithdrawUsage(bankAccountId, memberUuid, BankWithdrawUsageEntity.WindowType.DAILY, dayStartEpoch, delta).thenApply(x -> null));
+      f = f.thenCompose(v -> repo.addWithdrawUsage(bankAccountId, memberUuid, BankWithdrawUsageEntity.WindowType.DAILY, dayStartEpoch, delta)
+          .thenApply(x -> {
+            if (cache != null) cache.invalidateWithdrawUsage(bankAccountId);
+            return null;
+          }));
     }
 
     return f;

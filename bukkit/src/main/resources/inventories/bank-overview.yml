@@ -36,23 +36,28 @@ layout:
 items:
   sort-button:
     item: "minecraft:comparator"
-    name: "<gold>Sort</gold>"
+    display-name: "<dark_gray>» <yellow>Bank Sorting</yellow>"
     lore:
-      - "<gray>Use the control button to cycle through sort modes.</gray>"
-      - "<dark_gray>Left click: next mode</dark_gray>"
-      - "<dark_gray>Right click: previous mode</dark_gray>"
+      - ""
+      - "<yellow>│ <gray>Use the control button to</gray>"
+      - "<yellow>│ <gray>cycle through sort modes."
       - " "
       - "#modes#"
+      - " "
+      - "<dark_gray>Left click: next mode</dark_gray>"
+      - "<dark_gray>Right click: previous mode</dark_gray>"
 
   # If you use player_head as item for bank entries, the menu will automatically replace the skull owner with the bank owner's texture.
   bank-entry:
     item: "minecraft:player_head"
-    display-name: "<owner-name>'s Bank"
+    display-name: "<dark_gray>» <yellow><bank-name>'s <gray>Bank"
     lore:
-      - "<gray>Type: <green><type-label></green>"
-      - "<gray>Owner: <white><owner-name></white>"
-      - "<gray>Balance: <white><balance></white>"
-      - "<yellow>Click to manage</yellow>"
+      - ""
+      - "<yellow>│ <gray>Type: <yellow><type-label></yellow>"
+      - "<yellow>│ <gray>Owner: <yellow><owner-name></yellow>"
+      - "<yellow>│ <gray>Balance: <yellow><balance></yellow> <gray><currency>"
+      - ""
+      - "<dark_gray>Click to manage</dark_gray>"
 
   navigation:
     previous:
@@ -66,10 +71,10 @@ items:
 
 sorting:
   default-mode: "owner"
-  default-color: "<gray>"
-  active-color: "<yellow>"
+  default-color: "<gray>▶ "
+  active-color: "<yellow>▶ "
 
   modes:
-    owner: "Owned Banks -> Member Banks"
-    member: "Member Banks -> Owned Banks"
+    owner: "Owned Banks → Member Banks"
+    member: "Member Banks → Owned Banks"
 
