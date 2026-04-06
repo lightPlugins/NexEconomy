@@ -211,7 +211,10 @@ public class BankOverviewMenu {
 
     return itemService.builder(template.clone())
         .name(MiniMessage.miniMessage().deserialize(rawName, resolver))
-        .lore(l -> l.tagResolver(resolver))
+        .lore(l -> {
+          l.tagResolver(resolver);
+          l.build();
+        })
         .build();
   }
 
@@ -251,10 +254,10 @@ public class BankOverviewMenu {
         }
 
         ItemStack stack = itemService.builder(template.clone())
-//            .lore(l ->  {
-//              l.replaceToken("#modes#", modeComponents);
-//              l.build();
-//            })
+            .lore(l ->  {
+              l.replaceToken("#modes#", modeComponents);
+              l.build();
+            })
             .build();
 
         return MenuItem.of(stack);
