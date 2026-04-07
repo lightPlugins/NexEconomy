@@ -22,6 +22,8 @@ import java.util.concurrent.CompletableFuture;
 })
 public final class DefaultBankTransactionService implements BankTransactionService, Service {
 
+  private static final int MAX_TRANSACTIONS = 100;
+
   private final BankRegistryService banks;
   private final BankAccountCacheService cache;
   private final BankRepositoryService repo;
@@ -43,6 +45,8 @@ public final class DefaultBankTransactionService implements BankTransactionServi
     if (bank.isBlank()) return CompletableFuture.failedFuture(new IllegalArgumentException("bankId is blank"));
     if (ownerUuid == null) return CompletableFuture.failedFuture(new IllegalArgumentException("ownerUuid is null"));
     if (viewerUuid == null) return CompletableFuture.failedFuture(new IllegalArgumentException("viewerUuid is null"));
+
+    int effectiveLimit = Math.min(limit, MAX_TRANSACTIONS);
 
     return repo.isPlayerLocked(viewerUuid).thenCompose(viewerLocked -> {
       if (Boolean.TRUE.equals(viewerLocked)) {
@@ -81,7 +85,7 @@ public final class DefaultBankTransactionService implements BankTransactionServi
               if (role == null) return CompletableFuture.failedFuture(new IllegalStateException("no permission"));
               if (!role.canViewLog()) return CompletableFuture.failedFuture(new IllegalStateException("no permission"));
 
-              return repo.listRecentTransactions(view.account().getId(), limit);
+              return repo.listRecentTransactions(view.account().getId(), effectiveLimit);
             })
         );
       });

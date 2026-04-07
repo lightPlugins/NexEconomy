@@ -1,5 +1,8 @@
 package io.nexstudios.nexeconomy.service.bank.menu.bank;
 
+import io.nexstudios.configservice.config.ConfigurationSection;
+import io.nexstudios.configservice.config.FileConfiguration;
+import io.nexstudios.configservice.service.singlereader.FileReaderService;
 import io.nexstudios.itemservice.bukkit.service.item.ItemService;
 import io.nexstudios.menuservice.common.api.*;
 import io.nexstudios.menuservice.common.api.builder.MenuDefinitionBuilder;
@@ -11,45 +14,57 @@ import io.nexstudios.menuservice.common.api.page.control.PageControlButton;
 import io.nexstudios.menuservice.common.api.page.control.PageFilterControl;
 import io.nexstudios.menuservice.common.api.page.control.PageSortControl;
 import io.nexstudios.menuservice.common.api.registry.DuplicateStrategy;
+import io.nexstudios.nexeconomy.NexEconomyPlugin;
 import io.nexstudios.nexeconomy.definition.AmountNotation;
 import io.nexstudios.nexeconomy.definition.CurrencyDefinition;
 import io.nexstudios.nexeconomy.definition.MantissaAmount;
 import io.nexstudios.nexeconomy.service.bank.BankService;
 import io.nexstudios.nexeconomy.service.bank.transaction.BankTransactionService;
 import io.nexstudios.nexlogic.bukkit.services.entity.nexeconomy.BankTransactionEntity;
+import io.nexstudios.nexlogic.bukkit.services.items.config.ConfigItemService;
 import io.nexstudios.nexlogic.common.services.logging.LoggerService;
 import io.nexstudios.serviceregistry.di.Dependencies;
 import io.nexstudios.serviceregistry.di.ServiceAccessor;
+import lombok.NoArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import net.kyori.adventure.text.Component;
-import net.kyori.adventure.text.format.NamedTextColor;
+import net.kyori.adventure.text.minimessage.MiniMessage;
+import net.kyori.adventure.text.minimessage.tag.resolver.Placeholder;
+import net.kyori.adventure.text.minimessage.tag.resolver.TagResolver;
+import net.kyori.adventure.text.serializer.legacy.LegacyComponentSerializer;
 import org.bukkit.Bukkit;
 import org.bukkit.Material;
 import org.bukkit.OfflinePlayer;
 import org.bukkit.inventory.ItemStack;
 import org.jetbrains.annotations.NotNull;
 
+import java.math.BigDecimal;
+import java.nio.file.Path;
+import java.time.Duration;
 import java.time.Instant;
 import java.time.ZoneId;
 import java.time.ZonedDateTime;
 import java.time.format.DateTimeFormatter;
-import java.math.BigDecimal;
+import java.util.ArrayList;
 import java.util.Comparator;
-import java.util.Map;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
+import java.util.Map;
 import java.util.Optional;
 import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentHashMap;
 
 @Slf4j
+@NoArgsConstructor
 @Dependencies({
     ItemService.class,
     MenuService.class,
     BankService.class,
     BankTransactionService.class,
-    LoggerService.class
+    LoggerService.class,
+    FileReaderService.class
 })
 public class BankTransactionMenu {
 
@@ -57,64 +72,78 @@ public class BankTransactionMenu {
   private static final String AREA_ID = "transactions";
   private static final String SORT_ID = "transaction-sort";
   private static final String FILTER_ID = "transaction-filter";
-  private static final int SLOT_FILTER = 0;
-  private static final int SLOT_SORT = 8;
-  private static final int SLOT_BACK = 49;
+  private static final Path CONFIG_PATH = Path.of("inventories/bank-transactions.yml");
+  private static final String CONFIG_FILE = "inventories/bank-transactions.yml";
+
+  private static final int DEFAULT_ROWS = 6;
+  private static final int DEFAULT_FILTER_SLOT = 0;
+  private static final int DEFAULT_SORT_SLOT = 8;
+  private static final int DEFAULT_BACK_SLOT = 49;
+  private static final int DEFAULT_ENTRY_X = 1;
+  private static final int DEFAULT_ENTRY_Y = 1;
+  private static final int DEFAULT_ENTRY_WIDTH = 7;
+  private static final int DEFAULT_ENTRY_HEIGHT = 4;
+  private static final int DEFAULT_PREVIOUS_SLOT = 45;
+  private static final int DEFAULT_NEXT_SLOT = 53;
 
   private static LoggerService logger;
   private static ServiceAccessor servicesRef;
-  private static final java.util.Map<UUID, TransactionContext> CONTEXTS = new java.util.concurrent.ConcurrentHashMap<>();
+  private static ItemService itemService;
+  private static FileReaderService fileReaderService;
+  private static ConfigItemService configItemService;
+  private static FileConfiguration bankConfig;
+  private static int SLOT_FILTER = DEFAULT_FILTER_SLOT;
+  private static int SLOT_SORT = DEFAULT_SORT_SLOT;
+  private static int SLOT_BACK = DEFAULT_BACK_SLOT;
+  private static final Map<UUID, TransactionContext> CONTEXTS = new ConcurrentHashMap<>();
   private static final Map<UUID, List<TransactionEntry>> SNAPSHOTS = new ConcurrentHashMap<>();
   private static final Map<UUID, CompletableFuture<List<TransactionEntry>>> LOADS = new ConcurrentHashMap<>();
 
-  private BankTransactionMenu() {}
-
   public static void register(@NotNull ServiceAccessor services) {
     MenuService menuService = services.getService(MenuService.class);
-    ItemService items = services.getService(ItemService.class);
     logger = services.getService(LoggerService.class);
     servicesRef = services;
+    itemService = services.getService(ItemService.class);
+    fileReaderService = services.getService(FileReaderService.class);
+    configItemService = NexEconomyPlugin.getNexLogicService().getService(ConfigItemService.class);
+
+    bankConfig = loadConfig();
+    SLOT_FILTER = bankConfig.getInt("layout.slots.filter", DEFAULT_FILTER_SLOT);
+    SLOT_SORT = bankConfig.getInt("layout.slots.sort", DEFAULT_SORT_SLOT);
+    SLOT_BACK = bankConfig.getInt("layout.slots.back", DEFAULT_BACK_SLOT);
+
+    ItemStack fillTemplate = configuredItem(bankConfig, "items.fill", Material.BLACK_STAINED_GLASS_PANE);
+    ItemStack sortTemplate = configuredItem(bankConfig, "items.sort-button", Material.COMPARATOR);
+    ItemStack filterTemplate = configuredItem(bankConfig, "items.filter-button", Material.HOPPER);
+    ItemStack transactionTemplate = configuredItem(bankConfig, "items.transaction-entry", Material.PAPER);
+    ItemStack previousTemplate = configuredItem(bankConfig, "items.navigation.previous", Material.SPECTRAL_ARROW);
+    ItemStack nextTemplate = configuredItem(bankConfig, "items.navigation.next", Material.SPECTRAL_ARROW);
+    Map<String, String> sortModes = readSortModes(bankConfig);
+    Map<String, String> filterModes = readFilterModes(bankConfig);
+    PageSortControl<TransactionEntry> sortControl = buildSortControl(bankConfig, sortModes);
+    PageFilterControl<TransactionEntry> filterControl = buildFilterControl(bankConfig, filterModes);
 
     var def = MenuDefinitionBuilder.create()
         .key(KEY)
-        .title("§6Bank Transactions")
-        .rows(6)
-        .refreshInterval(java.time.Duration.ofSeconds(2))
+        .title(toLegacyTitle(bankConfig.getString("menu.title", "<yellow>Bank Transactions</yellow>")))
+        .rows(bankConfig.getInt("menu.rows", DEFAULT_ROWS))
+        .refreshInterval(parseRefreshInterval(bankConfig.getString("menu.refresh-interval", "2")))
         .interactionPolicy(InteractionPolicies.locked())
-        .fillEmptySlotsWith(MenuItem.of(items.builder(Material.BLACK_STAINED_GLASS_PANE)
-            .amount(1)
-            .name(Component.text(" "))
-            .build()))
+        .fillEmptySlotsWith(MenuItem.of(fillTemplate))
         .interactionHooks(new MenuInteractionHooks() {
           @Override
           public void onClose(MenuKey key, ViewerRef viewer, CloseReason reason) {
-            CONTEXTS.remove(viewer.uniqueId(), CONTEXTS.get(viewer.uniqueId()));
+            CONTEXTS.remove(viewer.uniqueId());
             SNAPSHOTS.remove(viewer.uniqueId());
             LOADS.remove(viewer.uniqueId());
           }
         })
-        .addSortControl(AREA_ID, buildSortControl())
-        .addFilterControl(AREA_ID, buildFilterControl())
-        .addControlButton(buildSortControlButton(items))
-        .addControlButton(buildFilterControlButton(items))
-        .addPagedArea(buildPagedArea(items))
-        .populator(ctx -> {
-          ctx.slot(SLOT_FILTER).setPlannedItem(() -> MenuItem.of(buildFilterButton(items)));
-          ctx.slot(SLOT_SORT).setPlannedItem(() -> MenuItem.of(buildSortButton(items)));
-          ctx.slot(SLOT_BACK).setPlannedItem(() -> MenuItem.of(items.builder(Material.ARROW)
-              .amount(1)
-              .name(Component.text("Back", NamedTextColor.GOLD))
-              .build()));
-          ctx.slot(SLOT_BACK).onClick(clickCtx -> {
-            clickCtx.cancel();
-            if (servicesRef != null) {
-              TransactionContext transCtx = CONTEXTS.get(clickCtx.viewer().uniqueId());
-              if (transCtx != null) {
-                BankDetailMenu.open(servicesRef, clickCtx.viewer(), transCtx.bankId(), transCtx.ownerUuid(), transCtx.ownerBank());
-              }
-            }
-          });
-        })
+        .addSortControl(AREA_ID, sortControl)
+        .addFilterControl(AREA_ID, filterControl)
+        .addControlButton(buildSortControlButton(sortTemplate, sortControl, sortModes, bankConfig))
+        .addControlButton(buildFilterControlButton(filterTemplate, filterControl, filterModes, bankConfig))
+        .addPagedArea(buildPagedArea(transactionTemplate, previousTemplate, nextTemplate, bankConfig))
+        .populator(ctx -> populate(ctx, bankConfig))
         .build();
 
     menuService.registry().register(def, DuplicateStrategy.REPLACE);
@@ -133,7 +162,27 @@ public class BankTransactionMenu {
     services.getService(MenuService.class).open(viewer, KEY);
   }
 
-  private static PagedAreaDefinition<TransactionEntry> buildPagedArea(ItemService itemService) {
+  private static void populate(MenuPopulateContext ctx, FileConfiguration config) {
+    ctx.slot(SLOT_FILTER).setPlannedItem(() -> MenuItem.of(buildFilterButton()));
+    ctx.slot(SLOT_SORT).setPlannedItem(() -> MenuItem.of(buildSortButton()));
+    ctx.slot(SLOT_BACK).setPlannedItem(() -> MenuItem.of(buildBackButton(config)));
+    ctx.slot(SLOT_BACK).onClick(clickCtx -> {
+      clickCtx.cancel();
+      if (servicesRef == null) {
+        return;
+      }
+
+      TransactionContext transCtx = CONTEXTS.get(clickCtx.viewer().uniqueId());
+      if (transCtx != null) {
+        BankDetailMenu.open(servicesRef, clickCtx.viewer(), transCtx.bankId(), transCtx.ownerUuid(), transCtx.ownerBank());
+      }
+    });
+  }
+
+  private static PagedAreaDefinition<TransactionEntry> buildPagedArea(ItemStack transactionTemplate,
+                                                                     ItemStack previousTemplate,
+                                                                     ItemStack nextTemplate,
+                                                                     FileConfiguration config) {
     PageSource<TransactionEntry> source = (menuKey, viewer) -> {
       try {
         TransactionContext ctx = CONTEXTS.get(viewer.uniqueId());
@@ -161,46 +210,50 @@ public class BankTransactionMenu {
       }
     };
 
-    PageBounds bounds = new PageBounds(1, 1, 7, 4, PageAlignment.LEFT);
-
-    PageNavigation nav = PageNavigation.builder()
-        .previousSlot(45)
-        .nextSlot(53)
-        .previousItem(new ItemStack(Material.SPECTRAL_ARROW))
-        .nextItem(new ItemStack(Material.SPECTRAL_ARROW))
-        .showCurrentPageAmount(true)
-        .hidePreviousOnFirstPage(true)
-        .hideNextOnLastPage(true)
-        .build();
+    PageBounds bounds = readBounds(config);
+    PageNavigation nav = buildNavigation(config, previousTemplate, nextTemplate);
 
     return new PagedAreaDefinition<>(
         AREA_ID,
         bounds,
         source,
-        (entry, index) -> () -> MenuItem.of(renderTransactionItem(itemService, entry)),
+        (entry, index) -> () -> MenuItem.of(renderTransactionItem(transactionTemplate, entry, config)),
         nav,
         Optional.empty()
     );
   }
 
-  private static ItemStack renderTransactionItem(ItemService items, TransactionEntry entry) {
+  private static ItemStack renderTransactionItem(ItemStack template, TransactionEntry entry, FileConfiguration config) {
     BankTransactionEntity tx = entry.transaction();
     String typeLabel = getTransactionType(tx);
     String actorName = getActorName(tx);
     String amountFormatted = getAmount(entry);
     String timestamp = getTimestamp(tx);
+    String bankType = entry.ownerBank() ? "Owner" : "Member";
+
+    String rawName = config.getString("items.transaction-entry.display-name", "<dark_gray>» <yellow><type-label></yellow>");
+    TagResolver resolver = TagResolver.resolver(List.of(
+        Placeholder.parsed("type-label", typeLabel),
+        Placeholder.parsed("actor-name", actorName),
+        Placeholder.parsed("amount", amountFormatted),
+        Placeholder.parsed("time", timestamp),
+        Placeholder.parsed("bank-id", entry.bankId()),
+        Placeholder.parsed("owner-name", nameOrUuid(entry.ownerUuid())),
+        Placeholder.parsed("owner-uuid", entry.ownerUuid().toString()),
+        Placeholder.parsed("bank-type", bankType),
+        Placeholder.parsed("currency", entry.currency() == null ? "" : entry.currency().id())
+    ));
 
     Material material = getMaterialForType(tx);
 
-    return items.builder(material)
+    ItemStack base = template == null ? new ItemStack(material) : template.clone();
+    return itemService.builder(base)
         .amount(1)
-        .name(Component.text(typeLabel, NamedTextColor.GOLD))
-        .lore(l -> l
-            .line("&7Type: &f" + typeLabel)
-            .line("&7Actor: &f" + actorName)
-            .line("&7Amount: &e" + amountFormatted)
-            .line("&7Time: &8" + timestamp)
-        )
+        .name(MiniMessage.miniMessage().deserialize(rawName, resolver))
+        .lore(l -> {
+          l.tagResolver(resolver);
+          l.build();
+        })
         .build();
   }
 
@@ -293,7 +346,7 @@ public class BankTransactionMenu {
           if (transactions == null) return List.of();
           return transactions.stream()
               .filter(java.util.Objects::nonNull)
-              .map(tx -> new TransactionEntry(tx, ctx.currency()))
+              .map(tx -> new TransactionEntry(tx, ctx.currency(), ctx.bankId(), ctx.ownerUuid(), ctx.ownerBank()))
               .toList();
         });
 
@@ -341,7 +394,13 @@ public class BankTransactionMenu {
     return symbol == null ? "" : symbol;
   }
 
-  private static PageControlButton buildSortControlButton(ItemService items) {
+  private static PageControlButton buildSortControlButton(ItemStack template,
+                                                          PageSortControl<TransactionEntry> sortControl,
+                                                          Map<String, String> sortModes,
+                                                          FileConfiguration config) {
+    String defaultColor = config.getString("sorting.default-color", "<gray>");
+    String activeColor = config.getString("sorting.active-color", "<yellow>");
+
     return new PageControlButton() {
       @Override public String areaId() { return AREA_ID; }
       @Override public String controlId() { return SORT_ID; }
@@ -350,20 +409,31 @@ public class BankTransactionMenu {
       @Override
       public MenuItem render(RenderContext ctx) {
         String mode = ctx.activeModeId().orElse(ctx.control().defaultModeId());
-        String label = ctx.control().labelForMode(mode);
+        List<Component> modeComponents = new ArrayList<>();
+        for (String modeId : sortControl.modeIds()) {
+          boolean active = normalizeMode(modeId).equals(normalizeMode(mode));
+          String label = sortModes.getOrDefault(normalizeMode(modeId), sortControl.labelForMode(modeId));
+          String colorPrefix = active ? activeColor : defaultColor;
+          modeComponents.add(MiniMessage.miniMessage().deserialize(colorPrefix + label));
+        }
 
-        return MenuItem.of(items.builder(Material.COMPARATOR)
+        String rawName = config.getString("items.sort-button.display-name", "<dark_gray>» <yellow>Transaction Sorting</yellow>");
+        TagResolver resolver = TagResolver.resolver(List.of(
+            Placeholder.parsed("current-mode", sortControl.labelForMode(mode))
+        ));
+
+        ItemStack base = template == null ? new ItemStack(Material.COMPARATOR) : template.clone();
+        ItemStack stack = itemService.builder(base)
             .amount(1)
-            .name(Component.text("Sort: " + label, NamedTextColor.GOLD))
-            .lore(l -> l
-                .line("&7Available options:")
-                .line("&" + ("deposit-withdraw".equals(mode) ? "c" : "7") + "▶ Deposit → Withdraw")
-                .line("&" + ("withdraw-deposit".equals(mode) ? "c" : "7") + "▶ Withdraw → Deposit")
-                .line("&" + ("latest-last".equals(mode) ? "c" : "7") + "▶ Latest → Last")
-                .line("&" + ("last-latest".equals(mode) ? "c" : "7") + "▶ Last → Latest")
-                .line("&8Click to cycle")
-            )
-            .build());
+            .name(MiniMessage.miniMessage().deserialize(rawName, resolver))
+            .lore(l -> {
+              l.tagResolver(resolver);
+              l.replaceToken("#modes#", modeComponents);
+              l.build();
+            })
+            .build();
+
+        return MenuItem.of(stack);
       }
 
       @Override
@@ -389,7 +459,10 @@ public class BankTransactionMenu {
     };
   }
 
-  private static PageControlButton buildFilterControlButton(ItemService items) {
+  private static PageControlButton buildFilterControlButton(ItemStack template,
+                                                            PageFilterControl<TransactionEntry> filterControl,
+                                                            Map<String, String> filterModes,
+                                                            FileConfiguration config) {
     return new PageControlButton() {
       @Override public String areaId() { return AREA_ID; }
       @Override public String controlId() { return FILTER_ID; }
@@ -398,19 +471,31 @@ public class BankTransactionMenu {
       @Override
       public MenuItem render(RenderContext ctx) {
         String mode = ctx.activeModeId().orElse(ctx.control().defaultModeId());
-        String label = ctx.control().labelForMode(mode);
+        List<Component> modeComponents = new ArrayList<>();
+        for (String modeId : filterControl.modeIds()) {
+          boolean active = normalizeMode(modeId).equals(normalizeMode(mode));
+          String label = filterModes.getOrDefault(normalizeMode(modeId), filterControl.labelForMode(modeId));
+          String colorPrefix = active ? "<yellow>" : "<gray>";
+          modeComponents.add(MiniMessage.miniMessage().deserialize(colorPrefix + label));
+        }
 
-        return MenuItem.of(items.builder(Material.HOPPER)
+        String rawName = config.getString("items.filter-button.display-name", "<dark_gray>» <yellow>Transaction Filter</yellow>");
+        TagResolver resolver = TagResolver.resolver(List.of(
+            Placeholder.parsed("current-mode", filterControl.labelForMode(mode))
+        ));
+
+        ItemStack base = template == null ? new ItemStack(Material.HOPPER) : template.clone();
+        ItemStack stack = itemService.builder(base)
             .amount(1)
-            .name(Component.text("Filter: " + label, NamedTextColor.GOLD))
-            .lore(l -> l
-                .line("&7Available options:")
-                .line("&" + ("all".equals(mode) ? "c" : "7") + "▶ All")
-                .line("&" + ("withdraw".equals(mode) ? "c" : "7") + "▶ Withdraw only")
-                .line("&" + ("deposit".equals(mode) ? "c" : "7") + "▶ Deposit only")
-                .line("&8Click to cycle")
-            )
-            .build());
+            .name(MiniMessage.miniMessage().deserialize(rawName, resolver))
+            .lore(l -> {
+              l.tagResolver(resolver);
+              l.replaceToken("#modes#", modeComponents);
+              l.build();
+            })
+            .build();
+
+        return MenuItem.of(stack);
       }
 
       @Override
@@ -436,41 +521,41 @@ public class BankTransactionMenu {
     };
   }
 
-  private static ItemStack buildSortButton(ItemService items) {
-    return items.builder(Material.COMPARATOR)
+  private static ItemStack buildSortButton() {
+    return configuredItem(bankConfig, "items.sort-button", Material.COMPARATOR);
+  }
+
+  private static ItemStack buildFilterButton() {
+    return configuredItem(bankConfig, "items.filter-button", Material.HOPPER);
+  }
+
+  private static ItemStack buildBackButton(FileConfiguration config) {
+    ItemStack template = configuredItem(config, "items.back", Material.ARROW);
+    String rawName = config.getString("items.back.display-name", "<yellow>Back</yellow>");
+    TagResolver resolver = TagResolver.resolver(List.of());
+
+    return itemService.builder(template.clone())
         .amount(1)
-        .name(Component.text("Sort", NamedTextColor.GOLD))
-        .lore(l -> l.line("&7Wird vom Control-Button gerendert"))
+        .name(MiniMessage.miniMessage().deserialize(rawName, resolver))
+        .lore(l -> {
+          l.tagResolver(resolver);
+          l.build();
+        })
         .build();
   }
 
-  private static ItemStack buildFilterButton(ItemService items) {
-    return items.builder(Material.HOPPER)
-        .amount(1)
-        .name(Component.text("Filter", NamedTextColor.GOLD))
-        .lore(l -> l.line("&7Wird vom Control-Button gerendert"))
-        .build();
-  }
+  private static PageSortControl<TransactionEntry> buildSortControl(FileConfiguration config,
+                                                                     Map<String, String> sortModes) {
+    String defaultMode = normalizeMode(config.getString("sorting.default-mode", "latest-last"));
 
-  private static PageSortControl<TransactionEntry> buildSortControl() {
     return new PageSortControl<>() {
       @Override public String controlId() { return SORT_ID; }
-      @Override public List<String> modeIds() { return List.of(
-          "deposit-withdraw",
-          "withdraw-deposit",
-          "latest-last",
-          "last-latest"
-      ); }
-      @Override public String defaultModeId() { return "latest-last"; }
+      @Override public List<String> modeIds() { return new ArrayList<>(sortModes.keySet()); }
+      @Override public String defaultModeId() { return defaultMode; }
 
       @Override
       public String labelForMode(String modeId) {
-        return switch (modeId) {
-          case "deposit-withdraw" -> "Deposit → Withdraw";
-          case "latest-last" -> "Latest → Last";
-          case "last-latest" -> "Last → Latest";
-          default -> "Withdraw → Deposit";
-        };
+        return sortModes.getOrDefault(normalizeMode(modeId), formatModeLabel(modeId));
       }
 
       @Override
@@ -485,19 +570,18 @@ public class BankTransactionMenu {
     };
   }
 
-  private static PageFilterControl<TransactionEntry> buildFilterControl() {
+  private static PageFilterControl<TransactionEntry> buildFilterControl(FileConfiguration config,
+                                                                        Map<String, String> filterModes) {
+    String defaultMode = normalizeMode(config.getString("filtering.default-mode", "all"));
+
     return new PageFilterControl<>() {
       @Override public String controlId() { return FILTER_ID; }
-      @Override public List<String> modeIds() { return List.of("all", "withdraw", "deposit"); }
-      @Override public String defaultModeId() { return "all"; }
+      @Override public List<String> modeIds() { return new ArrayList<>(filterModes.keySet()); }
+      @Override public String defaultModeId() { return defaultMode; }
 
       @Override
       public String labelForMode(String modeId) {
-        return switch (modeId) {
-          case "withdraw" -> "Withdraw only";
-          case "deposit" -> "Deposit only";
-          default -> "All";
-        };
+        return filterModes.getOrDefault(normalizeMode(modeId), formatFilterLabel(modeId));
       }
 
       @Override
@@ -509,6 +593,158 @@ public class BankTransactionMenu {
         };
       }
     };
+  }
+
+  private static ItemStack configuredItem(FileConfiguration cfg, String path, Material fallback) {
+    if (cfg == null || configItemService == null) {
+      return new ItemStack(fallback);
+    }
+
+    ConfigurationSection section = cfg.getSection(path);
+    if (section == null) {
+      return new ItemStack(fallback);
+    }
+
+    return configItemService.convertSectionToItem(section)
+        .orElseGet(() -> new ItemStack(fallback));
+  }
+
+  private static FileConfiguration loadConfig() {
+    return fileReaderService.load(CONFIG_PATH, CONFIG_FILE, true);
+  }
+
+  private static PageBounds readBounds(FileConfiguration config) {
+    ConfigurationSection bounds = config == null ? null : config.getSection("layout.transactions.bounds");
+    int x = bounds != null ? bounds.getInt("x", DEFAULT_ENTRY_X) : DEFAULT_ENTRY_X;
+    int y = bounds != null ? bounds.getInt("y", DEFAULT_ENTRY_Y) : DEFAULT_ENTRY_Y;
+    int width = bounds != null ? bounds.getInt("width", DEFAULT_ENTRY_WIDTH) : DEFAULT_ENTRY_WIDTH;
+    int height = bounds != null ? bounds.getInt("height", DEFAULT_ENTRY_HEIGHT) : DEFAULT_ENTRY_HEIGHT;
+    String alignmentRaw = bounds != null ? bounds.getString("alignment", "LEFT") : "LEFT";
+    return new PageBounds(x, y, width, height, parseAlignment(alignmentRaw));
+  }
+
+  private static PageNavigation buildNavigation(FileConfiguration config, ItemStack previousTemplate, ItemStack nextTemplate) {
+    ConfigurationSection navigation = config == null ? null : config.getSection("layout.transactions.navigation");
+    int previousSlot = navigation != null ? navigation.getInt("previous-slot", DEFAULT_PREVIOUS_SLOT) : DEFAULT_PREVIOUS_SLOT;
+    int nextSlot = navigation != null ? navigation.getInt("next-slot", DEFAULT_NEXT_SLOT) : DEFAULT_NEXT_SLOT;
+    boolean showCurrentPageAmount = navigation == null || navigation.getBoolean("show-current-page-amount", true);
+    boolean hidePreviousOnFirstPage = navigation == null || navigation.getBoolean("hide-previous-on-first-page", true);
+    boolean hideNextOnLastPage = navigation == null || navigation.getBoolean("hide-next-on-last-page", true);
+
+    return PageNavigation.builder()
+        .previousSlot(previousSlot)
+        .nextSlot(nextSlot)
+        .previousItem(previousTemplate == null ? new ItemStack(Material.SPECTRAL_ARROW) : previousTemplate)
+        .nextItem(nextTemplate == null ? new ItemStack(Material.SPECTRAL_ARROW) : nextTemplate)
+        .showCurrentPageAmount(showCurrentPageAmount)
+        .hidePreviousOnFirstPage(hidePreviousOnFirstPage)
+        .hideNextOnLastPage(hideNextOnLastPage)
+        .build();
+  }
+
+  private static Map<String, String> readSortModes(FileConfiguration config) {
+    Map<String, String> modes = new LinkedHashMap<>();
+    ConfigurationSection section = config == null ? null : config.getSection("sorting.modes");
+
+    if (section != null) {
+      for (String key : section.getKeys(false)) {
+        String modeId = normalizeMode(key);
+        modes.put(modeId, section.getString(key, formatModeLabel(modeId)));
+      }
+    }
+
+    if (modes.isEmpty()) {
+      modes.put("deposit-withdraw", "Deposit → Withdraw");
+      modes.put("withdraw-deposit", "Withdraw → Deposit");
+      modes.put("latest-last", "Latest → Last");
+      modes.put("last-latest", "Last → Latest");
+    }
+
+    return modes;
+  }
+
+  private static Map<String, String> readFilterModes(FileConfiguration config) {
+    Map<String, String> modes = new LinkedHashMap<>();
+    ConfigurationSection section = config == null ? null : config.getSection("filtering.modes");
+
+    if (section != null) {
+      for (String key : section.getKeys(false)) {
+        String modeId = normalizeMode(key);
+        modes.put(modeId, section.getString(key, formatFilterLabel(modeId)));
+      }
+    }
+
+    if (modes.isEmpty()) {
+      modes.put("all", "All Transactions");
+      modes.put("withdraw", "Withdraw Only");
+      modes.put("deposit", "Deposit Only");
+    }
+
+    return modes;
+  }
+
+  private static String formatFilterLabel(String modeId) {
+    return switch (normalizeMode(modeId)) {
+      case "withdraw" -> "Withdraw Only";
+      case "deposit" -> "Deposit Only";
+      default -> "All Transactions";
+    };
+  }
+
+  private static String formatModeLabel(String modeId) {
+    return switch (normalizeMode(modeId)) {
+      case "deposit-withdraw" -> "Deposit → Withdraw";
+      case "withdraw-deposit" -> "Withdraw → Deposit";
+      case "latest-last" -> "Latest → Last";
+      case "last-latest" -> "Last → Latest";
+      default -> modeId;
+    };
+  }
+
+  private static String normalizeMode(String value) {
+    return value == null ? "" : value.trim().toLowerCase(Locale.ROOT);
+  }
+
+  private static PageAlignment parseAlignment(String raw) {
+    if (raw == null || raw.isBlank()) {
+      return PageAlignment.LEFT;
+    }
+
+    try {
+      return PageAlignment.valueOf(raw.trim().toUpperCase(Locale.ROOT));
+    } catch (Exception ignored) {
+      return PageAlignment.LEFT;
+    }
+  }
+
+  private static String toLegacyTitle(String raw) {
+    String value = raw == null || raw.isBlank() ? "<yellow>Bank Transactions</yellow>" : raw;
+    return LegacyComponentSerializer.legacySection().serialize(MiniMessage.miniMessage().deserialize(value));
+  }
+
+  private static Duration parseRefreshInterval(String raw) {
+    if (raw == null || raw.isBlank()) {
+      return Duration.ofSeconds(1);
+    }
+
+    String normalized = raw.trim().toLowerCase(Locale.ROOT);
+    try {
+      if (normalized.endsWith("ms")) {
+        return Duration.ofMillis(Long.parseLong(normalized.substring(0, normalized.length() - 2).trim()));
+      }
+
+      long value = Long.parseLong(normalized.substring(0, normalized.length() - 1).trim());
+      if (normalized.endsWith("s")) {
+        return Duration.ofSeconds(value);
+      }
+      if (normalized.endsWith("m")) {
+        return Duration.ofMinutes(value);
+      }
+
+      return Duration.ofSeconds(Long.parseLong(normalized));
+    } catch (Exception ignored) {
+      return Duration.ofSeconds(1);
+    }
   }
 
   private static int transactionRank(BankTransactionEntity tx, boolean withdrawFirst) {
@@ -534,5 +770,9 @@ public class BankTransactionMenu {
 
   private record TransactionContext(String bankId, UUID ownerUuid, boolean ownerBank, CurrencyDefinition currency) {}
 
-  private record TransactionEntry(BankTransactionEntity transaction, CurrencyDefinition currency) {}
+  private record TransactionEntry(BankTransactionEntity transaction,
+                                  CurrencyDefinition currency,
+                                  String bankId,
+                                  UUID ownerUuid,
+                                  boolean ownerBank) {}
 }

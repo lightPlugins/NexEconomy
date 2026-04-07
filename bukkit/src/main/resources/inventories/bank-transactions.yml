@@ -1,0 +1,127 @@
+# Configuration for the BankTransactionMenu.
+# This file follows the same structure as the other inventory menus so the layout,
+# item templates and mode labels can be changed without touching the Java code.
+
+menu:
+  # Title shown at the top of the inventory.
+  title: "<yellow>Bank Transactions</yellow>"
+
+  # Inventory rows.
+  rows: 6
+
+  # Refresh interval in seconds for live content updates.
+  refresh-interval: "2"
+
+layout:
+  # Static button slots.
+  slots:
+    filter: 0
+    sort: 8
+    back: 49
+
+  # Paged transaction list.
+  transactions:
+    bounds:
+      x: 1
+      y: 1
+      width: 7
+      height: 4
+      alignment: "LEFT"
+
+    navigation:
+      previous-slot: 45
+      next-slot: 53
+      show-current-page-amount: true
+      hide-previous-on-first-page: true
+      hide-next-on-last-page: true
+
+items:
+  # Default filler for empty slots.
+  fill:
+    item: "minecraft:black_stained_glass_pane"
+    display-name: " "
+    lore: []
+
+  # Button used to cycle the active filter.
+  filter-button:
+    item: "minecraft:hopper"
+    display-name: "<dark_gray>» <yellow>Transaction Filter</yellow>"
+    lore:
+      - ""
+      - "<yellow>│ <gray>Filter the transaction list by type."
+      - "<yellow>│ <gray>Use the control button to cycle filters."
+      - " "
+      - "#modes#"
+      - " "
+      - "<dark_gray>Left click: next mode</dark_gray>"
+      - "<dark_gray>Right click: previous mode</dark_gray>"
+
+  # Button used to cycle the active sort mode.
+  sort-button:
+    item: "minecraft:comparator"
+    display-name: "<dark_gray>» <yellow>Transaction Sorting</yellow>"
+    lore:
+      - ""
+      - "<yellow>│ <gray>Sort the transaction list."
+      - "<yellow>│ <gray>Use the control button to cycle sort modes."
+      - " "
+      - "#modes#"
+      - " "
+      - "<dark_gray>Left click: next mode</dark_gray>"
+      - "<dark_gray>Right click: previous mode</dark_gray>"
+
+  # Template for a single transaction entry inside the paged area.
+  transaction-entry:
+    item: "minecraft:paper"
+    display-name: "<dark_gray>» <yellow><type-label></yellow>"
+    lore:
+      - ""
+      - "<yellow>│ <gray>Type: <yellow><type-label></yellow>"
+      - "<yellow>│ <gray>Actor: <yellow><actor-name></yellow>"
+      - "<yellow>│ <gray>Amount: <yellow><amount></yellow>"
+      - "<yellow>│ <gray>Time: <yellow><time></yellow>"
+      - "<yellow>│ <gray>Bank ID: <yellow><bank-id></yellow>"
+      - "<yellow>│ <gray>Owner: <yellow><owner-name></yellow>"
+      - "<yellow>│ <gray>Owner UUID: <yellow><owner-uuid></yellow>"
+      - "<yellow>│ <gray>Bank type: <yellow><bank-type></yellow>"
+
+  # Navigation buttons used by the paged area.
+  navigation:
+    previous:
+      item: "minecraft:spectral_arrow"
+      display-name: "<yellow>Previous Page</yellow>"
+      lore: []
+    next:
+      item: "minecraft:spectral_arrow"
+      display-name: "<yellow>Next Page</yellow>"
+      lore: []
+
+  # Back button to return to the bank detail menu.
+  back:
+    item: "minecraft:arrow"
+    display-name: "<yellow>Back</yellow>"
+    lore:
+      - ""
+      - "<dark_gray>Return to the bank details menu</dark_gray>"
+
+sorting:
+  # Default sort mode used when the menu opens.
+  default-mode: "latest-last"
+  default-color: "<gray>▶ "
+  active-color: "<yellow>▶ "
+
+  modes:
+    deposit-withdraw: "Deposit → Withdraw"
+    withdraw-deposit: "Withdraw → Deposit"
+    latest-last: "Latest → Last"
+    last-latest: "Last → Latest"
+
+filtering:
+  # Default filter mode used when the menu opens.
+  default-mode: "all"
+
+  modes:
+    all: "All Transactions"
+    withdraw: "Withdraw Only"
+    deposit: "Deposit Only"
+
