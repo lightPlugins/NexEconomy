@@ -1,5 +1,7 @@
 package io.nexstudios.nexeconomy.service.bank.interest;
 
+import io.nexstudios.configservice.config.FileConfiguration;
+import io.nexstudios.configservice.service.multireader.MultiFileReaderService;
 import io.nexstudios.configservice.service.singlereader.FileReaderService;
 import io.nexstudios.framework.paper.services.plugin.PaperPluginService;
 import io.nexstudios.languageservice.service.component.ComponentService;
@@ -44,6 +46,7 @@ import java.util.logging.Level;
     LoggerService.class,
     PaperPluginService.class,
     FileReaderService.class,
+    MultiFileReaderService.class,
     BankRepositoryService.class,
     BankRegistryService.class,
     ComponentService.class,
@@ -55,6 +58,7 @@ public final class DefaultBankInterestService implements BankInterestService {
   private final LoggerService logger;
   private final Plugin plugin;
   private final FileReaderService fileReader;
+  private final MultiFileReaderService multiFileReader;
   private final BankRepositoryService bankRepo;
   private final ComponentService componentService;
   private final BankAccountCacheService cacheService;
@@ -70,6 +74,7 @@ public final class DefaultBankInterestService implements BankInterestService {
     this.logger = accessor.getService(LoggerService.class);
     this.plugin = accessor.getService(PaperPluginService.class).plugin();
     this.fileReader = accessor.getService(FileReaderService.class);
+    this.multiFileReader = accessor.getService(MultiFileReaderService.class);
     this.bankRepo = accessor.getService(BankRepositoryService.class);
     this.componentService = accessor.getService(ComponentService.class);
     this.cacheService = accessor.getService(BankAccountCacheService.class);
@@ -109,31 +114,21 @@ public final class DefaultBankInterestService implements BankInterestService {
   public void reload() {
     interestConfigs.clear();
 
-    Path banksDir = plugin.getDataFolder().toPath().resolve("banks");
-    File banksDirFile = banksDir.toFile();
+    multiFileReader.loadAll(Path.of("banks")).forEach((filePath, config) -> {
+      String fileName = filePath.getFileName().toString();
+      if (!fileName.endsWith(".yml")) {
+        return;
+      }
 
-    if (!banksDirFile.exists()) {
-      return;
-    }
-
-    File[] bankFiles = banksDirFile.listFiles((dir, name) -> name.endsWith(".yml"));
-    if (bankFiles == null) {
-      return;
-    }
-
-    for (File bankFile : bankFiles) {
-      String fileName = bankFile.getName();
       String bankId = normalizeBankId(fileName.substring(0, fileName.length() - 4));
-
-      YamlConfiguration config = YamlConfiguration.loadConfiguration(bankFile);
       BankInterestConfig interestConfig = loadInterestConfig(config);
       interestConfigs.put(bankId, interestConfig);
-    }
+    });
 
     logger.logger().log(Level.INFO, "Loaded interest settings for " + interestConfigs.size() + " banks");
   }
 
-  private BankInterestConfig loadInterestConfig(YamlConfiguration config) {
+  private BankInterestConfig loadInterestConfig(FileConfiguration config) {
     if (config == null) {
       return new BankInterestConfig(false, BigDecimal.ZERO, List.of(), ZoneId.systemDefault(), BigDecimal.ZERO, "");
     }
@@ -150,7 +145,7 @@ public final class DefaultBankInterestService implements BankInterestService {
     }
 
     List<String> timesList = config.getStringList("interest.times");
-    if (timesList == null || timesList.isEmpty()) {
+    if (timesList.isEmpty()) {
       timesList = List.of("03:00:00");
     }
 
