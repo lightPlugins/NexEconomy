@@ -119,6 +119,10 @@ level-system:
     # the corresponding currency is used for this level.
     max-balance: '10k'
 
+    # The interest rate applied to the bank balance at this level.
+    # You can use different formats like "0.03" -> 3% or "3%" -> 3%.
+    interest-rate: "3%"
+
     # Permission required to upgrade to this level.
     need-permission: "nexeconomy.bank.level.2"
 
@@ -128,5 +132,6 @@ level-system:
 
   - level: 3
     max-balance: '500k'
+    interest-rate: "3.1%"
     need-permission: "nexeconomy.bank.level.3"
     upgrade-cost: '25k'

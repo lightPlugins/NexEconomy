@@ -2,6 +2,7 @@ package io.nexstudios.nexeconomy.service.bank.level;
 
 import io.nexstudios.nexeconomy.definition.AmountNotation;
 import io.nexstudios.nexeconomy.definition.MantissaAmount;
+import io.nexstudios.nexeconomy.service.bank.cache.BankAccountCacheService;
 import io.nexstudios.nexeconomy.service.bank.definition.BankDefinition;
 import io.nexstudios.nexeconomy.service.bank.registry.BankRegistryService;
 import io.nexstudios.nexeconomy.service.bank.repo.BankRepositoryService;
@@ -11,11 +12,11 @@ import io.nexstudios.serviceregistry.di.Service;
 import io.nexstudios.serviceregistry.di.ServiceAccessor;
 
 import java.math.BigDecimal;
-import java.util.HashMap;
 import java.util.Map;
 import java.util.Optional;
 import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.ConcurrentHashMap;
 
 /**
  * Default implementation of BankLevelService.
@@ -24,21 +25,28 @@ import java.util.concurrent.CompletableFuture;
 @Dependencies({
     BankRegistryService.class,
     BankRepositoryService.class,
+    BankAccountCacheService.class,
     CurrencyRegistryService.class
 })
 public final class DefaultBankLevelService implements BankLevelService, Service {
 
   private final BankRegistryService bankRegistry;
   private final BankRepositoryService repo;
-  private final Map<UUID, Integer> levelCache = new HashMap<>();
+  private final BankAccountCacheService cache;
+  private final Map<UUID, Integer> levelCache = new ConcurrentHashMap<>();
 
   public DefaultBankLevelService(ServiceAccessor accessor) {
     this.bankRegistry = accessor.getService(BankRegistryService.class);
     this.repo = accessor.getService(BankRepositoryService.class);
+    this.cache = accessor.getService(BankAccountCacheService.class);
   }
 
   @Override
   public CompletableFuture<Integer> getLevel(UUID bankAccountId) {
+    if (bankAccountId == null) {
+      return CompletableFuture.completedFuture(1);
+    }
+
     // Check cache first
     Integer cached = levelCache.get(bankAccountId);
     if (cached != null) {
@@ -49,8 +57,8 @@ public final class DefaultBankLevelService implements BankLevelService, Service 
     return repo.findBankAccountById(bankAccountId)
         .thenApply(account -> {
           int level = account.map(a -> {
-            Integer lvl = a.getLevel();
-            return (lvl == null || lvl <= 0) ? 1 : lvl;
+            int lvl = a.getLevel();
+            return lvl <= 0 ? 1 : lvl;
           }).orElse(1);
           levelCache.put(bankAccountId, level);
           return level;
@@ -70,48 +78,37 @@ public final class DefaultBankLevelService implements BankLevelService, Service 
       return CompletableFuture.failedFuture(new IllegalArgumentException("targetLevel must be >= 1"));
     }
 
-    return CompletableFuture.supplyAsync(() -> {
-      synchronized (levelCache) {
-        Integer current = levelCache.getOrDefault(bankAccountId, 1);
-        
-        // Validate: target level must be higher than current
-        if (targetLevel <= current) {
+    int current = levelCache.getOrDefault(bankAccountId, 1);
+    if (targetLevel <= current) {
+      return CompletableFuture.completedFuture(false);
+    }
+
+    return repo.updateBankLevel(bankAccountId, targetLevel)
+        .thenApply(success -> {
+          if (Boolean.TRUE.equals(success)) {
+            invalidate(bankAccountId);
+            if (cache != null) {
+              cache.invalidate(bankAccountId);
+            }
+            return true;
+          }
+
+          invalidate(bankAccountId);
           return false;
-        }
+        })
+        .exceptionally(ex -> {
+          invalidate(bankAccountId);
+          System.err.println("[NexEconomy] ERROR: updateBankLevel failed for account " + bankAccountId + ": " + ex);
+          return false;
+        });
+  }
 
-        // Update cache immediately
-        levelCache.put(bankAccountId, targetLevel);
-        return true;
-      }
-    }).thenCompose(cacheUpdated -> {
-      if (!cacheUpdated) {
-        return CompletableFuture.completedFuture(false);
-      }
-
-      // Persist to database via BankAccountEntity
-      return repo.updateBankLevel(bankAccountId, targetLevel)
-          .thenApply(success -> {
-            if (!success) {
-              System.err.println("[NexEconomy] WARNING: updateBankLevel failed for account " + bankAccountId);
-            }
-            return success;
-          })
-          .exceptionally(ex -> {
-            String msg = ex instanceof Throwable ? ex.toString() : "Unknown error";
-            System.err.println("[NexEconomy] ERROR: updateBankLevel failed for account " + bankAccountId + ": " + msg);
-            if (ex instanceof Throwable) {
-              ((Throwable) ex).printStackTrace();
-            }
-            // Restore cache to previous value since DB failed
-            synchronized (levelCache) {
-              Integer current = levelCache.getOrDefault(bankAccountId, 1);
-              if (current == targetLevel) {
-                levelCache.put(bankAccountId, targetLevel - 1);
-              }
-            }
-            return false;
-          });
-    });
+  @Override
+  public void invalidate(UUID bankAccountId) {
+    if (bankAccountId == null) {
+      return;
+    }
+    levelCache.remove(bankAccountId);
   }
 
   @Override

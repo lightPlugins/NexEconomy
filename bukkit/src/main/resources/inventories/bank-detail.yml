@@ -18,6 +18,7 @@ layout:
     deposit: 19
     deposit-all: 20
     transactions: 22
+    level: 31
     withdraw: 24
     withdraw-all: 25
     back: 49
@@ -95,6 +96,17 @@ items:
       - "<yellow>│ <gray>Bank balance: <yellow><bank-balance></yellow>"
       - ""
       - "<dark_gray>Click to open the history menu</dark_gray>"
+
+  level:
+    item: "minecraft:experience_bottle"
+    display-name: "<dark_gray>» <yellow>Levels"
+    lore:
+      - ""
+      - "<yellow>│ <gray>Current level: <yellow><current-level></yellow> <gray>/ <yellow><max-level></yellow>"
+      - "<yellow>│ <gray>Max balance at current level: <yellow><max-balance></yellow>"
+      - "<yellow>│ <gray>Interest rate at current level: <yellow><interest-rate></yellow>"
+      - ""
+      - "<dark_gray>Click to open the level menu</dark_gray>"
 
   withdraw:
     item: "minecraft:gold_ingot"

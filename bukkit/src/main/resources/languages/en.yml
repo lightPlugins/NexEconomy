@@ -212,6 +212,7 @@ bank:
     insufficient-funds: '<red>Insufficient funds to upgrade. You need <yellow><required></yellow> <gray><currency></gray>.</red>'
     max-level-reached: '<red>Bank <yellow><bank></yellow> has already reached maximum level.</red>'
     permission-denied: '<red>You do not have permission to upgrade this bank.</red>'
+    role-cannot-upgrade: '<red>Your bank role does not allow upgrades.</red>'
     already-at-level: '<red>Bank <yellow><bank></yellow> is already at level <yellow><level></yellow>.</red>'
 
 inventories:

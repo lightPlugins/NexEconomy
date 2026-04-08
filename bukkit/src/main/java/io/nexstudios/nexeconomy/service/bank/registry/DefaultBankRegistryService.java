@@ -84,7 +84,10 @@ public final class DefaultBankRegistryService implements BankRegistryService {
     String defaultMaxBalanceRaw = yml.getString("default-max-balance", "-1");
 
     BankDefinition.MemberSystem memberSystem = parseMemberSystem(yml.getConfigurationSection("member-system"));
-    BankDefinition.InterestSystem interestSystem = parseInterestSystem(yml.getConfigurationSection("interest-system"));
+    ConfigurationSection interestSection = yml.getConfigurationSection("interest");
+    BankDefinition.InterestSystem interestSystem = interestSection != null
+        ? parseInterestSystem(interestSection)
+        : parseInterestSystem(yml.getConfigurationSection("interest-system"));
 
     // Parse list-based "level-system" correctly (it is a YAML list, not a section).
     List<BankDefinition.LevelDefinition> levels = parseLevelsList(yml.getMapList("level-system"));
@@ -112,10 +115,11 @@ public final class DefaultBankRegistryService implements BankRegistryService {
 
       int level = parseInt(raw.get("level"), 1);
       String maxBalance = stringOrDefault(raw, "max-balance", "-1");
+      String interestRate = stringOrDefault(raw, "interest-rate", "");
       String perm = stringOrDefault(raw, "need-permission", "");
       String cost = stringOrDefault(raw, "upgrade-cost", "0");
 
-      out.add(new BankDefinition.LevelDefinition(level, maxBalance, perm, cost));
+      out.add(new BankDefinition.LevelDefinition(level, maxBalance, interestRate, perm, cost));
     }
 
     out.sort(Comparator.comparingInt(BankDefinition.LevelDefinition::level));
@@ -176,42 +180,19 @@ public final class DefaultBankRegistryService implements BankRegistryService {
     }
 
     boolean enabled = sec.getBoolean("enabled", false);
-    double percentage = sec.getDouble("percentage", 0.0);
-    String time = sec.getString("time", "03:00:00");
+    double percentage = parseInterestRateFraction(sec.getString("rate", null));
+    if (percentage <= 0.0) {
+      percentage = sec.getDouble("percentage", 0.0);
+    }
+
+    String time = sec.getString("time", null);
+    if (time == null || time.isBlank()) {
+      List<String> times = sec.getStringList("times");
+      time = times.isEmpty() ? "03:00:00" : times.get(0);
+    }
     String tz = sec.getString("timezone", "Europe/Berlin");
 
     return new BankDefinition.InterestSystem(enabled, percentage, time, tz);
-  }
-
-  private static List<BankDefinition.LevelDefinition> parseLevels(ConfigurationSection sec) {
-    if (sec == null) return List.of();
-
-    List<Map<?, ?>> list = sec.getMapList("");
-    if (list.isEmpty()) {
-      list = sec.getMapList("levels");
-    }
-
-    List<BankDefinition.LevelDefinition> out = new ArrayList<>();
-    List<Map<?, ?>> fromDefaultKey = sec.getMapList("");
-    if (!fromDefaultKey.isEmpty()) {
-      list = fromDefaultKey;
-    } else {
-      list = sec.getMapList("level-system");
-    }
-
-    for (Map<?, ?> raw : list) {
-      if (raw == null) continue;
-
-      int level = parseInt(raw.get("level"), 1);
-      String maxBalance = stringOrDefault(raw, "max-balance", "-1");
-      String perm = stringOrDefault(raw, "need-permission", "");
-      String cost = stringOrDefault(raw, "upgrade-cost", "0");
-
-      out.add(new BankDefinition.LevelDefinition(level, maxBalance, perm, cost));
-    }
-
-    out.sort(Comparator.comparingInt(BankDefinition.LevelDefinition::level));
-    return List.copyOf(out);
   }
 
   private void ensureDefaultsExist(File dir) {
@@ -266,6 +247,18 @@ public final class DefaultBankRegistryService implements BankRegistryService {
       return Integer.parseInt(String.valueOf(raw).trim());
     } catch (Exception ignored) {
       return def;
+    }
+  }
+
+  private static double parseInterestRateFraction(String raw) {
+    if (raw == null || raw.isBlank()) return 0.0;
+
+    try {
+      String cleaned = raw.trim().replace("%", "");
+      double value = Double.parseDouble(cleaned);
+      return value > 1.0 ? value / 100.0 : value;
+    } catch (Exception ignored) {
+      return 0.0;
     }
   }
 }

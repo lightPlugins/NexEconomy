@@ -83,6 +83,7 @@ public final class BankDetailMenu {
   private static final int DEFAULT_DEPOSIT_SLOT = 20;
   private static final int DEFAULT_DEPOSIT_ALL_SLOT = 21;
   private static final int DEFAULT_TRANSACTIONS_SLOT = 22;
+  private static final int DEFAULT_LEVEL_SLOT = 31;
   private static final int DEFAULT_WITHDRAW_SLOT = 23;
   private static final int DEFAULT_WITHDRAW_ALL_SLOT = 24;
   private static final int DEFAULT_BACK_SLOT = 49;
@@ -91,6 +92,7 @@ public final class BankDetailMenu {
   private static int SLOT_DEPOSIT = DEFAULT_DEPOSIT_SLOT;
   private static int SLOT_DEPOSIT_ALL = DEFAULT_DEPOSIT_ALL_SLOT;
   private static int SLOT_TRANSACTIONS = DEFAULT_TRANSACTIONS_SLOT;
+  private static int SLOT_LEVEL = DEFAULT_LEVEL_SLOT;
   private static int SLOT_WITHDRAW = DEFAULT_WITHDRAW_SLOT;
   private static int SLOT_WITHDRAW_ALL = DEFAULT_WITHDRAW_ALL_SLOT;
   private static int SLOT_BACK = DEFAULT_BACK_SLOT;
@@ -111,6 +113,7 @@ public final class BankDetailMenu {
   private static ItemStack depositAllTemplate;
   private static ItemStack depositAllDisabledTemplate;
   private static ItemStack transactionsTemplate;
+  private static ItemStack levelTemplate;
   private static ItemStack withdrawTemplate;
   private static ItemStack withdrawDisabledTemplate;
   private static ItemStack withdrawAllTemplate;
@@ -134,6 +137,7 @@ public final class BankDetailMenu {
     SLOT_DEPOSIT = bankConfig.getInt("layout.slots.deposit", DEFAULT_DEPOSIT_SLOT);
     SLOT_DEPOSIT_ALL = bankConfig.getInt("layout.slots.deposit-all", DEFAULT_DEPOSIT_ALL_SLOT);
     SLOT_TRANSACTIONS = bankConfig.getInt("layout.slots.transactions", DEFAULT_TRANSACTIONS_SLOT);
+    SLOT_LEVEL = bankConfig.getInt("layout.slots.level", DEFAULT_LEVEL_SLOT);
     SLOT_WITHDRAW = bankConfig.getInt("layout.slots.withdraw", DEFAULT_WITHDRAW_SLOT);
     SLOT_WITHDRAW_ALL = bankConfig.getInt("layout.slots.withdraw-all", DEFAULT_WITHDRAW_ALL_SLOT);
     SLOT_BACK = bankConfig.getInt("layout.slots.back", DEFAULT_BACK_SLOT);
@@ -144,6 +148,7 @@ public final class BankDetailMenu {
     depositAllTemplate = configuredItem(bankConfig, "items.deposit-all", Material.IRON_BLOCK);
     depositAllDisabledTemplate = configuredItem(bankConfig, "items.deposit-all-disabled", Material.BARRIER);
     transactionsTemplate = configuredItem(bankConfig, "items.transactions", Material.BOOK);
+    levelTemplate = configuredItem(bankConfig, "items.level", Material.EXPERIENCE_BOTTLE);
     withdrawTemplate = configuredItem(bankConfig, "items.withdraw", Material.GOLD_INGOT);
     withdrawDisabledTemplate = configuredItem(bankConfig, "items.withdraw-disabled", Material.BARRIER);
     withdrawAllTemplate = configuredItem(bankConfig, "items.withdraw-all", Material.GOLD_BLOCK);
@@ -209,6 +214,7 @@ public final class BankDetailMenu {
     setInfoPanel(ctx, data);
     setDepositButtons(ctx, data);
     setTransactionButton(ctx, data);
+    setLevelButton(ctx, data);
     setWithdrawButtons(ctx, data);
     setConfiguredButton(ctx, SLOT_BACK, backTemplate, "items.back", "Back", detailResolver(data), clickCtx -> {
       clickCtx.cancel();
@@ -261,6 +267,7 @@ public final class BankDetailMenu {
     int level = bankView.account() == null || bankView.account().getLevel() <= 0
         ? 1
         : bankView.account().getLevel();
+    int maxLevel = levelService.getMaxLevel(context.bankId());
     MantissaAmount maxBalance = levelService.getMaxBalance(context.bankId(), level);
 
     MantissaAmount remainingCapacity = maxBalance.subtract(bankBalance);
@@ -295,6 +302,8 @@ public final class BankDetailMenu {
         definition,
         currency,
         role,
+        level,
+        maxLevel,
         bankBalance,
         walletBalance,
         maxBalance,
@@ -328,7 +337,7 @@ public final class BankDetailMenu {
 
     LAST_DATA.put(player.getUniqueId(), data);
 
-    if (bankCache != null && bankView.account() != null && role != null && role.withdraw() != null) {
+    if (bankView.account() != null && role != null && role.withdraw() != null) {
       requestWithdrawUsageRefresh(player, context, definition, currency, bankView.account().getId(), role, data, bankCache);
     }
 
@@ -370,6 +379,16 @@ public final class BankDetailMenu {
       clickCtx.cancel();
       if (servicesRef != null) {
         BankTransactionMenu.open(servicesRef, clickCtx.viewer(), data.context().bankId(), data.context().ownerUuid(), data.context().ownerBank(), data.currency());
+      }
+    });
+  }
+
+  private static void setLevelButton(MenuPopulateContext ctx, BankData data) {
+    TagResolver resolver = detailResolver(data);
+    setConfiguredButton(ctx, SLOT_LEVEL, levelTemplate, "items.level", "Levels", resolver, clickCtx -> {
+      clickCtx.cancel();
+      if (servicesRef != null) {
+        BankLevelMenu.open(servicesRef, clickCtx.viewer(), data.context().bankId(), data.context().ownerUuid(), data.context().ownerBank());
       }
     });
   }
@@ -443,6 +462,7 @@ public final class BankDetailMenu {
     String walletBalance = AmountNotation.formatShort(data.walletBalance(), data.currency().fractionDigits());
     String maxBalance = AmountNotation.formatShort(data.maxBalance(), data.currency().fractionDigits());
     String remainingCapacity = AmountNotation.formatShort(data.remainingCapacity(), data.currency().fractionDigits());
+    String interestRate = currentInterestRate(data);
 
     return TagResolver.resolver(List.of(
         Placeholder.parsed("bank-name", data.definition().nameMiniMessage()),
@@ -451,6 +471,9 @@ public final class BankDetailMenu {
         Placeholder.parsed("owner-uuid", data.context().ownerUuid().toString()),
         Placeholder.parsed("bank-type", data.context().ownerBank() ? "Owner" : "Member"),
         Placeholder.parsed("role-name", roleName),
+        Placeholder.parsed("current-level", String.valueOf(data.currentLevel())),
+        Placeholder.parsed("max-level", String.valueOf(data.maxLevel())),
+        Placeholder.parsed("interest-rate", interestRate),
         Placeholder.parsed("bank-balance", bankBalance),
         Placeholder.parsed("wallet-balance", walletBalance),
         Placeholder.parsed("max-balance", maxBalance),
@@ -895,6 +918,37 @@ public final class BankDetailMenu {
     return root == null || root.getMessage() == null ? "unknown error" : root.getMessage();
   }
 
+  private static String currentInterestRate(BankData data) {
+    if (data == null || data.definition() == null || data.definition().levels() == null) {
+      return "—";
+    }
+
+    for (BankDefinition.LevelDefinition levelDef : data.definition().levels()) {
+      if (levelDef != null && levelDef.level() == data.currentLevel()) {
+        return formatInterestRate(levelDef.interestRateRaw());
+      }
+    }
+
+    return "—";
+  }
+
+  private static String formatInterestRate(String raw) {
+    if (raw == null || raw.isBlank()) {
+      return "—";
+    }
+
+    try {
+      String cleaned = raw.trim().replace("%", "");
+      BigDecimal rate = new BigDecimal(cleaned);
+      if (rate.compareTo(BigDecimal.ONE) > 0) {
+        rate = rate.divide(new BigDecimal("100"), 8, java.math.RoundingMode.HALF_UP);
+      }
+      return rate.multiply(new BigDecimal("100")).stripTrailingZeros().toPlainString() + "%";
+    } catch (Exception ignored) {
+      return raw.trim();
+    }
+  }
+
   private record BankContext(String bankId, UUID ownerUuid, boolean ownerBank) {}
 
   private record BankData(
@@ -902,6 +956,8 @@ public final class BankDetailMenu {
       BankDefinition definition,
       CurrencyDefinition currency,
       BankDefinition.RoleDefinition role,
+      int currentLevel,
+      int maxLevel,
       MantissaAmount bankBalance,
       MantissaAmount walletBalance,
       MantissaAmount maxBalance,
@@ -928,6 +984,8 @@ public final class BankDetailMenu {
           definition,
           currency,
           role,
+          currentLevel,
+          maxLevel,
           bankBalance,
           walletBalance,
           maxBalance,

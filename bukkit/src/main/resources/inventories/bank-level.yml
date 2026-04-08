@@ -1,0 +1,99 @@
+# Configuration for the BankLevelMenu.
+# The menu is fully configurable and uses a single centered paged row for bank levels.
+
+menu:
+  title: "<yellow>Bank Levels</yellow>"
+  rows: 6
+  refresh-interval: "1"
+
+layout:
+  slots:
+    back: 49
+
+  levels:
+    bounds:
+      x: 1
+      y: 2
+      width: 7
+      height: 1
+      alignment: "CENTER"
+
+    navigation:
+      previous-slot: 45
+      next-slot: 53
+      show-current-page-amount: true
+      hide-previous-on-first-page: true
+      hide-next-on-last-page: true
+
+items:
+  fill:
+    item: "minecraft:black_stained_glass_pane"
+    display-name: " "
+    lore: []
+
+  level-current:
+    item: "minecraft:lime_stained_glass_pane"
+    display-name: "<dark_gray>» <green>Level <level></green>"
+    lore:
+      - ""
+      - "<yellow>│ <gray>Bank: <yellow><bank-name></yellow>"
+      - "<yellow>│ <gray>Role: <yellow><role-name></yellow>"
+      - "<yellow>│ <gray>Status: <yellow><status></yellow>"
+      - "<yellow>│ <gray>Info: <yellow><upgrade-reason></yellow>"
+      - "<yellow>│ <gray>Current level: <yellow><current-level></yellow> <gray>/ <yellow><max-level></yellow>"
+      - "<yellow>│ <gray>Max balance: <yellow><max-balance></yellow>"
+      - "<yellow>│ <gray>Interest rate: <yellow><interest-rate></yellow>"
+      - ""
+      - "<dark_gray>This level is already unlocked</dark_gray>"
+
+  level-available:
+    item: "minecraft:yellow_stained_glass_pane"
+    display-name: "<dark_gray>» <yellow>Level <level></yellow>"
+    lore:
+      - ""
+      - "<yellow>│ <gray>Bank: <yellow><bank-name></yellow>"
+      - "<yellow>│ <gray>Role: <yellow><role-name></yellow>"
+      - "<yellow>│ <gray>Status: <yellow><status></yellow>"
+      - "<yellow>│ <gray>Info: <yellow><upgrade-reason></yellow>"
+      - "<yellow>│ <gray>Upgrade cost: <yellow><upgrade-cost></yellow>"
+      - "<yellow>│ <gray>Wallet balance: <yellow><wallet-balance></yellow>"
+      - "<yellow>│ <gray>Max balance: <yellow><max-balance></yellow>"
+      - "<yellow>│ <gray>Interest rate: <yellow><interest-rate></yellow>"
+      - "<yellow>│ <gray>Permission: <yellow><permission></yellow>"
+      - ""
+      - "<dark_gray>Click to upgrade</dark_gray>"
+
+  level-locked:
+    item: "minecraft:red_stained_glass_pane"
+    display-name: "<dark_gray>» <red>Level <level></red>"
+    lore:
+      - ""
+      - "<yellow>│ <gray>Bank: <yellow><bank-name></yellow>"
+      - "<yellow>│ <gray>Role: <yellow><role-name></yellow>"
+      - "<yellow>│ <gray>Status: <red><status></red>"
+      - "<yellow>│ <gray>Reason: <red><upgrade-reason></red>"
+      - "<yellow>│ <gray>Required previous level: <yellow><current-level></yellow>"
+      - "<yellow>│ <gray>Max balance: <yellow><max-balance></yellow>"
+      - "<yellow>│ <gray>Interest rate: <yellow><interest-rate></yellow>"
+      - "<yellow>│ <gray>Permission: <yellow><permission></yellow>"
+      - ""
+      - "<dark_gray>Unlock the previous level first</dark_gray>"
+
+  navigation:
+    previous:
+      item: "minecraft:arrow"
+      display-name: "<yellow>Previous Page</yellow>"
+      lore: []
+    next:
+      item: "minecraft:arrow"
+      display-name: "<yellow>Next Page</yellow>"
+      lore: []
+
+  back:
+    item: "minecraft:arrow"
+    display-name: "<yellow>Back</yellow>"
+    lore:
+      - ""
+      - "<dark_gray>Return to the bank details menu</dark_gray>"
+
+

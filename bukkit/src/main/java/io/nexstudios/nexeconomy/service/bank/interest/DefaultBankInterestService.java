@@ -7,8 +7,10 @@ import io.nexstudios.languageservice.service.component.ComponentService;
 import io.nexstudios.nexeconomy.definition.AmountNotation;
 import io.nexstudios.nexeconomy.definition.CurrencyDefinition;
 import io.nexstudios.nexeconomy.definition.MantissaAmount;
+import io.nexstudios.nexeconomy.service.bank.definition.BankDefinition;
 import io.nexstudios.nexeconomy.service.bank.cache.BankAccountCacheService;
 import io.nexstudios.nexeconomy.service.bank.repo.BankRepositoryService;
+import io.nexstudios.nexeconomy.service.bank.registry.BankRegistryService;
 import io.nexstudios.nexeconomy.service.registry.CurrencyRegistryService;
 import io.nexstudios.nexlogic.common.services.logging.LoggerService;
 import io.nexstudios.serviceregistry.di.Dependencies;
@@ -16,6 +18,7 @@ import io.nexstudios.serviceregistry.di.ServiceAccessor;
 import net.kyori.adventure.text.minimessage.tag.resolver.Placeholder;
 import net.kyori.adventure.text.minimessage.tag.resolver.TagResolver;
 import org.bukkit.Bukkit;
+import org.bukkit.entity.Player;
 import org.bukkit.plugin.Plugin;
 import org.bukkit.scheduler.BukkitTask;
 
@@ -28,6 +31,7 @@ import java.time.ZoneId;
 import java.time.ZonedDateTime;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
@@ -41,6 +45,7 @@ import java.util.logging.Level;
     PaperPluginService.class,
     FileReaderService.class,
     BankRepositoryService.class,
+    BankRegistryService.class,
     ComponentService.class,
     BankAccountCacheService.class,
     CurrencyRegistryService.class
@@ -53,6 +58,7 @@ public final class DefaultBankInterestService implements BankInterestService {
   private final BankRepositoryService bankRepo;
   private final ComponentService componentService;
   private final BankAccountCacheService cacheService;
+  private final BankRegistryService bankRegistry;
   private final CurrencyRegistryService currencyRegistry;
 
   private final Map<String, BankInterestConfig> interestConfigs = new ConcurrentHashMap<>();
@@ -67,6 +73,7 @@ public final class DefaultBankInterestService implements BankInterestService {
     this.bankRepo = accessor.getService(BankRepositoryService.class);
     this.componentService = accessor.getService(ComponentService.class);
     this.cacheService = accessor.getService(BankAccountCacheService.class);
+    this.bankRegistry = accessor.getService(BankRegistryService.class);
     this.currencyRegistry = accessor.getService(CurrencyRegistryService.class);
 
     reload();
@@ -76,8 +83,8 @@ public final class DefaultBankInterestService implements BankInterestService {
   public void start() {
     if (started || !plugin.isEnabled()) return;
 
-    // Run scheduler every minute to check if any interest times have been reached
-    this.scheduler = Bukkit.getScheduler().runTaskTimerAsynchronously(
+    // Run the check on the main thread so Bukkit player access stays safe.
+    this.scheduler = Bukkit.getScheduler().runTaskTimer(
         plugin,
         this::checkAndProcessInterests,
         0L,      // Start immediately
@@ -116,7 +123,7 @@ public final class DefaultBankInterestService implements BankInterestService {
 
     for (File bankFile : bankFiles) {
       String fileName = bankFile.getName();
-      String bankId = fileName.substring(0, fileName.length() - 4);
+      String bankId = normalizeBankId(fileName.substring(0, fileName.length() - 4));
 
       FileConfiguration config = fileReader.load(
           Path.of("banks/" + fileName),
@@ -144,7 +151,7 @@ public final class DefaultBankInterestService implements BankInterestService {
     BigDecimal rate;
     try {
       rate = new BigDecimal(rateStr.replace("%", "").trim());
-      rate = rate.divide(new BigDecimal("100"));
+      rate = rate.divide(new BigDecimal("100"), 8, RoundingMode.HALF_UP);
     } catch (Exception ex) {
       rate = BigDecimal.ZERO;
     }
@@ -172,8 +179,8 @@ public final class DefaultBankInterestService implements BankInterestService {
       zoneId = ZoneId.systemDefault();
     }
 
-    BigDecimal maxBalance = BigDecimal.ZERO;
     String maxBalanceStr = config.getString("default-max-balance", "0");
+    BigDecimal maxBalance;
     try {
       maxBalance = new BigDecimal(maxBalanceStr.replace("k", "").replace("m", "").trim());
       if (maxBalanceStr.toLowerCase().contains("k")) {
@@ -199,7 +206,7 @@ public final class DefaultBankInterestService implements BankInterestService {
         String bankId = entry.getKey();
         BankInterestConfig config = entry.getValue();
 
-        if (!config.enabled() || config.rate().compareTo(BigDecimal.ZERO) <= 0 || config.times().isEmpty()) {
+        if (!config.enabled() || config.times().isEmpty() || !hasAnyInterestRate(bankId, config)) {
           continue;
         }
 
@@ -241,13 +248,19 @@ public final class DefaultBankInterestService implements BankInterestService {
 
   @Override
   public void processInterestForBank(String bankId) {
-    BankInterestConfig config = interestConfigs.get(bankId);
+    String normalizedBankId = normalizeBankId(bankId);
+    BankInterestConfig config = interestConfigs.get(normalizedBankId);
     if (config == null || !config.enabled()) {
       return;
     }
 
-    // Collect all online players and process interest for all
-    var onlinePlayers = new ArrayList<>(Bukkit.getOnlinePlayers());
+    BankDefinition bankDef = bankRegistry.bank(normalizedBankId).orElse(null);
+    if (bankDef == null || !bankDef.enabled()) {
+      return;
+    }
+
+    // Collect all online players and process interest only for online owners.
+    var onlinePlayers = new ArrayList<Player>(Bukkit.getOnlinePlayers());
     if (onlinePlayers.isEmpty()) {
       return;
     }
@@ -255,25 +268,16 @@ public final class DefaultBankInterestService implements BankInterestService {
     // Track statistics
     var stats = new AtomicInteger(0);
     var totalInterest = new AtomicReference<>(BigDecimal.ZERO);
-    var futures = new ArrayList<CompletableFuture<Void>>();
-
-    // Process interest for each online player
-    for (var player : onlinePlayers) {
-      var future = processInterestForPlayerAsync(bankId, player.getUniqueId(), config, stats, totalInterest);
-      futures.add(future);
-    }
-
-    // When all futures complete, log summary
-    CompletableFuture.allOf(futures.toArray(new CompletableFuture[0]))
+    processInterestBatch(normalizedBankId, bankDef, config, onlinePlayers, 0, 32, stats, totalInterest)
         .thenRun(() -> {
           int playersProcessed = stats.get();
           if (playersProcessed > 0) {
             String message = String.format(
-                "[BankInterest] Bank '%s' processed interest for %d player(s). Total interest distributed: %s (rate: %.2f%%)",
-                bankId,
+                "[BankInterest] Bank '%s' processed interest for %d player(s). Total interest distributed: %s (rate: %s)",
+                normalizedBankId,
                 playersProcessed,
                 totalInterest.get().toPlainString(),
-                config.rate().multiply(new BigDecimal("100"))
+                describeInterestRate(bankId, config)
             );
             logger.logger().log(Level.INFO, message);
           }
@@ -287,129 +291,283 @@ public final class DefaultBankInterestService implements BankInterestService {
   private CompletableFuture<Void> processInterestForPlayerAsync(
       String bankId,
       UUID playerUuid,
+      BankDefinition bankDef,
       BankInterestConfig config,
       AtomicInteger playersProcessed,
       AtomicReference<BigDecimal> totalInterest
   ) {
-    if (config.rate().compareTo(BigDecimal.ZERO) <= 0) {
+    if (playerUuid == null) {
       return CompletableFuture.completedFuture(null);
     }
 
-    // Find bank account for this player as owner
-    return bankRepo.findAccount(bankId, playerUuid).thenCompose(accountOpt -> {
-      if (accountOpt.isEmpty()) {
+    return cacheService.loadOrCreate(bankId, playerUuid).thenCompose(view -> {
+      if (view == null || view.account() == null || view.account().getId() == null) {
         return CompletableFuture.completedFuture(null);
       }
 
-      var account = accountOpt.get();
-      if (account.getId() == null) {
+      var account = view.account();
+      BigDecimal effectiveRate = resolveEffectiveRate(bankDef, account.getLevel(), config);
+      if (effectiveRate.compareTo(BigDecimal.ZERO) <= 0) {
         return CompletableFuture.completedFuture(null);
       }
 
-      return bankRepo.loadBalance(account.getId()).thenCompose(balance -> {
-        if (balance == null || balance.compareTo(MantissaAmount.zero()) <= 0) {
-          return CompletableFuture.completedFuture(null);
-        }
+      MantissaAmount balance = view.balance() == null ? MantissaAmount.zero() : view.balance();
+      if (balance.compareTo(MantissaAmount.zero()) <= 0) {
+        return CompletableFuture.completedFuture(null);
+      }
 
-        BigDecimal currentHuman = balance.toHuman();
-        BigDecimal interestAmount = currentHuman.multiply(config.rate());
+      BigDecimal currentHuman = balance.toHuman();
+      BigDecimal interestAmount = currentHuman.multiply(effectiveRate);
 
-        if (interestAmount.compareTo(BigDecimal.ZERO) <= 0) {
-          return CompletableFuture.completedFuture(null);
-        }
+      if (interestAmount.compareTo(BigDecimal.ZERO) <= 0) {
+        return CompletableFuture.completedFuture(null);
+      }
 
-        // Check if bank has reached max balance
-        BigDecimal maxBalance = config.maxBalance();
-        BigDecimal newBalance = currentHuman.add(interestAmount);
-        BigDecimal appliedInterest = interestAmount;
-        boolean isCapped = false;
+      BigDecimal maxBalance = resolveEffectiveMaxBalance(bankDef, account.getLevel(), config);
+      BigDecimal newBalance = currentHuman.add(interestAmount);
+      BigDecimal appliedInterest = interestAmount;
+      boolean isCapped = false;
 
-        if (maxBalance.compareTo(BigDecimal.ZERO) > 0 && newBalance.compareTo(maxBalance) > 0) {
-          // Interest would exceed max balance
-          if (currentHuman.compareTo(maxBalance) >= 0) {
-            // Already at or above max balance - no interest earned
-            var onlinePlayer = Bukkit.getPlayer(playerUuid);
-            if (onlinePlayer != null && onlinePlayer.isOnline()) {
-              var component = componentService.builder(onlinePlayer, "bank.interest.max-balance-reached", "NotDefined", true)
-                  .resolver(TagResolver.resolver(
-                      Placeholder.parsed("bank", bankId)
-                  ))
-                  .build();
-              onlinePlayer.sendMessage(component);
-            }
-            return CompletableFuture.completedFuture(null);
-          } else {
-            // Cap the interest to fit within max balance
-            appliedInterest = maxBalance.subtract(currentHuman);
-            isCapped = true;
-          }
-        }
-
-        // Make final copies for use in lambda
-        final BigDecimal finalAppliedInterest = appliedInterest;
-        final boolean finalIsCapped = isCapped;
-
-        // Apply interest
-        MantissaAmount interestMantissa = MantissaAmount.of(finalAppliedInterest, 0);
-        
-        // Update statistics
-        playersProcessed.incrementAndGet();
-        totalInterest.updateAndGet(current -> current.add(finalAppliedInterest));
-
-        return bankRepo.applyBalanceDelta(account.getId(), interestMantissa).thenRun(() -> {
-          // Invalidate cache to force fresh load on next query
-          cacheService.invalidate(account.getId());
-
-          // Notify player if still online using ComponentService
+      if (maxBalance.compareTo(BigDecimal.ZERO) > 0 && newBalance.compareTo(maxBalance) > 0) {
+        if (currentHuman.compareTo(maxBalance) >= 0) {
           var onlinePlayer = Bukkit.getPlayer(playerUuid);
           if (onlinePlayer != null && onlinePlayer.isOnline()) {
-            // Get currency using the currency ID from bank config, not bankId
-            CurrencyDefinition currencyDef = currencyRegistry.currency(config.currencyId());
-            int fractionDigits = currencyDef != null ? currencyDef.fractionDigits() : 0;
-
-            // Convert to MantissaAmount with exp3=0, then toHuman() to get human-readable format
-            MantissaAmount appliedInterestMantissa = MantissaAmount.of(finalAppliedInterest, 0);
-            BigDecimal appliedInterestHuman = appliedInterestMantissa.toHuman();
-            String formattedAppliedInterest = AmountNotation.formatShort(appliedInterestMantissa, fractionDigits);
-            String currencySymbol = determineCurrencySymbol(appliedInterestHuman, currencyDef);
-
-            if (finalIsCapped) {
-              MantissaAmount earnedMantissa = MantissaAmount.of(interestAmount, 0);
-              BigDecimal earnedHuman = earnedMantissa.toHuman();
-              String formattedEarned = AmountNotation.formatShort(earnedMantissa, fractionDigits);
-              String earnedCurrencySymbol = determineCurrencySymbol(earnedHuman, currencyDef);
-              String cappedCurrencySymbol = determineCurrencySymbol(appliedInterestHuman, currencyDef);
-
-              var component = componentService.builder(onlinePlayer, "bank.interest.earned-capped", "NotDefined", true)
-                  .resolver(TagResolver.resolver(
-                      Placeholder.parsed("bank", bankId),
-                      Placeholder.parsed("earned", formattedEarned),
-                      Placeholder.parsed("earned-currency", earnedCurrencySymbol),
-                      Placeholder.parsed("capped", formattedAppliedInterest),
-                      Placeholder.parsed("capped-currency", cappedCurrencySymbol)
-                  ))
-                  .build();
-              onlinePlayer.sendMessage(component);
-            } else {
-              var component = componentService.builder(onlinePlayer, "bank.interest.earned", "NotDefined", true)
-                  .resolver(TagResolver.resolver(
-                      Placeholder.parsed("bank", bankId),
-                      Placeholder.parsed("amount", formattedAppliedInterest),
-                      Placeholder.parsed("currency", currencySymbol)
-                  ))
-                  .build();
-              onlinePlayer.sendMessage(component);
-            }
+            var component = componentService.builder(onlinePlayer, "bank.interest.max-balance-reached", "NotDefined", true)
+                .resolver(TagResolver.resolver(
+                    Placeholder.parsed("bank", bankId)
+                ))
+                .build();
+            onlinePlayer.sendMessage(component);
           }
-        }).exceptionally(ex -> {
-          logger.logger().log(Level.WARNING, "Failed to apply interest for bank " + bankId + " player " + playerUuid, ex);
-          return null;
-        });
+          return CompletableFuture.completedFuture(null);
+        }
+
+        appliedInterest = maxBalance.subtract(currentHuman);
+        isCapped = true;
+      }
+
+      final BigDecimal finalAppliedInterest = appliedInterest;
+      final boolean finalIsCapped = isCapped;
+      final BigDecimal finalInterestAmount = interestAmount;
+
+      MantissaAmount interestMantissa = MantissaAmount.of(finalAppliedInterest, 0);
+      playersProcessed.incrementAndGet();
+      totalInterest.updateAndGet(current -> current.add(finalAppliedInterest));
+
+      return bankRepo.applyBalanceDelta(account.getId(), interestMantissa).thenRun(() -> {
+        cacheService.invalidate(account.getId());
+
+        var onlinePlayer = Bukkit.getPlayer(playerUuid);
+        if (onlinePlayer != null && onlinePlayer.isOnline()) {
+          CurrencyDefinition currencyDef = currencyRegistry.currency(config.currencyId());
+          int fractionDigits = currencyDef != null ? currencyDef.fractionDigits() : 0;
+
+          MantissaAmount appliedInterestMantissa = MantissaAmount.of(finalAppliedInterest, 0);
+          BigDecimal appliedInterestHuman = appliedInterestMantissa.toHuman();
+          String formattedAppliedInterest = AmountNotation.formatShort(appliedInterestMantissa, fractionDigits);
+          String currencySymbol = determineCurrencySymbol(appliedInterestHuman, currencyDef);
+
+          if (finalIsCapped) {
+            MantissaAmount earnedMantissa = MantissaAmount.of(finalInterestAmount, 0);
+            BigDecimal earnedHuman = earnedMantissa.toHuman();
+            String formattedEarned = AmountNotation.formatShort(earnedMantissa, fractionDigits);
+            String earnedCurrencySymbol = determineCurrencySymbol(earnedHuman, currencyDef);
+            String cappedCurrencySymbol = determineCurrencySymbol(appliedInterestHuman, currencyDef);
+
+            var component = componentService.builder(onlinePlayer, "bank.interest.earned-capped", "NotDefined", true)
+                .resolver(TagResolver.resolver(
+                    Placeholder.parsed("bank", bankId),
+                    Placeholder.parsed("earned", formattedEarned),
+                    Placeholder.parsed("earned-currency", earnedCurrencySymbol),
+                    Placeholder.parsed("capped", formattedAppliedInterest),
+                    Placeholder.parsed("capped-currency", cappedCurrencySymbol)
+                ))
+                .build();
+            onlinePlayer.sendMessage(component);
+          } else {
+            var component = componentService.builder(onlinePlayer, "bank.interest.earned", "NotDefined", true)
+                .resolver(TagResolver.resolver(
+                    Placeholder.parsed("bank", bankId),
+                    Placeholder.parsed("amount", formattedAppliedInterest),
+                    Placeholder.parsed("currency", currencySymbol)
+                ))
+                .build();
+            onlinePlayer.sendMessage(component);
+          }
+        }
+      }).exceptionally(ex -> {
+        logger.logger().log(Level.WARNING, "Failed to apply interest for bank " + bankId + " player " + playerUuid, ex);
+        return null;
       });
     }).exceptionally(ex -> {
       logger.logger().log(Level.WARNING, "Error processing interest for bank " + bankId + " player " + playerUuid, ex);
       return null;
     });
+  }
+
+  private CompletableFuture<Void> processInterestBatch(
+      String bankId,
+      BankDefinition bankDef,
+      BankInterestConfig config,
+      List<Player> onlinePlayers,
+      int startIndex,
+      int batchSize,
+      AtomicInteger playersProcessed,
+      AtomicReference<BigDecimal> totalInterest
+  ) {
+    if (onlinePlayers == null || startIndex >= onlinePlayers.size()) {
+      return CompletableFuture.completedFuture(null);
+    }
+
+    int endIndex = Math.min(onlinePlayers.size(), startIndex + Math.max(1, batchSize));
+    List<CompletableFuture<Void>> futures = new ArrayList<>(endIndex - startIndex);
+
+    for (int i = startIndex; i < endIndex; i++) {
+      Player player = onlinePlayers.get(i);
+      if (player == null) continue;
+      futures.add(processInterestForPlayerAsync(bankId, player.getUniqueId(), bankDef, config, playersProcessed, totalInterest));
+    }
+
+    return CompletableFuture.allOf(futures.toArray(new CompletableFuture[0]))
+        .thenCompose(ignored -> processInterestBatch(bankId, bankDef, config, onlinePlayers, endIndex, batchSize, playersProcessed, totalInterest));
+  }
+
+  private BigDecimal resolveEffectiveRate(BankDefinition bankDef, Integer level, BankInterestConfig config) {
+    BigDecimal baseRate = resolveBaseRate(config);
+    if (bankDef == null || level == null || level <= 0) {
+      return baseRate;
+    }
+
+    BankDefinition.LevelDefinition levelDef = findLevel(bankDef, level);
+    if (levelDef == null) {
+      return baseRate;
+    }
+
+    BigDecimal levelRate = parseRate(levelDef.interestRateRaw());
+    return levelRate.compareTo(BigDecimal.ZERO) > 0 ? levelRate : baseRate;
+  }
+
+  private BigDecimal resolveEffectiveMaxBalance(BankDefinition bankDef, Integer level, BankInterestConfig config) {
+    BigDecimal baseMax = config.maxBalance();
+    if (bankDef == null || level == null || level <= 0) {
+      return baseMax;
+    }
+
+    BankDefinition.LevelDefinition levelDef = findLevel(bankDef, level);
+    if (levelDef == null) {
+      return baseMax;
+    }
+
+    String raw = levelDef.maxBalanceRaw();
+    if (raw == null || raw.isBlank()) {
+      return baseMax;
+    }
+
+    return parseAmount(raw);
+  }
+
+  private BigDecimal resolveBaseRate(BankInterestConfig config) {
+    return config == null || config.rate() == null ? BigDecimal.ZERO : config.rate();
+  }
+
+  private static BankDefinition.LevelDefinition findLevel(BankDefinition def, int level) {
+    if (def == null || def.levels() == null || def.levels().isEmpty()) {
+      return null;
+    }
+
+    for (BankDefinition.LevelDefinition ld : def.levels()) {
+      if (ld != null && ld.level() == level) {
+        return ld;
+      }
+    }
+    return null;
+  }
+
+  private static String normalizeBankId(String bankId) {
+    return bankId == null ? "" : bankId.trim().toLowerCase(Locale.ROOT);
+  }
+
+  private static BigDecimal parseRate(String raw) {
+    if (raw == null || raw.isBlank()) {
+      return BigDecimal.ZERO;
+    }
+
+    try {
+      String cleaned = raw.trim().replace("%", "");
+      BigDecimal value = new BigDecimal(cleaned);
+      return value.compareTo(BigDecimal.ONE) > 0 ? value.divide(new BigDecimal("100"), 8, RoundingMode.HALF_UP) : value;
+    } catch (Exception ignored) {
+      return BigDecimal.ZERO;
+    }
+  }
+
+  private static BigDecimal parseAmount(String raw) {
+    if (raw == null || raw.isBlank()) {
+      return BigDecimal.ZERO;
+    }
+
+    try {
+      String cleaned = raw.trim().toLowerCase();
+      BigDecimal value = new BigDecimal(cleaned.replace("k", "").replace("m", ""));
+      if (cleaned.contains("k")) {
+        return value.multiply(new BigDecimal("1000"));
+      }
+      if (cleaned.contains("m")) {
+        return value.multiply(new BigDecimal("1000000"));
+      }
+      return value;
+    } catch (Exception ignored) {
+      return BigDecimal.ZERO;
+    }
+  }
+
+  private static String formatRatePercent(BigDecimal rate) {
+    if (rate == null) {
+      return "0%";
+    }
+
+    return rate.multiply(new BigDecimal("100")).stripTrailingZeros().toPlainString() + "%";
+  }
+
+  private boolean hasAnyInterestRate(String bankId, BankInterestConfig config) {
+    if (resolveBaseRate(config).compareTo(BigDecimal.ZERO) > 0) {
+      return true;
+    }
+
+    BankDefinition bankDef = bankRegistry.bank(bankId).orElse(null);
+    if (bankDef == null || bankDef.levels() == null || bankDef.levels().isEmpty()) {
+      return false;
+    }
+
+    for (BankDefinition.LevelDefinition levelDef : bankDef.levels()) {
+      if (levelDef == null) continue;
+      if (parseRate(levelDef.interestRateRaw()).compareTo(BigDecimal.ZERO) > 0) {
+        return true;
+      }
+    }
+
+    return false;
+  }
+
+  private String describeInterestRate(String bankId, BankInterestConfig config) {
+    BigDecimal baseRate = resolveBaseRate(config);
+    BankDefinition bankDef = bankRegistry.bank(bankId).orElse(null);
+
+    if (bankDef == null || bankDef.levels() == null || bankDef.levels().isEmpty()) {
+      return formatRatePercent(baseRate);
+    }
+
+    boolean hasLevelSpecificRate = false;
+    for (BankDefinition.LevelDefinition levelDef : bankDef.levels()) {
+      if (levelDef == null) continue;
+      BigDecimal levelRate = parseRate(levelDef.interestRateRaw());
+      if (levelRate.compareTo(BigDecimal.ZERO) > 0 && levelRate.compareTo(baseRate) != 0) {
+        hasLevelSpecificRate = true;
+        break;
+      }
+    }
+
+    return hasLevelSpecificRate ? "level-based" : formatRatePercent(baseRate);
   }
 
   private String determineCurrencySymbol(BigDecimal amount, CurrencyDefinition currencyDef) {

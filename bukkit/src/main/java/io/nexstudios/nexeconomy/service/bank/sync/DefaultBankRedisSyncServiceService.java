@@ -7,6 +7,7 @@ import io.nexstudios.databaseservice.bukkit.service.api.pubsub.RedisPubSubServic
 import io.nexstudios.framework.paper.services.plugin.PaperPluginService;
 import io.nexstudios.nexeconomy.NexEconomyPlugin;
 import io.nexstudios.nexeconomy.service.bank.cache.BankAccountCacheService;
+import io.nexstudios.nexeconomy.service.bank.level.BankLevelService;
 import io.nexstudios.nexlogic.common.services.logging.LoggerService;
 import io.nexstudios.serviceregistry.di.Dependencies;
 import io.nexstudios.serviceregistry.di.ServiceAccessor;
@@ -15,18 +16,14 @@ import org.bukkit.plugin.Plugin;
 import java.time.Duration;
 import java.util.Map;
 import java.util.Objects;
-import java.util.Optional;
 import java.util.UUID;
 
-/**
- * Redis Pub/Sub sync for bank account caches.
- *
- * The actual local cache will be implemented next; for now this provides the wire protocol.
- */
+/** Redis Pub/Sub sync for bank account caches. */
 @Dependencies({
     LoggerService.class,
     PaperPluginService.class,
-    BankAccountCacheService.class
+    BankAccountCacheService.class,
+    BankLevelService.class
 })
 public final class DefaultBankRedisSyncServiceService implements BankRedisSyncService, AutoCloseable {
 
@@ -37,8 +34,9 @@ public final class DefaultBankRedisSyncServiceService implements BankRedisSyncSe
   private final Plugin plugin;
 
   private final BankAccountCacheService cache;
+  private final BankLevelService levelService;
 
-  private final Optional<RedisPubSubService> pubSubOpt;
+  private final RedisPubSubService pubSub;
 
   private PubSubSubscription subscription;
 
@@ -47,14 +45,13 @@ public final class DefaultBankRedisSyncServiceService implements BankRedisSyncSe
     this.plugin = accessor.getService(PaperPluginService.class).plugin();
 
     this.cache = accessor.getService(BankAccountCacheService.class);
+    this.levelService = accessor.getService(BankLevelService.class);
 
-    this.pubSubOpt = NexEconomyPlugin.getNexLogicService()
-        .findService(RedisPubSubService.class);
+    this.pubSub = NexEconomyPlugin.getNexLogicService().findService(RedisPubSubService.class).orElse(null);
   }
 
   @Override
   public void start() {
-    RedisPubSubService pubSub = pubSubOpt.orElse(null);
     if (pubSub == null) {
       logger.logger().warning("Redis Pub/Sub service not available. Bank cross-server sync is disabled.");
       return;
@@ -81,7 +78,6 @@ public final class DefaultBankRedisSyncServiceService implements BankRedisSyncSe
   public void publishInvalidateAccount(UUID bankAccountId) {
     if (bankAccountId == null) return;
 
-    RedisPubSubService pubSub = pubSubOpt.orElse(null);
     if (pubSub == null) return;
     if (!pubSub.isEnabled()) return;
     if (!pubSub.isConnected()) return;
@@ -96,7 +92,6 @@ public final class DefaultBankRedisSyncServiceService implements BankRedisSyncSe
   }
 
   private void handle(PubSubMessage msg) {
-    RedisPubSubService pubSub = pubSubOpt.orElse(null);
     if (pubSub == null) return;
 
     // cross-server only
@@ -109,6 +104,9 @@ public final class DefaultBankRedisSyncServiceService implements BankRedisSyncSe
         java.util.UUID accountId = java.util.UUID.fromString(id);
         if (cache != null) {
           cache.invalidate(accountId);
+        }
+        if (levelService != null) {
+          levelService.invalidate(accountId);
         }
       } catch (IllegalArgumentException ignored) {
         // ignore invalid payload

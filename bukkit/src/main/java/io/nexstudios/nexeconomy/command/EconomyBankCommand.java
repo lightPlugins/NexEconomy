@@ -13,10 +13,12 @@ import io.nexstudios.nexeconomy.definition.CurrencyDefinition;
 import io.nexstudios.nexeconomy.definition.CurrencyType;
 import io.nexstudios.nexeconomy.definition.MantissaAmount;
 import io.nexstudios.nexeconomy.service.bank.BankService;
+import io.nexstudios.nexeconomy.service.bank.cache.BankAccountCacheService;
 import io.nexstudios.nexeconomy.service.bank.definition.BankDefinition;
 import io.nexstudios.nexeconomy.service.bank.level.BankLevelService;
 import io.nexstudios.nexeconomy.service.bank.menu.bank.BankOverviewMenu;
 import io.nexstudios.nexeconomy.service.bank.repo.BankRepositoryService;
+import io.nexstudios.nexeconomy.service.bank.sync.BankRedisSyncService;
 import io.nexstudios.nexeconomy.service.bank.repo.InviteLookupRow;
 import io.nexstudios.nexeconomy.service.bank.transaction.BankTransactionService;
 import io.nexstudios.nexeconomy.service.economy.EconomyService;
@@ -37,6 +39,7 @@ import java.time.ZoneId;
 import java.time.format.DateTimeFormatter;
 import java.util.List;
 import java.util.Locale;
+import java.util.Map;
 import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
 import java.util.stream.Collectors;
@@ -51,6 +54,8 @@ import java.util.stream.Collectors;
     CurrencyRegistryService.class,
     BankTransactionService.class,
     BankLevelService.class,
+    BankAccountCacheService.class,
+    BankRedisSyncService.class,
     EconomyService.class
 })
 public final class EconomyBankCommand implements Service {
@@ -65,6 +70,8 @@ public final class EconomyBankCommand implements Service {
   private final CurrencyRegistryService currencies;
   private final BankTransactionService txService;
   private final BankLevelService levelService;
+  private final BankAccountCacheService bankCache;
+  private final BankRedisSyncService redisSync;
   private final EconomyService economy;
   private final ServiceAccessor services;
 
@@ -74,6 +81,8 @@ public final class EconomyBankCommand implements Service {
     this.currencies = accessor.getService(CurrencyRegistryService.class);
     this.txService = accessor.getService(BankTransactionService.class);
     this.levelService = accessor.getService(BankLevelService.class);
+    this.bankCache = accessor.getService(BankAccountCacheService.class);
+    this.redisSync = accessor.getService(BankRedisSyncService.class);
     this.economy = accessor.getService(EconomyService.class);
     this.services = accessor;
   }
@@ -1100,6 +1109,13 @@ public final class EconomyBankCommand implements Service {
         }
 
         String bankName = bankDef.get().nameMiniMessage();
+        BankDefinition.RoleDefinition role = resolveOwnerRole(bankDef.get());
+        if (role != null && !role.canUpgrade()) {
+          sender.sendMessage(components.builder(sender, "bank.level.role-cannot-upgrade", "NotDefined", true)
+              .resolver(TagResolver.resolver(Placeholder.parsed("bank", bankName)))
+              .build());
+          return CompletableFuture.completedFuture(null);
+        }
 
         return levelService.getLevel(bankAccountId).thenCompose(currentLevel -> {
           int maxLevel = levelService.getMaxLevel(bankId);
@@ -1156,6 +1172,13 @@ public final class EconomyBankCommand implements Service {
         }
 
         String bankName = bankDef.get().nameMiniMessage();
+        BankDefinition.RoleDefinition role = resolveOwnerRole(bankDef.get());
+        if (role != null && !role.canUpgrade()) {
+          sender.sendMessage(components.builder(sender, "bank.level.role-cannot-upgrade", "NotDefined", true)
+              .resolver(TagResolver.resolver(Placeholder.parsed("bank", bankName)))
+              .build());
+          return CompletableFuture.completedFuture(null);
+        }
 
         return levelService.getLevel(bankAccountId).thenCompose(currentLevel -> {
           int targetLevel = currentLevel + 1;
@@ -1219,6 +1242,13 @@ public final class EconomyBankCommand implements Service {
                     return null;
                   }
 
+                  if (bankCache != null) {
+                    bankCache.invalidate(bankAccountId);
+                  }
+                  if (redisSync != null) {
+                    redisSync.publishInvalidateAccount(bankAccountId);
+                  }
+
                   sender.sendMessage(components.builder(sender, "bank.level.upgraded", "NotDefined", true)
                       .resolver(TagResolver.resolver(
                           Placeholder.parsed("bank", bankName),
@@ -1244,6 +1274,20 @@ public final class EconomyBankCommand implements Service {
 
   private static String normalize(String s) {
     return s == null ? "" : s.trim().toLowerCase(Locale.ROOT);
+  }
+
+  private static BankDefinition.RoleDefinition resolveOwnerRole(BankDefinition def) {
+    if (def == null || def.memberSystem() == null || def.memberSystem().rolesByIdLower() == null) {
+      return null;
+    }
+
+    Map<String, BankDefinition.RoleDefinition> roles = def.memberSystem().rolesByIdLower();
+    BankDefinition.RoleDefinition ownerRole = roles.get("owner");
+    if (ownerRole != null) {
+      return ownerRole;
+    }
+
+    return roles.get("member");
   }
 }
 

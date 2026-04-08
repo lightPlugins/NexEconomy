@@ -25,6 +25,11 @@ public interface BankLevelService extends Service {
   CompletableFuture<Boolean> upgrade(UUID bankAccountId, int targetLevel);
 
   /**
+   * Invalidate any cached level information for the given bank account.
+   */
+  void invalidate(UUID bankAccountId);
+
+  /**
    * Check if a bank can be upgraded to the target level.
    * Validates: current level < target level <= max level.
    * Note: Permission checking is delegated to the command layer.

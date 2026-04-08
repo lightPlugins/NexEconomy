@@ -52,6 +52,7 @@ public record BankDefinition(
   public record LevelDefinition(
       int level,
       String maxBalanceRaw,
+      String interestRateRaw,
       String permission,
       String upgradeCostRaw
   ) {}
