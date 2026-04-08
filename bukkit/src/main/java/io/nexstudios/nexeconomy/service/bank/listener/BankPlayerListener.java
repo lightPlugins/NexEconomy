@@ -12,7 +12,10 @@ import org.bukkit.event.EventHandler;
 import org.bukkit.event.player.PlayerJoinEvent;
 import org.bukkit.event.player.PlayerQuitEvent;
 
+import java.util.ArrayList;
+import java.util.List;
 import java.util.UUID;
+import java.util.concurrent.CompletableFuture;
 
 @Dependencies({
     BankRegistryService.class,
@@ -36,16 +39,21 @@ public final class BankPlayerListener implements ServiceListener {
     Player p = e.getPlayer();
     UUID uuid = p.getUniqueId();
 
+    List<CompletableFuture<?>> initialAccounts = new ArrayList<>();
+
     for (BankDefinition def : bankRegistry.banks()) {
       if (def == null) continue;
       if (!def.enabled()) continue;
       if (!def.unlockedByDefault()) continue;
 
-      bankService.getOrCreateAccount(def.idLower(), uuid);
+      initialAccounts.add(bankService.getOrCreateAccount(def.idLower(), uuid));
     }
 
     if (presence != null) {
-      presence.onPlayerJoin(uuid);
+      CompletableFuture
+          .allOf(initialAccounts.toArray(CompletableFuture[]::new))
+          .handle((ignored, error) -> null)
+          .thenRun(() -> presence.onPlayerJoin(uuid));
     }
   }
 

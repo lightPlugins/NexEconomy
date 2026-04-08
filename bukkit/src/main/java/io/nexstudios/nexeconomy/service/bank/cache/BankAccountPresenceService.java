@@ -33,7 +33,7 @@ public final class BankAccountPresenceService implements Service {
 
     repo.findBankAccountsForMember(playerUuid).thenAccept(refs -> {
       if (refs == null || refs.isEmpty()) {
-        accountsByPlayer.put(playerUuid, Set.of());
+        accountsByPlayer.remove(playerUuid);
         return;
       }
 
@@ -56,7 +56,7 @@ public final class BankAccountPresenceService implements Service {
 
       accountsByPlayer.put(playerUuid, Set.copyOf(accountIds));
     }).exceptionally(ex -> {
-      accountsByPlayer.put(playerUuid, Set.of());
+      accountsByPlayer.remove(playerUuid);
       return null;
     });
   }
@@ -75,7 +75,7 @@ public final class BankAccountPresenceService implements Service {
     if (p == null || !p.isOnline()) return OptionalInt.empty();
 
     Set<UUID> accountIds = accountsByPlayer.get(playerUuid);
-    if (accountIds == null) return OptionalInt.empty();
+    if (accountIds == null || accountIds.isEmpty()) return OptionalInt.empty();
 
     int count = 0;
 
@@ -178,7 +178,7 @@ public final class BankAccountPresenceService implements Service {
     if (p == null || !p.isOnline()) return Optional.empty();
 
     Set<UUID> ids = accountsByPlayer.get(playerUuid);
-    if (ids == null) return Optional.empty();
+    if (ids == null || ids.isEmpty()) return Optional.empty();
 
     return Optional.of(Set.copyOf(ids));
   }
