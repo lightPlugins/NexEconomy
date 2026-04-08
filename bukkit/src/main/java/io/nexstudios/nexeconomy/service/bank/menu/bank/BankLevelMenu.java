@@ -12,6 +12,7 @@ import io.nexstudios.menuservice.common.api.item.MenuItem;
 import io.nexstudios.menuservice.common.api.page.*;
 import io.nexstudios.menuservice.common.api.registry.DuplicateStrategy;
 import io.nexstudios.nexeconomy.NexEconomyPlugin;
+import io.nexstudios.nexeconomy.definition.AmountNotation;
 import io.nexstudios.nexeconomy.definition.CurrencyDefinition;
 import io.nexstudios.nexeconomy.definition.MantissaAmount;
 import io.nexstudios.nexeconomy.service.bank.BankService;
@@ -81,9 +82,10 @@ public final class BankLevelMenu {
   private static ConfigItemService configItemService;
   private static FileConfiguration bankConfig;
   private static ItemStack fillTemplate;
-  private static ItemStack currentTemplate;
-  private static ItemStack availableTemplate;
-  private static ItemStack lockedTemplate;
+  private static ItemStack unlockedTemplate;
+  private static ItemStack previousNeedsUnlockedTemplate;
+  private static ItemStack conditionsNotMetTemplate;
+  private static ItemStack readyForUnlockTemplate;
   private static ItemStack previousTemplate;
   private static ItemStack nextTemplate;
   private static ItemStack backTemplate;
@@ -105,9 +107,10 @@ public final class BankLevelMenu {
 
     SLOT_BACK = bankConfig.getInt("layout.slots.back", DEFAULT_BACK_SLOT);
     fillTemplate = configuredItem(bankConfig, "items.fill", Material.BLACK_STAINED_GLASS_PANE);
-    currentTemplate = configuredItem(bankConfig, "items.level-current", Material.LIME_STAINED_GLASS_PANE);
-    availableTemplate = configuredItem(bankConfig, "items.level-available", Material.YELLOW_STAINED_GLASS_PANE);
-    lockedTemplate = configuredItem(bankConfig, "items.level-locked", Material.RED_STAINED_GLASS_PANE);
+    unlockedTemplate = configuredItem(bankConfig, "items.unlocked", Material.LIME_STAINED_GLASS_PANE);
+    previousNeedsUnlockedTemplate = configuredItem(bankConfig, "items.previous-needs-to-be-unlocked", Material.RED_STAINED_GLASS_PANE);
+    conditionsNotMetTemplate = configuredItem(bankConfig, "items.conditions-not-met", Material.RED_STAINED_GLASS_PANE);
+    readyForUnlockTemplate = configuredItem(bankConfig, "items.ready-for-unlock", Material.YELLOW_STAINED_GLASS_PANE);
     previousTemplate = configuredItem(bankConfig, "items.navigation.previous", Material.ARROW);
     nextTemplate = configuredItem(bankConfig, "items.navigation.next", Material.ARROW);
     backTemplate = configuredItem(bankConfig, "items.back", Material.ARROW);
@@ -209,7 +212,11 @@ public final class BankLevelMenu {
       boolean roleCanUpgrade = context.ownerUuid().equals(viewerUuid) || (role != null && role.canUpgrade());
       String roleName = role == null ? "unknown" : role.nameMiniMessage();
 
-      List<LevelEntry> out = new ArrayList<>(levels.length);
+      List<LevelEntry> out = new ArrayList<>(levels.length + 1);
+      if (findLevel(definition, 1) == null) {
+        out.add(buildDefaultLevelOneEntry(context, definition, bankView, currency, roleName, currentLevel, maxLevel, walletBalance, walletShown));
+      }
+
       for (BankDefinition.LevelDefinition levelDef : levels) {
         if (levelDef == null) continue;
 
@@ -218,14 +225,14 @@ public final class BankLevelMenu {
         MantissaAmount maxBalance = levelService.getMaxBalance(context.bankId(), level);
         String permission = levelDef.permission() == null ? "" : levelDef.permission().trim();
         String interestRate = formatInterestRate(levelDef.interestRateRaw());
-        boolean owned = level <= currentLevel;
         boolean next = level == currentLevel + 1;
         boolean hasPermission = permission.isBlank() || player.hasPermission(permission);
         boolean hasFunds = walletBalance.compareTo(upgradeCost) >= 0;
         boolean canUpgrade = next && level <= maxLevel && roleCanUpgrade && hasPermission && hasFunds;
-        LevelState state = owned ? LevelState.CURRENT : canUpgrade ? LevelState.AVAILABLE : LevelState.LOCKED;
-        String status = owned ? "Unlocked" : canUpgrade ? "Ready to upgrade" : resolveUpgradeReason(level, currentLevel, maxLevel, roleCanUpgrade, hasPermission, hasFunds);
-        String upgradeReason = owned ? "Already unlocked" : canUpgrade ? "Click to upgrade" : status;
+        LevelState state = resolveState(level, currentLevel, roleCanUpgrade, hasPermission, hasFunds);
+        String status = resolveStatus(state);
+        String upgradeReason = resolveUpgradeReason(state, currentLevel, roleCanUpgrade, hasPermission, hasFunds, walletBalance, upgradeCost, currency);
+        String missingFunds = formatMissingFunds(walletBalance, upgradeCost, currency);
 
         out.add(new LevelEntry(
             context.bankId(),
@@ -246,7 +253,8 @@ public final class BankLevelMenu {
             interestRate,
             permission,
             status,
-            upgradeReason
+            upgradeReason,
+            missingFunds
         ));
       }
 
@@ -275,15 +283,17 @@ public final class BankLevelMenu {
   private static ItemStack renderLevelItem(LevelEntry entry) {
     String path = entry.state().path;
     ItemStack template = switch (entry.state()) {
-      case CURRENT -> currentTemplate;
-      case AVAILABLE -> availableTemplate;
-      default -> lockedTemplate;
+      case UNLOCKED -> unlockedTemplate;
+      case PREVIOUS_NEEDS_TO_BE_UNLOCKED -> previousNeedsUnlockedTemplate;
+      case CONDITIONS_NOT_TRUE -> conditionsNotMetTemplate;
+      case READY_FOR_UNLOCK -> readyForUnlockTemplate;
     };
 
     String fallbackName = switch (entry.state()) {
-      case CURRENT -> "<dark_gray>» <green>Level <level></green>";
-      case AVAILABLE -> "<dark_gray>» <yellow>Level <level></yellow>";
-      default -> "<dark_gray>» <red>Level <level></red>";
+      case UNLOCKED -> "<dark_gray>» <green>Unlocked <level></green>";
+      case PREVIOUS_NEEDS_TO_BE_UNLOCKED -> "<dark_gray>» <red>Previous needs to be unlocked</red>";
+      case CONDITIONS_NOT_TRUE -> "<dark_gray>» <red>Conditions not true</red>";
+      case READY_FOR_UNLOCK -> "<dark_gray>» <yellow>Ready for unlock</yellow>";
     };
 
     TagResolver resolver = TagResolver.resolver(List.of(
@@ -293,6 +303,7 @@ public final class BankLevelMenu {
         Placeholder.parsed("level", String.valueOf(entry.level())),
         Placeholder.parsed("current-level", String.valueOf(entry.currentLevel())),
         Placeholder.parsed("max-level", String.valueOf(entry.maxLevel())),
+        Placeholder.parsed("required-level", String.valueOf(entry.currentLevel() + 1)),
         Placeholder.parsed("status", entry.status()),
         Placeholder.parsed("upgrade-reason", entry.upgradeReason()),
         Placeholder.parsed("upgrade-cost", entry.upgradeCostText()),
@@ -300,7 +311,8 @@ public final class BankLevelMenu {
         Placeholder.parsed("wallet-balance", entry.walletBalanceText()),
         Placeholder.parsed("interest-rate", entry.interestRate()),
         Placeholder.parsed("permission", entry.permission().isBlank() ? "None" : entry.permission()),
-        Placeholder.parsed("can-upgrade", entry.canUpgrade() ? "Yes" : "No")
+        Placeholder.parsed("can-upgrade", entry.canUpgrade() ? "Yes" : "No"),
+        Placeholder.parsed("missing-funds", entry.missingFundsText())
     ));
 
     String rawName = bankConfig.getString(path + ".display-name", fallbackName);
@@ -514,31 +526,143 @@ public final class BankLevelMenu {
     return level;
   }
 
-  private static String resolveUpgradeReason(int level,
-                                            int currentLevel,
-                                            int maxLevel,
-                                            boolean roleCanUpgrade,
-                                            boolean hasPermission,
-                                            boolean hasFunds) {
-    if (level > maxLevel) {
-      return "Max level reached";
-    }
+  private static LevelState resolveState(int level,
+                                         int currentLevel,
+                                         boolean roleCanUpgrade,
+                                         boolean hasPermission,
+                                         boolean hasFunds) {
     if (level <= currentLevel) {
-      return "Already unlocked";
+      return LevelState.UNLOCKED;
     }
     if (level > currentLevel + 1) {
-      return "Unlock the previous level first";
+      return LevelState.PREVIOUS_NEEDS_TO_BE_UNLOCKED;
     }
-    if (!roleCanUpgrade) {
-      return "Your role cannot upgrade";
+    if (roleCanUpgrade && hasPermission && hasFunds) {
+      return LevelState.READY_FOR_UNLOCK;
     }
-    if (!hasPermission) {
-      return "Missing permission";
+    return LevelState.CONDITIONS_NOT_TRUE;
+  }
+
+  private static String resolveStatus(LevelState state) {
+    return switch (state) {
+      case UNLOCKED -> "Unlocked";
+      case PREVIOUS_NEEDS_TO_BE_UNLOCKED -> "Previous needs to be unlocked";
+      case CONDITIONS_NOT_TRUE -> "Conditions not true";
+      case READY_FOR_UNLOCK -> "Ready for unlock";
+    };
+  }
+
+  private static String resolveUpgradeReason(LevelState state,
+                                             int currentLevel,
+                                             boolean roleCanUpgrade,
+                                             boolean hasPermission,
+                                             boolean hasFunds,
+                                             MantissaAmount walletBalance,
+                                             MantissaAmount upgradeCost,
+                                             CurrencyDefinition currency) {
+    return switch (state) {
+      case UNLOCKED -> "Already unlocked";
+      case PREVIOUS_NEEDS_TO_BE_UNLOCKED -> "Unlock level " + (currentLevel + 1) + " first";
+      case READY_FOR_UNLOCK -> "Click to upgrade";
+      case CONDITIONS_NOT_TRUE -> {
+        if (!roleCanUpgrade) {
+          yield "Your role cannot upgrade";
+        }
+        if (!hasPermission) {
+          yield "Missing permission";
+        }
+        if (!hasFunds) {
+          yield "Need " + formatMissingFunds(walletBalance, upgradeCost, currency) + " more";
+        }
+        yield "Conditions not met";
+      }
+    };
+  }
+
+  private static String formatMissingFunds(MantissaAmount walletBalance, MantissaAmount upgradeCost, CurrencyDefinition currency) {
+    if (walletBalance == null || upgradeCost == null || currency == null) {
+      return "—";
     }
-    if (!hasFunds) {
-      return "Insufficient funds";
+
+    if (walletBalance.compareTo(upgradeCost) >= 0) {
+      return "—";
     }
-    return "Ready to upgrade";
+
+    MantissaAmount missing = upgradeCost.subtract(walletBalance);
+    return bankService().formatBalanceWithCurrency(missing, currency);
+  }
+
+  private static LevelEntry buildDefaultLevelOneEntry(LevelContext context,
+                                                      BankDefinition definition,
+                                                      BankAccountCacheService.View bankView,
+                                                      CurrencyDefinition currency,
+                                                      String roleName,
+                                                      int currentLevel,
+                                                      int maxLevel,
+                                                      MantissaAmount walletBalance,
+                                                      String walletShown) {
+    String status = "Unlocked";
+    String reason = "Already unlocked";
+    String missingFunds = "-";
+
+    return new LevelEntry(
+        context.bankId(),
+        context.ownerUuid(),
+        definition.nameMiniMessage(),
+        bankView.account() == null ? null : bankView.account().getId(),
+        currency,
+        roleName,
+        1,
+        currentLevel,
+        maxLevel,
+        LevelState.UNLOCKED,
+        false,
+        MantissaAmount.zero(),
+        resolveLevelOneMaxBalance(definition),
+        walletBalance,
+        walletShown,
+        resolveLevelOneInterestRate(definition),
+        "",
+        status,
+        reason,
+        missingFunds
+    );
+  }
+
+  private static String resolveLevelOneInterestRate(BankDefinition definition) {
+    if (definition == null || definition.interestSystem() == null || !definition.interestSystem().enabled()) {
+      return "—";
+    }
+
+    double percentage = definition.interestSystem().percentage();
+    if (percentage <= 0.0d) {
+      return "—";
+    }
+
+    return formatInterestRate(String.valueOf(percentage));
+  }
+
+  private static MantissaAmount resolveLevelOneMaxBalance(BankDefinition definition) {
+    if (definition == null) {
+      return MantissaAmount.zero();
+    }
+
+    String raw = definition.defaultMaxBalanceRaw();
+    if (raw == null || raw.isBlank()) {
+      return MantissaAmount.zero();
+    }
+
+    MantissaAmount virtual = AmountNotation.parseVirtualMantissaAmount(raw);
+    if (virtual != null) {
+      return virtual;
+    }
+
+    BigDecimal vaultAmount = AmountNotation.parseVaultHuman(raw);
+    if (vaultAmount != null) {
+      return MantissaAmount.of(vaultAmount, 0);
+    }
+
+    return MantissaAmount.zero();
   }
 
   private static BankDefinition.RoleDefinition resolveRole(BankDefinition def,
@@ -727,7 +851,8 @@ public final class BankLevelMenu {
       String interestRate,
       String permission,
       String status,
-      String upgradeReason
+      String upgradeReason,
+      String missingFundsText
   ) {
     String upgradeCostText() {
       return bankService().formatBalanceWithCurrency(upgradeCost, currency);
@@ -739,9 +864,10 @@ public final class BankLevelMenu {
   }
 
   private enum LevelState {
-    CURRENT("items.level-current"),
-    AVAILABLE("items.level-available"),
-    LOCKED("items.level-locked");
+    UNLOCKED("items.unlocked"),
+    PREVIOUS_NEEDS_TO_BE_UNLOCKED("items.previous-needs-to-be-unlocked"),
+    CONDITIONS_NOT_TRUE("items.conditions-not-true"),
+    READY_FOR_UNLOCK("items.ready-for-unlock");
 
     private final String path;
 

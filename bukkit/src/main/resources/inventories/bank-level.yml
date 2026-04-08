@@ -31,30 +31,53 @@ items:
     display-name: " "
     lore: []
 
-  level-current:
+  unlocked:
     item: "minecraft:lime_stained_glass_pane"
-    display-name: "<dark_gray>» <green>Level <level></green>"
+    display-name: "<dark_gray>» <green>Unlocked <level></green>"
     lore:
       - ""
       - "<yellow>│ <gray>Bank: <yellow><bank-name></yellow>"
-      - "<yellow>│ <gray>Role: <yellow><role-name></yellow>"
-      - "<yellow>│ <gray>Status: <yellow><status></yellow>"
-      - "<yellow>│ <gray>Info: <yellow><upgrade-reason></yellow>"
       - "<yellow>│ <gray>Current level: <yellow><current-level></yellow> <gray>/ <yellow><max-level></yellow>"
       - "<yellow>│ <gray>Max balance: <yellow><max-balance></yellow>"
       - "<yellow>│ <gray>Interest rate: <yellow><interest-rate></yellow>"
       - ""
       - "<dark_gray>This level is already unlocked</dark_gray>"
 
-  level-available:
-    item: "minecraft:yellow_stained_glass_pane"
-    display-name: "<dark_gray>» <yellow>Level <level></yellow>"
+  previous-needs-to-be-unlocked:
+    item: "minecraft:red_stained_glass_pane"
+    display-name: "<dark_gray>» <red>Previous needs to be unlocked</red>"
+    lore:
+      - ""
+      - "<yellow>│ <gray>Bank: <yellow><bank-name></yellow>"
+      - "<yellow>│ <gray>Current level: <yellow><current-level></yellow>"
+      - "<yellow>│ <gray>Required level: <yellow><required-level></yellow>"
+      - "<yellow>│ <gray>Interest rate: <yellow><interest-rate></yellow>"
+      - "<yellow>│ <gray>Reason: <red><upgrade-reason></red>"
+      - ""
+      - "<dark_gray>Unlock the previous level first</dark_gray>"
+
+  conditions-not-met:
+    item: "minecraft:red_stained_glass_pane"
+    display-name: "<dark_gray>» <red>Conditions not true</red>"
     lore:
       - ""
       - "<yellow>│ <gray>Bank: <yellow><bank-name></yellow>"
       - "<yellow>│ <gray>Role: <yellow><role-name></yellow>"
-      - "<yellow>│ <gray>Status: <yellow><status></yellow>"
-      - "<yellow>│ <gray>Info: <yellow><upgrade-reason></yellow>"
+      - "<yellow>│ <gray>Interest rate: <yellow><interest-rate></yellow>"
+      - "<yellow>│ <gray>Upgrade cost: <yellow><upgrade-cost></yellow>"
+      - "<yellow>│ <gray>Wallet balance: <yellow><wallet-balance></yellow>"
+      - "<yellow>│ <gray>Missing: <red><missing-funds></red>"
+      - "<yellow>│ <gray>Reason: <red><upgrade-reason></red>"
+      - ""
+      - "<dark_gray>Fix the missing condition first</dark_gray>"
+
+  ready-for-unlock:
+    item: "minecraft:yellow_stained_glass_pane"
+    display-name: "<dark_gray>» <yellow>Ready for unlock</yellow>"
+    lore:
+      - ""
+      - "<yellow>│ <gray>Bank: <yellow><bank-name></yellow>"
+      - "<yellow>│ <gray>Role: <yellow><role-name></yellow>"
       - "<yellow>│ <gray>Upgrade cost: <yellow><upgrade-cost></yellow>"
       - "<yellow>│ <gray>Wallet balance: <yellow><wallet-balance></yellow>"
       - "<yellow>│ <gray>Max balance: <yellow><max-balance></yellow>"
@@ -62,22 +85,6 @@ items:
       - "<yellow>│ <gray>Permission: <yellow><permission></yellow>"
       - ""
       - "<dark_gray>Click to upgrade</dark_gray>"
-
-  level-locked:
-    item: "minecraft:red_stained_glass_pane"
-    display-name: "<dark_gray>» <red>Level <level></red>"
-    lore:
-      - ""
-      - "<yellow>│ <gray>Bank: <yellow><bank-name></yellow>"
-      - "<yellow>│ <gray>Role: <yellow><role-name></yellow>"
-      - "<yellow>│ <gray>Status: <red><status></red>"
-      - "<yellow>│ <gray>Reason: <red><upgrade-reason></red>"
-      - "<yellow>│ <gray>Required previous level: <yellow><current-level></yellow>"
-      - "<yellow>│ <gray>Max balance: <yellow><max-balance></yellow>"
-      - "<yellow>│ <gray>Interest rate: <yellow><interest-rate></yellow>"
-      - "<yellow>│ <gray>Permission: <yellow><permission></yellow>"
-      - ""
-      - "<dark_gray>Unlock the previous level first</dark_gray>"
 
   navigation:
     previous:

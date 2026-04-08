@@ -1,6 +1,5 @@
 package io.nexstudios.nexeconomy.service.bank.interest;
 
-import io.nexstudios.configservice.config.FileConfiguration;
 import io.nexstudios.configservice.service.singlereader.FileReaderService;
 import io.nexstudios.framework.paper.services.plugin.PaperPluginService;
 import io.nexstudios.languageservice.service.component.ComponentService;
@@ -18,6 +17,7 @@ import io.nexstudios.serviceregistry.di.ServiceAccessor;
 import net.kyori.adventure.text.minimessage.tag.resolver.Placeholder;
 import net.kyori.adventure.text.minimessage.tag.resolver.TagResolver;
 import org.bukkit.Bukkit;
+import org.bukkit.configuration.file.YamlConfiguration;
 import org.bukkit.entity.Player;
 import org.bukkit.plugin.Plugin;
 import org.bukkit.scheduler.BukkitTask;
@@ -125,14 +125,7 @@ public final class DefaultBankInterestService implements BankInterestService {
       String fileName = bankFile.getName();
       String bankId = normalizeBankId(fileName.substring(0, fileName.length() - 4));
 
-      FileConfiguration config = fileReader.load(
-          Path.of("banks/" + fileName),
-          "banks/" + fileName,
-          true
-      );
-
-      if (config == null) continue;
-
+      YamlConfiguration config = YamlConfiguration.loadConfiguration(bankFile);
       BankInterestConfig interestConfig = loadInterestConfig(config);
       interestConfigs.put(bankId, interestConfig);
     }
@@ -140,7 +133,7 @@ public final class DefaultBankInterestService implements BankInterestService {
     logger.logger().log(Level.INFO, "Loaded interest settings for " + interestConfigs.size() + " banks");
   }
 
-  private BankInterestConfig loadInterestConfig(FileConfiguration config) {
+  private BankInterestConfig loadInterestConfig(YamlConfiguration config) {
     if (config == null) {
       return new BankInterestConfig(false, BigDecimal.ZERO, List.of(), ZoneId.systemDefault(), BigDecimal.ZERO, "");
     }

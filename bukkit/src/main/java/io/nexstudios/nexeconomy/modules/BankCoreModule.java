@@ -30,12 +30,12 @@ public final class BankCoreModule implements ServiceModule {
     services.register(BankRegistryService.class, DefaultBankRegistryService.class);
     services.register(BankRepositoryService.class, DefaultBankRepositoryService.class);
 
-    // Register BankLevelService (depends on BankRepositoryService)
-    services.register(BankLevelService.class, DefaultBankLevelService.class);
-
-    // Register cache services (BankAccountCacheService depends on BankLevelService)
+    // Register cache services before cache-dependent services
     services.register(BankAccountCacheService.class, BankAccountCacheService.class);
     services.register(BankAccountPresenceService.class, BankAccountPresenceService.class);
+
+    // Register BankLevelService after the cache is available
+    services.register(BankLevelService.class, DefaultBankLevelService.class);
 
     // Register sync and transaction services
     services.register(BankRedisSyncService.class, DefaultBankRedisSyncServiceService.class);
