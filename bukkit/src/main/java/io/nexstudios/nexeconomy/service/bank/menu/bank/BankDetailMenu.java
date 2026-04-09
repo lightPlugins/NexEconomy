@@ -28,6 +28,7 @@ import io.nexstudios.nexeconomy.service.economy.EconomyPlayerCacheService;
 import io.nexstudios.nexeconomy.service.economy.repo.EconomyPlayer;
 import io.nexstudios.nexeconomy.service.bank.registry.BankRegistryService;
 import io.nexstudios.nexeconomy.service.registry.CurrencyRegistryService;
+import io.nexstudios.languageservice.service.component.ComponentService;
 import io.nexstudios.nexlogic.bukkit.services.entity.nexeconomy.BankMemberEntity;
 import io.nexstudios.nexlogic.bukkit.services.entity.nexeconomy.BankWithdrawUsageEntity;
 import io.nexstudios.nexlogic.bukkit.services.items.config.ConfigItemService;
@@ -40,6 +41,7 @@ import net.kyori.adventure.text.Component;
 import net.kyori.adventure.text.minimessage.MiniMessage;
 import net.kyori.adventure.text.minimessage.tag.resolver.Placeholder;
 import net.kyori.adventure.text.minimessage.tag.resolver.TagResolver;
+import net.kyori.adventure.text.serializer.legacy.LegacyComponentSerializer;
 import org.bukkit.Bukkit;
 import org.bukkit.Material;
 import org.bukkit.OfflinePlayer;
@@ -62,6 +64,7 @@ import java.util.concurrent.ConcurrentHashMap;
 @Dependencies({
     ItemService.class,
     MenuService.class,
+    ComponentService.class,
     BankService.class,
     BankRegistryService.class,
     BankAccountCacheService.class,
@@ -104,6 +107,7 @@ public final class BankDetailMenu {
   private static org.bukkit.plugin.Plugin plugin;
   private static HeadService headService;
   private static LoggerService logger;
+  private static ComponentService componentService;
   private static ItemService itemService;
   private static FileReaderService fileReaderService;
   private static ConfigItemService configItemService;
@@ -128,6 +132,7 @@ public final class BankDetailMenu {
     logger = services.getService(LoggerService.class);
     headService = NexEconomyPlugin.getNexLogicService().getService(HeadService.class);
     plugin = services.getService(PaperPluginService.class).plugin();
+    componentService = services.getService(ComponentService.class);
     itemService = services.getService(ItemService.class);
     fileReaderService = services.getService(FileReaderService.class);
     configItemService = NexEconomyPlugin.getNexLogicService().getService(ConfigItemService.class);
@@ -697,19 +702,19 @@ public final class BankDetailMenu {
 
     TextRequestDialogService textService = servicesRef.getService(TextRequestDialogService.class);
     TextRequestDialog dialog = textService.create()
-        .title(withdraw ? "Withdraw amount" : "Deposit amount")
-        .body("Enter an amount like 5k or 15ab")
-        .placeholder("Amount...")
+        .title(localizedLegacy(player, withdraw ? "bank.detail.dialog.withdraw.title" : "bank.detail.dialog.deposit.title"))
+        .body(localizedLegacy(player, withdraw ? "bank.detail.dialog.withdraw.body" : "bank.detail.dialog.deposit.body"))
+        .placeholder(localizedLegacy(player, "bank.detail.dialog.amount.placeholder"))
         .minCharacters(1)
         .maxCharacters(32)
-        .submitButton(withdraw ? "Withdraw" : "Deposit");
+        .submitButton(localizedLegacy(player, withdraw ? "bank.detail.dialog.withdraw.submit" : "bank.detail.dialog.deposit.submit"));
 
     dialog.show(player).thenAccept(raw -> {
       if (raw == null || raw.isBlank()) return;
 
       MantissaAmount amount = parseAmount(data.currency(), raw);
       if (amount == null || amount.compareTo(MantissaAmount.zero()) <= 0) {
-        player.sendMessage(Component.text("Invalid amount."));
+        sendMessage(player, "general.wrong-amount", TagResolver.resolver(List.of()));
         return;
       }
 
@@ -727,17 +732,17 @@ public final class BankDetailMenu {
 
     MantissaAmount balance = currentWalletBalance(player.getUniqueId(), data.currency());
     if (balance == null || balance.compareTo(MantissaAmount.zero()) <= 0) {
-      player.sendMessage(Component.text("Your wallet is empty."));
+      sendMessage(player, "bank.detail.wallet-empty", TagResolver.resolver(List.of()));
       return;
     }
 
     String shown = AmountNotation.formatShort(balance, data.currency().fractionDigits());
     ConfirmDialogService confirmService = servicesRef.getService(ConfirmDialogService.class);
     ConfirmDialog confirm = confirmService.create()
-        .title("Deposit all?")
-        .body("Do you really want to deposit " + shown + " from your wallet into this bank?")
-        .confirmButton("Deposit")
-        .cancelButton("Cancel");
+        .title(localizedLegacy(player, "bank.detail.dialog.deposit-all.title"))
+        .body(localizedLegacy(player, "bank.detail.dialog.deposit-all.body", Placeholder.parsed("amount", shown)))
+        .confirmButton(localizedLegacy(player, "bank.detail.dialog.deposit-all.confirm"))
+        .cancelButton(localizedLegacy(player, "bank.detail.dialog.cancel"));
 
     confirm.show(player).thenAccept(result -> {
       if (!Boolean.TRUE.equals(result)) return;
@@ -751,17 +756,17 @@ public final class BankDetailMenu {
 
     MantissaAmount balance = data.bankBalance();
     if (balance == null || balance.compareTo(MantissaAmount.zero()) <= 0) {
-      player.sendMessage(Component.text("The bank is empty."));
+      sendMessage(player, "bank.detail.bank-empty", TagResolver.resolver(List.of()));
       return;
     }
 
     String shown = AmountNotation.formatShort(balance, data.currency().fractionDigits());
     ConfirmDialogService confirmService = servicesRef.getService(ConfirmDialogService.class);
     ConfirmDialog confirm = confirmService.create()
-        .title("Withdraw all?")
-        .body("Do you really want to withdraw up to " + shown + " from this bank? The role limit may reduce the amount automatically.")
-        .confirmButton("Withdraw")
-        .cancelButton("Cancel");
+        .title(localizedLegacy(player, "bank.detail.dialog.withdraw-all.title"))
+        .body(localizedLegacy(player, "bank.detail.dialog.withdraw-all.body", Placeholder.parsed("amount", shown)))
+        .confirmButton(localizedLegacy(player, "bank.detail.dialog.withdraw-all.confirm"))
+        .cancelButton(localizedLegacy(player, "bank.detail.dialog.cancel"));
 
     confirm.show(player).thenAccept(result -> {
       if (!Boolean.TRUE.equals(result)) return;
@@ -774,7 +779,10 @@ public final class BankDetailMenu {
     bankService.deposit(data.context().bankId(), data.context().ownerUuid(), player.getUniqueId(), amount)
         .thenAccept(done -> Bukkit.getScheduler().runTask(plugin, () -> {
           String shown = AmountNotation.formatShort(done, data.currency().fractionDigits());
-          player.sendMessage(Component.text("Deposited " + shown + "."));
+          sendMessage(player, "bank.deposit.self", TagResolver.resolver(List.of(
+              Placeholder.parsed("amount", shown),
+              Placeholder.parsed("bank", data.definition().nameMiniMessage())
+          )));
           triggerDepositSuccess(player);
           refreshOpenView(player);
         }))
@@ -782,7 +790,8 @@ public final class BankDetailMenu {
           Bukkit.getScheduler().runTask(plugin,
               () -> {
                 triggerDepositFailed(player);
-                player.sendMessage(Component.text("Deposit failed: " + rootMessage(ex)));
+                sendMessage(player, "bank.detail.deposit-failed", TagResolver.resolver(List.of()));
+                sendBankDetailError(player, ex);
               });
           return null;
         });
@@ -794,7 +803,10 @@ public final class BankDetailMenu {
         .thenAccept(done -> Bukkit.getScheduler().runTask(plugin, () -> {
           applyWithdrawUsageOptimistically(player.getUniqueId(), data, done);
           String shown = AmountNotation.formatShort(done, data.currency().fractionDigits());
-          player.sendMessage(Component.text("Withdrew " + shown + "."));
+          sendMessage(player, "bank.withdraw.self", TagResolver.resolver(List.of(
+              Placeholder.parsed("amount", shown),
+              Placeholder.parsed("bank", data.definition().nameMiniMessage())
+          )));
           triggerWithdrawSuccess(player);
           refreshOpenView(player);
         }))
@@ -802,7 +814,8 @@ public final class BankDetailMenu {
           Bukkit.getScheduler().runTask(plugin,
               () -> {
                 triggerWithdrawFailed(player);
-                player.sendMessage(Component.text("Withdraw failed: " + rootMessage(ex)));
+                sendMessage(player, "bank.detail.withdraw-failed", TagResolver.resolver(List.of()));
+                sendBankDetailError(player, ex);
               });
           return null;
         });
@@ -852,6 +865,33 @@ public final class BankDetailMenu {
       case WITHDRAW_SUCCESS -> effects.executeWithdrawSuccess(player);
       case WITHDRAW_FAILED -> effects.executeWithdrawFailed(player);
     }
+  }
+
+  private static void sendMessage(Player player, String key, TagResolver resolver) {
+    if (componentService == null || player == null) {
+      return;
+    }
+
+    player.sendMessage(componentService.builder(player, key, "NotDefined", true)
+        .resolver(resolver)
+        .build());
+  }
+
+  private static String localizedLegacy(Player player, String key, TagResolver... extraResolvers) {
+    if (componentService == null || player == null) {
+      return key;
+    }
+
+    var builder = componentService.builder(player, key, "NotDefined", true);
+    if (extraResolvers != null) {
+      for (TagResolver resolver : extraResolvers) {
+        if (resolver != null) {
+          builder.resolver(resolver);
+        }
+      }
+    }
+
+    return LegacyComponentSerializer.legacySection().serialize(builder.build());
   }
 
   private enum ClickEffectType {
@@ -1006,6 +1046,98 @@ public final class BankDetailMenu {
       root = root.getCause();
     }
     return root == null || root.getMessage() == null ? "unknown error" : root.getMessage();
+  }
+
+  private static void sendBankDetailError(Player player, Throwable ex) {
+    Throwable root = ex;
+    for (int i = 0; i < 6 && root != null && root.getCause() != null; i++) {
+      root = root.getCause();
+    }
+
+    if (isMarker(root, "bank not available")) {
+      sendMessage(player, "bank.errors.bank-not-available", TagResolver.resolver(List.of()));
+      return;
+    }
+
+    if (isMarker(root, "member system disabled")) {
+      sendMessage(player, "bank.errors.member-system-disabled", TagResolver.resolver(List.of()));
+      return;
+    }
+
+    if (isMarker(root, "no permission")) {
+      sendMessage(player, "bank.errors.no-permission", TagResolver.resolver(List.of()));
+      return;
+    }
+
+    if (isMarker(root, "player must be online")) {
+      sendMessage(player, "bank.errors.player-must-be-online", TagResolver.resolver(List.of()));
+      return;
+    }
+
+    if (isMarker(root, "invalid amount")) {
+      sendMessage(player, "general.wrong-amount", TagResolver.resolver(List.of()));
+      return;
+    }
+
+    if (isMarker(root, "insufficient funds")) {
+      sendMessage(player, "bank.errors.insufficient-funds", TagResolver.resolver(List.of()));
+      return;
+    }
+
+    if (isMarker(root, "max balance reached")) {
+      sendMessage(player, "bank.errors.max-balance-reached", TagResolver.resolver(List.of()));
+      return;
+    }
+
+    if (isMarker(root, "bank empty")) {
+      sendMessage(player, "bank.errors.bank-empty", TagResolver.resolver(List.of()));
+      return;
+    }
+
+    if (isMarker(root, "limit reached")) {
+      sendMessage(player, "bank.errors.withdraw-limit-reached", TagResolver.resolver(List.of()));
+      return;
+    }
+
+    if (isMarker(root, "not a member")) {
+      sendMessage(player, "bank.errors.not-a-member", TagResolver.resolver(List.of()));
+      return;
+    }
+
+    if (isMarker(root, "unknown role")) {
+      sendMessage(player, "bank.errors.unknown-role", TagResolver.resolver(List.of()));
+      return;
+    }
+
+    if (isMarker(root, "already a member")) {
+      sendMessage(player, "bank.errors.already-a-member", TagResolver.resolver(List.of()));
+      return;
+    }
+
+    if (isMarker(root, "cannot invite owner")) {
+      sendMessage(player, "bank.errors.cannot-invite-self", TagResolver.resolver(List.of()));
+      return;
+    }
+
+    if (isMarker(root, "bank locked")) {
+      sendMessage(player, "bank.errors.bank-locked", TagResolver.resolver(List.of()));
+      return;
+    }
+
+    if (isMarker(root, "bank accounts locked")) {
+      sendMessage(player, "bank.errors.bank-accounts-locked", TagResolver.resolver(List.of()));
+      return;
+    }
+
+    sendMessage(player, "bank.errors.internal", TagResolver.resolver(List.of(
+        Placeholder.parsed("error", rootMessage(root))
+    )));
+  }
+
+  private static boolean isMarker(Throwable ex, String marker) {
+    if (ex == null || marker == null || marker.isBlank()) return false;
+    String message = ex.getMessage();
+    return message != null && message.toLowerCase().contains(marker.trim().toLowerCase());
   }
 
   private static String currentInterestRate(BankData data) {

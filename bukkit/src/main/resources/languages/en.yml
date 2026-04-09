@@ -164,55 +164,33 @@ bank:
     other: '<gray>You deposited <yellow><amount></yellow> into <yellow><bank></yellow> <gray>(owner: <yellow><owner></yellow>).</gray>'
 
   withdraw:
-    self: '<gray>You withdrew <yellow><amount></yellow> from <yellow><bank></yellow>.'
+    self: '<gray>You withdrew <yellow><amount></yellow> from <yellow><bank></yellow>.</gray>'
     other: '<gray>You withdrew <yellow><amount></yellow> from <yellow><bank></yellow> <gray>(owner: <yellow><owner></yellow>).</gray>'
 
-  invite:
-    sent: '<gray>You invited <yellow><player></yellow> to <yellow><bank></yellow> as <yellow><role></yellow>.'
-    sent-other: '<gray>You invited <yellow><player></yellow> to <yellow><bank></yellow> <gray>(owner: <yellow><owner></yellow>)</gray> as <yellow><role></yellow>.'
-    received: '<gray>You have been invited to <yellow><bank></yellow> by <yellow><owner></yellow> as <yellow><role></yellow>. <gray>To accept, use:</gray> <yellow>/bank accept <bank> <owner></yellow><gray>.</gray>'
-    received-other: '<gray>You have been invited to <yellow><bank></yellow> <gray>(owner: <yellow><owner></yellow>)</gray> by <yellow><inviter></yellow> as <yellow><role></yellow>. <gray>To accept, use:</gray> <yellow>/bank accept <bank> <owner></yellow><gray>.</gray>'
-    invitee-already-member: '<red><player></red> <gray>is already a member of another bank and cannot be invited again.</gray>'
-    you-already-member: '<red>You are already a member of another bank. Leave that bank first before joining a new one.</red>'
-
-  accept:
-    already-member: '<red>You cannot join this bank because you are already a member of another bank.</red> <gray>Please leave your current bank first and try again.</gray>'
-
-  leave:
-    success: '<gray>You have left <yellow><bank></yellow>.'
-    owner-cannot-leave: '<red>You cannot leave your own bank.</red>'
-
-  transactions:
-    header: '<gray>Last <yellow>10</yellow> transactions for <yellow><bank></yellow> (owner: <yellow><owner></yellow>):</gray>'
-    other:
-      header: '<gray>Last <yellow>10</yellow> transactions for <yellow><bank></yellow> (owner: <yellow><owner></yellow>):</gray>'
-      empty: '<gray>No transactions found for <yellow><bank></yellow> (owner: <yellow><owner></yellow>).</gray>'
-    empty: '<gray>No transactions found for <yellow><bank></yellow>.</gray>'
-    row: '<dark_gray>● <gray><time> <dark_gray>| <gray>by <yellow><actor></yellow> <dark_gray>| <amount>'
-
-  other:
-    list:
-      empty: '<gray>You are currently not a member of any other bank.</gray>'
-      header: '<gray>You are a member of <yellow><amount></yellow> other bank(s):</gray>'
-      row: '<dark_gray>● <gray>Bank:</gray> <yellow><bank></yellow> <dark_gray>|</dark_gray> <gray>Owner:</gray> <yellow><owner></yellow> <dark_gray>(</dark_gray><yellow><owner-uuid></yellow><dark_gray>)</dark_gray>'
-    accept:
-      none: '<red>You do not have any pending bank invites from <dark_red><owner></dark_red></red><red>.</red>'
-      success: '<gray>You accepted the bank invite from <yellow><owner></yellow>.</gray>'
-    deny:
-      none: '<red>You do not have any pending bank invites from <dark_red><owner></dark_red></red><red>.</red>'
-      success: '<gray>You declined the bank invite from <yellow><owner></yellow>.</gray>'
-    invites:
-      empty: '<gray>You currently have no pending bank invites.</gray>'
-      header: '<gray>You have <yellow><amount></yellow> pending bank invite(s):</gray>'
-      row: '<dark_gray>● <gray>Bank:</gray> <yellow><bank></yellow> <dark_gray>|</dark_gray> <gray>Owner:</gray> <yellow><owner></yellow> <dark_gray>(</dark_gray><yellow><owner-uuid></yellow><dark_gray>)</dark_gray> <dark_gray>|</dark_gray> <gray>Role:</gray> <yellow><role></yellow> <dark_gray>|</dark_gray> <gray>Invited by:</gray> <yellow><invited-by></yellow>'
-
-  level:
-    current: '<gray>Bank <yellow><bank></yellow> is at level <yellow><level></yellow>. Max balance: <yellow><max-balance></yellow>. Next level: <yellow><next-level></yellow> (Cost: <yellow><next-cost></yellow>).</gray>'
-    upgraded: '<gray>Bank <yellow><bank></yellow> has been upgraded to level <yellow><level></yellow> for <yellow><cost></yellow>.</gray>'
-    insufficient-funds: '<red>Insufficient funds to upgrade. You need <yellow><required></yellow> <gray><currency></gray>.</red>'
-    max-level-reached: '<red>Bank <yellow><bank></yellow> has already reached maximum level.</red>'
-    permission-denied: '<red>You do not have permission to upgrade this bank.</red>'
-    role-cannot-upgrade: '<red>Your bank role does not allow upgrades.</red>'
-    already-at-level: '<red>Bank <yellow><bank></yellow> is already at level <yellow><level></yellow>.</red>'
+  detail:
+    wallet-empty: '<red>Your wallet is empty.</red>'
+    bank-empty: '<red>The bank is empty.</red>'
+    deposit-failed: '<red>Deposit failed.</red>'
+    withdraw-failed: '<red>Withdraw failed.</red>'
+    dialog:
+      amount:
+        placeholder: 'Amount...'
+      cancel: 'Cancel'
+      deposit:
+        title: '<yellow>Deposit amount</yellow>'
+        body: '<gray>Enter an amount like <yellow>5k</yellow> or <yellow>15ab</yellow>.</gray>'
+        submit: 'Deposit'
+      withdraw:
+        title: '<yellow>Withdraw amount</yellow>'
+        body: '<gray>Enter an amount like <yellow>5k</yellow> or <yellow>15ab</yellow>.</gray>'
+        submit: 'Withdraw'
+      deposit-all:
+        title: '<yellow>Deposit all?</yellow>'
+        body: '<gray>Do you really want to deposit <yellow><amount></yellow> from your wallet into this bank?</gray>'
+        confirm: 'Deposit'
+      withdraw-all:
+        title: '<yellow>Withdraw all?</yellow>'
+        body: '<gray>Do you really want to withdraw up to <yellow><amount></yellow> from this bank? The role limit may reduce the amount automatically.</gray>'
+        confirm: 'Withdraw'
 
 inventories:
