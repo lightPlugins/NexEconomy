@@ -23,15 +23,23 @@ import io.nexstudios.nexeconomy.service.bank.repo.InviteLookupRow;
 import io.nexstudios.nexeconomy.service.bank.transaction.BankTransactionService;
 import io.nexstudios.nexeconomy.service.economy.EconomyService;
 import io.nexstudios.nexeconomy.service.registry.CurrencyRegistryService;
+import io.nexstudios.dialogservice.api.ConfirmDialog;
+import io.nexstudios.dialogservice.service.ConfirmDialogService;
+import io.nexstudios.framework.paper.services.plugin.PaperPluginService;
 import io.nexstudios.nexlogic.bukkit.services.entity.nexeconomy.BankTransactionEntity;
 import io.nexstudios.serviceregistry.di.Dependencies;
 import io.nexstudios.serviceregistry.di.Service;
 import io.nexstudios.serviceregistry.di.ServiceAccessor;
+import net.kyori.adventure.text.Component;
+import net.kyori.adventure.text.event.ClickEvent;
+import net.kyori.adventure.text.event.HoverEvent;
 import net.kyori.adventure.text.minimessage.tag.resolver.Placeholder;
 import net.kyori.adventure.text.minimessage.tag.resolver.TagResolver;
+import net.kyori.adventure.text.serializer.legacy.LegacyComponentSerializer;
 import org.bukkit.Bukkit;
 import org.bukkit.OfflinePlayer;
 import org.bukkit.entity.Player;
+import org.bukkit.plugin.Plugin;
 
 import java.math.BigDecimal;
 import java.time.Instant;
@@ -50,6 +58,8 @@ import java.util.stream.Collectors;
 )
 @Dependencies({
     ComponentService.class,
+    ConfirmDialogService.class,
+    PaperPluginService.class,
     BankService.class,
     CurrencyRegistryService.class,
     BankTransactionService.class,
@@ -73,6 +83,8 @@ public final class EconomyBankCommand implements Service {
   private final BankAccountCacheService bankCache;
   private final BankRedisSyncService redisSync;
   private final EconomyService economy;
+  private final ConfirmDialogService confirmDialogs;
+  private final Plugin plugin;
   private final ServiceAccessor services;
 
   public EconomyBankCommand(ServiceAccessor accessor) {
@@ -84,6 +96,8 @@ public final class EconomyBankCommand implements Service {
     this.bankCache = accessor.getService(BankAccountCacheService.class);
     this.redisSync = accessor.getService(BankRedisSyncService.class);
     this.economy = accessor.getService(EconomyService.class);
+    this.confirmDialogs = accessor.getService(ConfirmDialogService.class);
+    this.plugin = accessor.getService(PaperPluginService.class).plugin();
     this.services = accessor;
   }
 
@@ -347,13 +361,7 @@ public final class EconomyBankCommand implements Service {
           ))
           .build());
 
-      player.sendMessage(components.builder(player, "bank.invite.received", "NotDefined", true)
-          .resolver(TagResolver.resolver(
-              Placeholder.parsed("bank", bankId),
-              Placeholder.parsed("owner", sender.getName()),
-              Placeholder.parsed("role", finalRoleId)
-          ))
-          .build());
+      sendClickableInviteMessage(player, bankId, ownerUuid, finalRoleId, sender.getName());
     }).exceptionally(ex -> {
       if (isMarker(ex, "invitee_already_in_another_bank")) {
         sender.sendMessage(components.builder(sender, "bank.invite.invitee-already-member", "NotDefined", true)
@@ -713,14 +721,7 @@ public final class EconomyBankCommand implements Service {
           ))
           .build());
 
-      player.sendMessage(components.builder(player, "bank.invite.received-other", "NotDefined", true)
-          .resolver(TagResolver.resolver(
-              Placeholder.parsed("bank", bankId),
-              Placeholder.parsed("owner", nameOrUuid(ownerUuid)),
-              Placeholder.parsed("inviter", sender.getName()),
-              Placeholder.parsed("role", finalRoleId)
-          ))
-          .build());
+      sendClickableInviteMessage(player, bankId, ownerUuid, finalRoleId, sender.getName());
     }).exceptionally(ex -> {
       if (isMarker(ex, "invitee_already_in_another_bank")) {
         sender.sendMessage(components.builder(sender, "bank.invite.invitee-already-member", "NotDefined", true)
@@ -841,28 +842,29 @@ public final class EconomyBankCommand implements Service {
       return 0;
     }
 
-    bankService.acceptInviteFromOwner(ownerUuid, sender.getUniqueId()).thenAccept(ok -> {
-      String ownerShown = nameOrUuid(ownerUuid);
+    promptInviteAcceptance(sender, ownerUuid, null);
 
-      if (!ok) {
-        sender.sendMessage(components.builder(sender, "bank.other.accept.none", "NotDefined", true)
-            .resolver(TagResolver.resolver(Placeholder.parsed("owner", ownerShown)))
-            .build());
-        return;
-      }
+    return 1;
+  }
 
-      sender.sendMessage(components.builder(sender, "bank.other.accept.success", "NotDefined", true)
-          .resolver(TagResolver.resolver(Placeholder.parsed("owner", ownerShown)))
+  @Command(value = "other accept <owner> <bank>", permission = "nexeconomy.bank.other.accept")
+  public int acceptOtherWithBank(
+      NexPaperCommandSource source,
+      @Arg("owner") @Suggest(BankOwnerSuggestion.class) String ownerName,
+      @Arg("bank") @Suggest(BankSuggestion.class) String bank
+  ) {
+    Player sender = (Player) source.sender();
+    if (sender == null) return 0;
+
+    UUID ownerUuid = resolvePlayerUuidByName(ownerName);
+    if (ownerUuid == null) {
+      sender.sendMessage(components.builder(sender, "general.player-not-found", "NotDefined", true)
+          .resolver(TagResolver.resolver(Placeholder.parsed("player", ownerName == null ? "unknown" : ownerName)))
           .build());
-    }).exceptionally(ex -> {
-      if (isMarker(ex, "invitee_already_member_somewhere")) {
-        sender.sendMessage(components.builder(sender, "bank.accept.already-member", "NotDefined", true).build());
-        return null;
-      }
-      sendBankError(sender, ex);
-      return null;
-    });
+      return 0;
+    }
 
+    promptInviteAcceptance(sender, ownerUuid, normalize(bank));
     return 1;
   }
 
@@ -949,6 +951,167 @@ public final class EconomyBankCommand implements Service {
     String name = off.getName();
     return (name == null || name.isBlank()) ? uuid.toString() : name;
   }
+
+  private void sendClickableInviteMessage(Player player, String bankId, UUID ownerUuid, String roleId, String inviterName) {
+    if (player == null || ownerUuid == null) return;
+
+    String bankShown = bankId == null ? "" : bankId;
+    String ownerShown = nameOrUuid(ownerUuid);
+    String roleShown = (roleId == null || roleId.isBlank()) ? "member" : roleId;
+
+    Component hover = components.builder(player, "bank.invite.received-hover", "NotDefined", true)
+        .resolver(TagResolver.resolver(
+            Placeholder.parsed("bank", bankShown),
+            Placeholder.parsed("owner", ownerShown),
+            Placeholder.parsed("role", roleShown)
+        ))
+        .build();
+
+    Component base = components.builder(player, "bank.invite.received", "NotDefined", true)
+        .resolver(TagResolver.resolver(
+            Placeholder.parsed("bank", bankShown),
+            Placeholder.parsed("owner", ownerShown),
+            Placeholder.parsed("inviter", inviterName == null || inviterName.isBlank() ? ownerShown : inviterName),
+            Placeholder.parsed("role", roleShown)
+        ))
+        .build();
+
+    base = base.clickEvent(ClickEvent.runCommand("/bank other accept " + ownerUuid + " " + bankShown))
+        .hoverEvent(HoverEvent.showText(hover));
+
+    player.sendMessage(base);
+  }
+
+  private void promptInviteAcceptance(Player sender, UUID ownerUuid, String bankFilter) {
+    if (sender == null || ownerUuid == null) return;
+
+    bankService.invites(sender.getUniqueId())
+        .thenCompose(list -> {
+          InviteLookupRow row = findInviteRow(list, ownerUuid, bankFilter);
+          if (row == null) {
+            return CompletableFuture.completedFuture(null);
+          }
+
+          return bankService.bank(row.bankIdLower()).thenApply(def ->
+              new InvitePrompt(row, def.map(BankDefinition::nameMiniMessage).orElse(row.bankIdLower()))
+          );
+        })
+        .thenAccept(prompt -> Bukkit.getScheduler().runTask(plugin, () -> {
+          if (prompt == null) {
+            sender.sendMessage(components.builder(sender, "bank.invite.accept.none", "NotDefined", true)
+                .resolver(TagResolver.resolver(Placeholder.parsed("owner", nameOrUuid(ownerUuid))))
+                .build());
+            return;
+          }
+
+          showInviteConfirmDialog(sender, prompt);
+        }))
+        .exceptionally(ex -> {
+          Bukkit.getScheduler().runTask(plugin, () -> {
+            if (isMarker(ex, "invitee_already_member_somewhere")) {
+              sender.sendMessage(components.builder(sender, "bank.invite.accept.already-member", "NotDefined", true).build());
+              return;
+            }
+
+            sendBankError(sender, ex);
+          });
+          return null;
+        });
+  }
+
+  private void showInviteConfirmDialog(Player sender, InvitePrompt prompt) {
+    if (sender == null || prompt == null || prompt.row() == null || confirmDialogs == null) return;
+
+    InviteLookupRow row = prompt.row();
+    String bankShown = prompt.bankShown() == null || prompt.bankShown().isBlank() ? row.bankIdLower() : prompt.bankShown();
+    String ownerShown = nameOrUuid(row.ownerUuid());
+    String roleShown = row.roleIdLower() == null || row.roleIdLower().isBlank() ? "member" : row.roleIdLower();
+
+    ConfirmDialog confirm = confirmDialogs.create()
+        .title(localizedLegacy(sender, "bank.invite.dialog.title"))
+        .body(localizedLegacy(sender, "bank.invite.dialog.body", TagResolver.resolver(List.of(
+            Placeholder.parsed("bank", bankShown),
+            Placeholder.parsed("owner", ownerShown),
+            Placeholder.parsed("role", roleShown)
+        ))))
+        .confirmButton(localizedLegacy(sender, "bank.invite.dialog.confirm"))
+        .cancelButton(localizedLegacy(sender, "bank.invite.dialog.cancel"));
+
+    confirm.show(sender).thenAccept(result -> {
+      if (!Boolean.TRUE.equals(result)) return;
+
+      bankService.acceptInvite(row.bankIdLower(), row.ownerUuid(), sender.getUniqueId())
+          .thenAccept(ok -> Bukkit.getScheduler().runTask(plugin, () -> {
+            if (Boolean.TRUE.equals(ok)) {
+              sender.sendMessage(components.builder(sender, "bank.invite.accept.success", "NotDefined", true)
+                  .resolver(TagResolver.resolver(
+                      Placeholder.parsed("bank", bankShown),
+                      Placeholder.parsed("owner", ownerShown),
+                      Placeholder.parsed("role", roleShown)
+                  ))
+                  .build());
+              return;
+            }
+
+            sender.sendMessage(components.builder(sender, "bank.invite.accept.none", "NotDefined", true)
+                .resolver(TagResolver.resolver(
+                    Placeholder.parsed("bank", bankShown),
+                    Placeholder.parsed("owner", ownerShown),
+                    Placeholder.parsed("role", roleShown)
+                ))
+                .build());
+          }))
+          .exceptionally(ex -> {
+            Bukkit.getScheduler().runTask(plugin, () -> {
+              if (isMarker(ex, "invitee_already_member_somewhere")) {
+                sender.sendMessage(components.builder(sender, "bank.invite.accept.already-member", "NotDefined", true).build());
+                return;
+              }
+
+              sender.sendMessage(components.builder(sender, "bank.invite.accept.failed", "NotDefined", true)
+                  .resolver(TagResolver.resolver(
+                      Placeholder.parsed("bank", bankShown),
+                      Placeholder.parsed("owner", ownerShown),
+                      Placeholder.parsed("role", roleShown)
+                  ))
+                  .build());
+              sendBankError(sender, ex);
+            });
+            return null;
+          });
+    });
+  }
+
+  private static InviteLookupRow findInviteRow(List<InviteLookupRow> rows, UUID ownerUuid, String bankFilter) {
+    if (rows == null || rows.isEmpty() || ownerUuid == null) return null;
+
+    String bankId = normalize(bankFilter);
+    Instant now = Instant.now();
+
+    for (InviteLookupRow row : rows) {
+      if (row == null || row.ownerUuid() == null || !row.ownerUuid().equals(ownerUuid)) continue;
+      if (!bankId.isBlank() && !bankId.equals(normalize(row.bankIdLower()))) continue;
+      if (row.expiresAt() != null && row.expiresAt().isBefore(now)) continue;
+      return row;
+    }
+
+    return null;
+  }
+
+  private String localizedLegacy(Player player, String key, TagResolver... extraResolvers) {
+    if (player == null || components == null) return key;
+
+    var builder = components.builder(player, key, "NotDefined", true);
+    if (extraResolvers != null) {
+      for (TagResolver resolver : extraResolvers) {
+        if (resolver != null) builder.resolver(resolver);
+      }
+    }
+
+    return LegacyComponentSerializer.legacySection().serialize(builder.build());
+  }
+
+  private record InvitePrompt(InviteLookupRow row, String bankShown) {}
 
   private CompletableFuture<CurrencyDefinition> resolveCurrency(String bankIdLower) {
     String id = normalize(bankIdLower);

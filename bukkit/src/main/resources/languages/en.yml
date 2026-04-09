@@ -159,6 +159,22 @@ bank:
     self: '<gray>The members of <yellow><bank></yellow> are: <yellow><members></yellow>.'
     other: '<gray>The members of <yellow><bank></yellow> <gray>(owner: <yellow><owner></yellow>) are: <yellow><members></yellow>.'
 
+  invite:
+    sent: '<gray>You invited <yellow><player></yellow> to <yellow><bank></yellow> as <yellow><role></yellow>.</gray>'
+    sent-other: '<gray>You invited <yellow><player></yellow> to <yellow><bank></yellow> <gray>(owner: <yellow><owner></yellow>)</gray> as <yellow><role></yellow>.</gray>'
+    received: '<gray>You have been invited to <yellow><bank></yellow> by <yellow><owner></yellow> as <yellow><role></yellow>.</gray>'
+    received-hover: '<yellow>Click here to accept the invite.</yellow><newline><gray>Bank: <yellow><bank></yellow></gray><newline><gray>Owner: <yellow><owner></yellow></gray><newline><gray>Role: <yellow><role></yellow></gray>'
+    dialog:
+      title: '<yellow>Accept bank invite?</yellow>'
+      body: '<gray>Do you want to accept the invite for <yellow><bank></yellow> from <yellow><owner></yellow> as <yellow><role></yellow>?</gray>'
+      confirm: 'Accept invite'
+      cancel: 'Cancel'
+    accept:
+      success: '<gray>You have accepted the invite for <yellow><bank></yellow> from <yellow><owner></yellow> as <yellow><role></yellow>.</gray>'
+      none: '<red>No valid invite from <dark_red><owner></dark_red> was found for <yellow><bank></yellow>.</red>'
+      failed: '<red>Could not accept the invite for <yellow><bank></yellow> from <dark_red><owner></dark_red>.</red>'
+      already-member: '<red>You are already a member of another bank.</red>'
+
   deposit:
     self: '<gray>You deposited <yellow><amount></yellow> into <yellow><bank></yellow>.'
     other: '<gray>You deposited <yellow><amount></yellow> into <yellow><bank></yellow> <gray>(owner: <yellow><owner></yellow>).</gray>'
