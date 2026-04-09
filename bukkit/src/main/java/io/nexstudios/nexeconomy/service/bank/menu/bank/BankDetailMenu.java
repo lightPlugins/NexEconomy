@@ -21,6 +21,7 @@ import io.nexstudios.nexeconomy.definition.CurrencyType;
 import io.nexstudios.nexeconomy.definition.MantissaAmount;
 import io.nexstudios.nexeconomy.service.bank.cache.BankAccountCacheService;
 import io.nexstudios.nexeconomy.service.bank.BankService;
+import io.nexstudios.nexeconomy.service.bank.effects.BankClickEffectService;
 import io.nexstudios.nexeconomy.service.bank.definition.BankDefinition;
 import io.nexstudios.nexeconomy.service.bank.level.BankLevelService;
 import io.nexstudios.nexeconomy.service.economy.EconomyPlayerCacheService;
@@ -192,6 +193,7 @@ public final class BankDetailMenu {
       setFallbackButton(ctx, SLOT_INFO, Material.BARRIER, "Bank not available", "Open this menu from the bank overview.", null);
       setFallbackButton(ctx, SLOT_BACK, Material.ARROW, "Back", "Return to overview", clickCtx -> {
         clickCtx.cancel();
+        triggerGeneralClick(clickCtx.viewer().uniqueId());
         if (servicesRef != null) {
           BankOverviewMenu.open(servicesRef, clickCtx.viewer());
         }
@@ -204,6 +206,7 @@ public final class BankDetailMenu {
       setFallbackButton(ctx, SLOT_INFO, Material.BARRIER, "Bank not available", "The bank data could not be loaded.", null);
       setFallbackButton(ctx, SLOT_BACK, Material.ARROW, "Back", "Return to overview", clickCtx -> {
         clickCtx.cancel();
+        triggerGeneralClick(clickCtx.viewer().uniqueId());
         if (servicesRef != null) {
           BankOverviewMenu.open(servicesRef, clickCtx.viewer());
         }
@@ -218,6 +221,7 @@ public final class BankDetailMenu {
     setWithdrawButtons(ctx, data);
     setConfiguredButton(ctx, SLOT_BACK, backTemplate, "items.back", "Back", detailResolver(data), clickCtx -> {
       clickCtx.cancel();
+      triggerGeneralClick(clickCtx.viewer().uniqueId());
       if (servicesRef != null) {
         BankOverviewMenu.open(servicesRef, clickCtx.viewer());
       }
@@ -353,23 +357,34 @@ public final class BankDetailMenu {
   private static void setDepositButtons(MenuPopulateContext ctx, BankData data) {
     TagResolver resolver = detailResolver(data);
     if (!data.depositEnabled()) {
-      setConfiguredButton(ctx, SLOT_DEPOSIT, depositDisabledTemplate, "items.deposit-disabled", "Deposit", resolver, null);
-      setConfiguredButton(ctx, SLOT_DEPOSIT_ALL, depositAllDisabledTemplate, "items.deposit-all-disabled", "Deposit all", resolver, null);
+      setConfiguredButton(ctx, SLOT_DEPOSIT, depositDisabledTemplate, "items.deposit-disabled", "Deposit", resolver, clickCtx -> {
+        clickCtx.cancel();
+        triggerGeneralClick(clickCtx.viewer().uniqueId());
+      });
+      setConfiguredButton(ctx, SLOT_DEPOSIT_ALL, depositAllDisabledTemplate, "items.deposit-all-disabled", "Deposit all", resolver, clickCtx -> {
+        clickCtx.cancel();
+        triggerGeneralClick(clickCtx.viewer().uniqueId());
+      });
       return;
     }
 
     setConfiguredButton(ctx, SLOT_DEPOSIT, depositTemplate, "items.deposit", "Deposit", resolver, clickCtx -> {
       clickCtx.cancel();
+      triggerGeneralClick(clickCtx.viewer().uniqueId());
       openAmountDialog(clickCtx.viewer(), data, false);
     });
 
     if (data.remainingCapacity().compareTo(MantissaAmount.zero()) > 0 && data.walletBalance().compareTo(MantissaAmount.zero()) > 0) {
       setConfiguredButton(ctx, SLOT_DEPOSIT_ALL, depositAllTemplate, "items.deposit-all", "Deposit all", resolver, clickCtx -> {
         clickCtx.cancel();
+        triggerGeneralClick(clickCtx.viewer().uniqueId());
         openAllDepositDialog(clickCtx.viewer(), data);
       });
     } else {
-      setConfiguredButton(ctx, SLOT_DEPOSIT_ALL, depositAllDisabledTemplate, "items.deposit-all-disabled", "Deposit all", resolver, null);
+      setConfiguredButton(ctx, SLOT_DEPOSIT_ALL, depositAllDisabledTemplate, "items.deposit-all-disabled", "Deposit all", resolver, clickCtx -> {
+        clickCtx.cancel();
+        triggerGeneralClick(clickCtx.viewer().uniqueId());
+      });
     }
   }
 
@@ -377,6 +392,7 @@ public final class BankDetailMenu {
     TagResolver resolver = detailResolver(data);
     setConfiguredButton(ctx, SLOT_TRANSACTIONS, transactionsTemplate, "items.transactions", "Transactions", resolver, clickCtx -> {
       clickCtx.cancel();
+      triggerGeneralClick(clickCtx.viewer().uniqueId());
       if (servicesRef != null) {
         BankTransactionMenu.open(servicesRef, clickCtx.viewer(), data.context().bankId(), data.context().ownerUuid(), data.context().ownerBank(), data.currency());
       }
@@ -387,6 +403,7 @@ public final class BankDetailMenu {
     TagResolver resolver = detailResolver(data);
     setConfiguredButton(ctx, SLOT_LEVEL, levelTemplate, "items.level", "Levels", resolver, clickCtx -> {
       clickCtx.cancel();
+      triggerGeneralClick(clickCtx.viewer().uniqueId());
       if (servicesRef != null) {
         BankLevelMenu.open(servicesRef, clickCtx.viewer(), data.context().bankId(), data.context().ownerUuid(), data.context().ownerBank());
       }
@@ -396,23 +413,34 @@ public final class BankDetailMenu {
   private static void setWithdrawButtons(MenuPopulateContext ctx, BankData data) {
     TagResolver resolver = detailResolver(data);
     if (!data.withdrawEnabled()) {
-      setConfiguredButton(ctx, SLOT_WITHDRAW, withdrawDisabledTemplate, "items.withdraw-disabled", "Withdraw", resolver, null);
-      setConfiguredButton(ctx, SLOT_WITHDRAW_ALL, withdrawAllDisabledTemplate, "items.withdraw-all-disabled", "Withdraw all", resolver, null);
+      setConfiguredButton(ctx, SLOT_WITHDRAW, withdrawDisabledTemplate, "items.withdraw-disabled", "Withdraw", resolver, clickCtx -> {
+        clickCtx.cancel();
+        triggerGeneralClick(clickCtx.viewer().uniqueId());
+      });
+      setConfiguredButton(ctx, SLOT_WITHDRAW_ALL, withdrawAllDisabledTemplate, "items.withdraw-all-disabled", "Withdraw all", resolver, clickCtx -> {
+        clickCtx.cancel();
+        triggerGeneralClick(clickCtx.viewer().uniqueId());
+      });
       return;
     }
 
     setConfiguredButton(ctx, SLOT_WITHDRAW, withdrawTemplate, "items.withdraw", "Withdraw", resolver, clickCtx -> {
       clickCtx.cancel();
+      triggerGeneralClick(clickCtx.viewer().uniqueId());
       openAmountDialog(clickCtx.viewer(), data, true);
     });
 
     if (data.bankBalance().compareTo(MantissaAmount.zero()) > 0) {
       setConfiguredButton(ctx, SLOT_WITHDRAW_ALL, withdrawAllTemplate, "items.withdraw-all", "Withdraw all", resolver, clickCtx -> {
         clickCtx.cancel();
+        triggerGeneralClick(clickCtx.viewer().uniqueId());
         openAllWithdrawDialog(clickCtx.viewer(), data);
       });
     } else {
-      setConfiguredButton(ctx, SLOT_WITHDRAW_ALL, withdrawAllDisabledTemplate, "items.withdraw-all-disabled", "Withdraw all", resolver, null);
+      setConfiguredButton(ctx, SLOT_WITHDRAW_ALL, withdrawAllDisabledTemplate, "items.withdraw-all-disabled", "Withdraw all", resolver, clickCtx -> {
+        clickCtx.cancel();
+        triggerGeneralClick(clickCtx.viewer().uniqueId());
+      });
     }
   }
 
@@ -747,11 +775,15 @@ public final class BankDetailMenu {
         .thenAccept(done -> Bukkit.getScheduler().runTask(plugin, () -> {
           String shown = AmountNotation.formatShort(done, data.currency().fractionDigits());
           player.sendMessage(Component.text("Deposited " + shown + "."));
+          triggerDepositSuccess(player);
           refreshOpenView(player);
         }))
         .exceptionally(ex -> {
           Bukkit.getScheduler().runTask(plugin,
-              () -> player.sendMessage(Component.text("Deposit failed: " + rootMessage(ex))));
+              () -> {
+                triggerDepositFailed(player);
+                player.sendMessage(Component.text("Deposit failed: " + rootMessage(ex)));
+              });
           return null;
         });
   }
@@ -763,25 +795,83 @@ public final class BankDetailMenu {
           applyWithdrawUsageOptimistically(player.getUniqueId(), data, done);
           String shown = AmountNotation.formatShort(done, data.currency().fractionDigits());
           player.sendMessage(Component.text("Withdrew " + shown + "."));
+          triggerWithdrawSuccess(player);
           refreshOpenView(player);
         }))
         .exceptionally(ex -> {
           Bukkit.getScheduler().runTask(plugin,
-              () -> player.sendMessage(Component.text("Withdraw failed: " + rootMessage(ex))));
+              () -> {
+                triggerWithdrawFailed(player);
+                player.sendMessage(Component.text("Withdraw failed: " + rootMessage(ex)));
+              });
           return null;
         });
   }
 
-  private static MantissaAmount currentWalletBalance(UUID playerUuid, CurrencyDefinition currency) {
-    EconomyPlayerCacheService economyCache = servicesRef.getService(EconomyPlayerCacheService.class);
-    if (economyCache == null || playerUuid == null || currency == null) return MantissaAmount.zero();
+  private static void triggerGeneralClick(UUID viewerUuid) {
+    if (viewerUuid == null || servicesRef == null) {
+      return;
+    }
 
-    EconomyPlayer econ = economyCache.getOnline(playerUuid);
-    if (econ == null) return MantissaAmount.zero();
-
-    EconomyPlayer.BalanceEntry entry = econ.entry(currency.id());
-    return entry == null || entry.amount() == null ? MantissaAmount.zero() : entry.amount();
+    Player player = Bukkit.getPlayer(viewerUuid);
+    if (player != null) {
+      triggerClick(player, ClickEffectType.GENERAL);
+    }
   }
+
+  private static void triggerDepositSuccess(Player player) {
+    triggerClick(player, ClickEffectType.DEPOSIT_SUCCESS);
+  }
+
+  private static void triggerDepositFailed(Player player) {
+    triggerClick(player, ClickEffectType.DEPOSIT_FAILED);
+  }
+
+  private static void triggerWithdrawSuccess(Player player) {
+    triggerClick(player, ClickEffectType.WITHDRAW_SUCCESS);
+  }
+
+  private static void triggerWithdrawFailed(Player player) {
+    triggerClick(player, ClickEffectType.WITHDRAW_FAILED);
+  }
+
+  private static void triggerClick(Player player, ClickEffectType type) {
+    if (servicesRef == null || player == null || type == null) {
+      return;
+    }
+
+    BankClickEffectService effects = servicesRef.getService(BankClickEffectService.class);
+    if (effects == null) {
+      return;
+    }
+
+    switch (type) {
+      case GENERAL -> effects.executeGeneralClick(player);
+      case DEPOSIT_SUCCESS -> effects.executeDepositSuccess(player);
+      case DEPOSIT_FAILED -> effects.executeDepositFailed(player);
+      case WITHDRAW_SUCCESS -> effects.executeWithdrawSuccess(player);
+      case WITHDRAW_FAILED -> effects.executeWithdrawFailed(player);
+    }
+  }
+
+  private enum ClickEffectType {
+    GENERAL,
+    DEPOSIT_SUCCESS,
+    DEPOSIT_FAILED,
+    WITHDRAW_SUCCESS,
+    WITHDRAW_FAILED
+  }
+
+   private static MantissaAmount currentWalletBalance(UUID playerUuid, CurrencyDefinition currency) {
+     EconomyPlayerCacheService economyCache = servicesRef.getService(EconomyPlayerCacheService.class);
+     if (economyCache == null || playerUuid == null || currency == null) return MantissaAmount.zero();
+
+     EconomyPlayer econ = economyCache.getOnline(playerUuid);
+     if (econ == null) return MantissaAmount.zero();
+
+     EconomyPlayer.BalanceEntry entry = econ.entry(currency.id());
+     return entry == null || entry.amount() == null ? MantissaAmount.zero() : entry.amount();
+   }
 
   private static void refreshOpenView(Player player) {
     MenuService menuService = servicesRef.getService(MenuService.class);

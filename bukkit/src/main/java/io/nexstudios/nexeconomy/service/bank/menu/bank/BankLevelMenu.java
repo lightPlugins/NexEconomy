@@ -17,6 +17,7 @@ import io.nexstudios.nexeconomy.definition.CurrencyDefinition;
 import io.nexstudios.nexeconomy.definition.MantissaAmount;
 import io.nexstudios.nexeconomy.service.bank.BankService;
 import io.nexstudios.nexeconomy.service.bank.cache.BankAccountCacheService;
+import io.nexstudios.nexeconomy.service.bank.effects.BankClickEffectService;
 import io.nexstudios.nexeconomy.service.bank.definition.BankDefinition;
 import io.nexstudios.nexeconomy.service.bank.level.BankLevelService;
 import io.nexstudios.nexeconomy.service.bank.registry.BankRegistryService;
@@ -157,6 +158,7 @@ public final class BankLevelMenu {
 
     setConfiguredButton(ctx, SLOT_BACK, backTemplate, "items.back", "Back", resolver, clickCtx -> {
       clickCtx.cancel();
+      triggerGeneralClick(clickCtx.viewer().uniqueId());
       if (servicesRef != null && context != null) {
         BankDetailMenu.open(servicesRef, clickCtx.viewer(), context.bankId(), context.ownerUuid(), context.ownerBank());
       } else if (servicesRef != null) {
@@ -271,10 +273,11 @@ public final class BankLevelMenu {
         (entry, index) -> () -> MenuItem.of(renderLevelItem(entry)),
         navigation,
         Optional.of((entry, index, clickCtx) -> {
+          clickCtx.cancel();
+          triggerGeneralClick(clickCtx.viewer().uniqueId());
           if (!entry.canUpgrade()) {
             return;
           }
-          clickCtx.cancel();
           attemptUpgrade(clickCtx.viewer(), entry);
         })
     );
@@ -285,14 +288,14 @@ public final class BankLevelMenu {
     ItemStack template = switch (entry.state()) {
       case UNLOCKED -> unlockedTemplate;
       case PREVIOUS_NEEDS_TO_BE_UNLOCKED -> previousNeedsUnlockedTemplate;
-      case CONDITIONS_NOT_TRUE -> conditionsNotMetTemplate;
+      case CONDITIONS_NOT_MET -> conditionsNotMetTemplate;
       case READY_FOR_UNLOCK -> readyForUnlockTemplate;
     };
 
     String fallbackName = switch (entry.state()) {
       case UNLOCKED -> "<dark_gray>» <green>Unlocked <level></green>";
       case PREVIOUS_NEEDS_TO_BE_UNLOCKED -> "<dark_gray>» <red>Previous needs to be unlocked</red>";
-      case CONDITIONS_NOT_TRUE -> "<dark_gray>» <red>Conditions not true</red>";
+      case CONDITIONS_NOT_MET -> "<dark_gray>» <red>Conditions not true</red>";
       case READY_FOR_UNLOCK -> "<dark_gray>» <yellow>Ready for unlock</yellow>";
     };
 
@@ -346,24 +349,28 @@ public final class BankLevelMenu {
     BankDefinition definition = bankRegistry.bank(entry.bankId()).orElse(null);
     if (definition == null) {
       sendMessage(player, "bank.errors.bank-not-available", Placeholder.parsed("bank", entry.bankName()));
+      triggerUpgradeFailed(player);
       return;
     }
 
     CurrencyDefinition currency = currencies.currency(definition.currencyIdLower());
     if (currency == null) {
       sendMessage(player, "bank.errors.internal", Placeholder.parsed("error", "Currency not found"));
+      triggerUpgradeFailed(player);
       return;
     }
 
     BankDefinition.LevelDefinition levelDef = findLevel(definition, entry.level());
     if (levelDef == null) {
       sendMessage(player, "bank.errors.internal", Placeholder.parsed("error", "Level definition not found"));
+      triggerUpgradeFailed(player);
       return;
     }
 
     String permission = levelDef.permission() == null ? "" : levelDef.permission().trim();
     if (!permission.isBlank() && !player.hasPermission(permission)) {
       sendMessage(player, "bank.level.permission-denied", Placeholder.parsed("bank", entry.bankName()));
+      triggerUpgradeFailed(player);
       return;
     }
 
@@ -373,6 +380,7 @@ public final class BankLevelMenu {
     BankDefinition.RoleDefinition currentRole = resolveRole(definition, new LevelContext(entry.bankId(), entry.ownerUuid(), false), player.getUniqueId(), currentMember);
     if (currentRole != null && !currentRole.canUpgrade()) {
       sendMessage(player, "bank.level.role-cannot-upgrade", Placeholder.parsed("bank", entry.bankName()));
+      triggerUpgradeFailed(player);
       return;
     }
 
@@ -384,6 +392,7 @@ public final class BankLevelMenu {
           Placeholder.parsed("required", bankService().formatBalanceWithCurrency(cost, currency)),
           Placeholder.parsed("currency", currency.symbolPlural())
       )));
+      triggerUpgradeFailed(player);
       return;
     }
 
@@ -402,6 +411,7 @@ public final class BankLevelMenu {
           });
     }).thenAccept(success -> Bukkit.getScheduler().runTask(plugin, () -> {
       if (!Boolean.TRUE.equals(success)) {
+        triggerUpgradeFailed(player);
         sendMessage(player, "bank.errors.internal", Placeholder.parsed("error", "Upgrade failed"));
         return;
       }
@@ -412,11 +422,55 @@ public final class BankLevelMenu {
           Placeholder.parsed("level", String.valueOf(entry.level())),
           Placeholder.parsed("cost", bankService().formatBalanceWithCurrency(cost, currency))
       )));
+      triggerUpgradeSuccess(player);
       refreshOpenView(player);
     })).exceptionally(ex -> {
-      Bukkit.getScheduler().runTask(plugin, () -> sendMessage(player, "bank.errors.internal", Placeholder.parsed("error", rootMessage(ex))));
+      Bukkit.getScheduler().runTask(plugin, () -> {
+        triggerUpgradeFailed(player);
+        sendMessage(player, "bank.errors.internal", Placeholder.parsed("error", rootMessage(ex)));
+      });
       return null;
     });
+  }
+
+  private static void triggerGeneralClick(UUID viewerUuid) {
+    triggerClick(viewerUuid, ClickEffectType.GENERAL);
+  }
+
+  private static void triggerUpgradeSuccess(Player player) {
+    triggerClick(player, ClickEffectType.UPGRADE_SUCCESS);
+  }
+
+  private static void triggerUpgradeFailed(Player player) {
+    triggerClick(player, ClickEffectType.UPGRADE_FAILED);
+  }
+
+  private static void triggerClick(UUID viewerUuid, ClickEffectType type) {
+    if (viewerUuid == null || type == null) {
+      return;
+    }
+
+    Player player = Bukkit.getPlayer(viewerUuid);
+    if (player != null) {
+      triggerClick(player, type);
+    }
+  }
+
+  private static void triggerClick(Player player, ClickEffectType type) {
+    if (servicesRef == null || player == null || type == null) {
+      return;
+    }
+
+    BankClickEffectService effects = servicesRef.getService(BankClickEffectService.class);
+    if (effects == null) {
+      return;
+    }
+
+    switch (type) {
+      case GENERAL -> effects.executeGeneralClick(player);
+      case UPGRADE_SUCCESS -> effects.executeBankUpgradeSuccess(player);
+      case UPGRADE_FAILED -> effects.executeBankUpgradeFailed(player);
+    }
   }
 
   private static void invalidateBankAccount(UUID bankAccountId) {
@@ -466,6 +520,117 @@ public final class BankLevelMenu {
         refreshOpenView(player);
       }
     });
+  }
+
+  private static void setConfiguredButton(MenuPopulateContext ctx,
+                                          int slot,
+                                          ItemStack template,
+                                          String path,
+                                          String fallbackName,
+                                          TagResolver resolver,
+                                          MenuSlot.MenuClickHandler clickHandler) {
+    ItemStack stack = renderConfiguredItem(template, path, fallbackName, resolver);
+
+    MenuSlot menuSlot = ctx.slot(slot);
+    menuSlot.setPlannedItem(() -> MenuItem.of(stack));
+    if (clickHandler != null) {
+      menuSlot.onClick(clickHandler);
+    }
+  }
+
+  private static FileConfiguration loadConfig() {
+    return fileReaderService.load(CONFIG_PATH, CONFIG_FILE, true);
+  }
+
+  private static ItemStack configuredItem(FileConfiguration cfg, String path, Material fallback) {
+    ConfigurationSection section = cfg.getSection(path);
+    if (section == null) {
+      return new ItemStack(fallback);
+    }
+
+    return configItemService.convertSectionToItem(section)
+        .orElseGet(() -> new ItemStack(fallback));
+  }
+
+  private static ItemStack renderConfiguredItem(ItemStack template, String path, String fallbackName, TagResolver resolver) {
+    String rawName = bankConfig == null ? fallbackName : bankConfig.getString(path + ".display-name", fallbackName);
+    if (rawName == null || rawName.isBlank()) {
+      rawName = fallbackName;
+    }
+
+    return itemService.builder(template.clone())
+        .name(MiniMessage.miniMessage().deserialize(rawName, resolver))
+        .lore(l -> {
+          l.tagResolver(resolver);
+          l.build();
+        })
+        .build();
+  }
+
+  private static PageBounds readBounds(FileConfiguration cfg) {
+    ConfigurationSection bounds = cfg.getSection("layout.levels.bounds");
+    int x = bounds != null ? bounds.getInt("x", 1) : 1;
+    int y = bounds != null ? bounds.getInt("y", 2) : 2;
+    int width = bounds != null ? bounds.getInt("width", 7) : 7;
+    int height = bounds != null ? bounds.getInt("height", 1) : 1;
+    String alignmentRaw = bounds != null ? bounds.getString("alignment", "CENTER") : "CENTER";
+    return new PageBounds(x, y, width, height, parseAlignment(alignmentRaw));
+  }
+
+  private static PageNavigation buildNavigation(FileConfiguration cfg, ItemStack previous, ItemStack next) {
+    ConfigurationSection nav = cfg.getSection("layout.levels.navigation");
+    int previousSlot = nav != null ? nav.getInt("previous-slot", 45) : 45;
+    int nextSlot = nav != null ? nav.getInt("next-slot", 53) : 53;
+    boolean showCurrentPageAmount = nav == null || nav.getBoolean("show-current-page-amount", true);
+    boolean hidePreviousOnFirstPage = nav == null || nav.getBoolean("hide-previous-on-first-page", true);
+    boolean hideNextOnLastPage = nav == null || nav.getBoolean("hide-next-on-last-page", true);
+
+    return PageNavigation.builder()
+        .previousSlot(previousSlot)
+        .nextSlot(nextSlot)
+        .previousItem(previous)
+        .nextItem(next)
+        .showCurrentPageAmount(showCurrentPageAmount)
+        .hidePreviousOnFirstPage(hidePreviousOnFirstPage)
+        .hideNextOnLastPage(hideNextOnLastPage)
+        .build();
+  }
+
+  private static PageAlignment parseAlignment(String raw) {
+    if (raw == null) {
+      return PageAlignment.CENTER;
+    }
+
+    return switch (raw.trim().toUpperCase(Locale.ROOT)) {
+      case "LEFT" -> PageAlignment.LEFT;
+      case "RIGHT" -> PageAlignment.RIGHT;
+      default -> PageAlignment.CENTER;
+    };
+  }
+
+  private static Duration parseRefreshInterval(String raw) {
+    if (raw == null || raw.isBlank()) {
+      return Duration.ofSeconds(1);
+    }
+
+    String normalized = raw.trim().toLowerCase(Locale.ROOT);
+    try {
+      if (normalized.endsWith("ms")) {
+        return Duration.ofMillis(Long.parseLong(normalized.substring(0, normalized.length() - 2).trim()));
+      }
+
+      if (normalized.endsWith("s")) {
+        return Duration.ofSeconds(Long.parseLong(normalized.substring(0, normalized.length() - 1).trim()));
+      }
+
+      if (normalized.endsWith("m")) {
+        return Duration.ofMinutes(Long.parseLong(normalized.substring(0, normalized.length() - 1).trim()));
+      }
+
+      return Duration.ofSeconds(Long.parseLong(normalized));
+    } catch (Exception ignored) {
+      return Duration.ofSeconds(1);
+    }
   }
 
   private static MantissaAmount currentWalletBalance(UUID playerUuid, CurrencyDefinition currency, EconomyPlayerCacheService economyCache) {
@@ -540,14 +705,14 @@ public final class BankLevelMenu {
     if (roleCanUpgrade && hasPermission && hasFunds) {
       return LevelState.READY_FOR_UNLOCK;
     }
-    return LevelState.CONDITIONS_NOT_TRUE;
+    return LevelState.CONDITIONS_NOT_MET;
   }
 
   private static String resolveStatus(LevelState state) {
     return switch (state) {
       case UNLOCKED -> "Unlocked";
       case PREVIOUS_NEEDS_TO_BE_UNLOCKED -> "Previous needs to be unlocked";
-      case CONDITIONS_NOT_TRUE -> "Conditions not true";
+      case CONDITIONS_NOT_MET -> "Conditions not true";
       case READY_FOR_UNLOCK -> "Ready for unlock";
     };
   }
@@ -564,7 +729,7 @@ public final class BankLevelMenu {
       case UNLOCKED -> "Already unlocked";
       case PREVIOUS_NEEDS_TO_BE_UNLOCKED -> "Unlock level " + (currentLevel + 1) + " first";
       case READY_FOR_UNLOCK -> "Click to upgrade";
-      case CONDITIONS_NOT_TRUE -> {
+      case CONDITIONS_NOT_MET -> {
         if (!roleCanUpgrade) {
           yield "Your role cannot upgrade";
         }
@@ -721,113 +886,23 @@ public final class BankLevelMenu {
         .serialize(MiniMessage.miniMessage().deserialize(value));
   }
 
-  private static void setConfiguredButton(MenuPopulateContext ctx,
-                                          int slot,
-                                          ItemStack template,
-                                          String path,
-                                          String fallbackName,
-                                          TagResolver resolver,
-                                          MenuSlot.MenuClickHandler clickHandler) {
-    ItemStack stack = renderConfiguredItem(template, path, fallbackName, resolver);
-    MenuSlot menuSlot = ctx.slot(slot);
-    menuSlot.setPlannedItem(() -> MenuItem.of(stack));
-    if (clickHandler != null) {
-      menuSlot.onClick(clickHandler);
+  private enum LevelState {
+    UNLOCKED("items.unlocked"),
+    PREVIOUS_NEEDS_TO_BE_UNLOCKED("items.previous-needs-to-be-unlocked"),
+    CONDITIONS_NOT_MET("items.conditions-not-met"),
+    READY_FOR_UNLOCK("items.ready-for-unlock");
+
+    private final String path;
+
+    LevelState(String path) {
+      this.path = path;
     }
   }
 
-  private static ItemStack renderConfiguredItem(ItemStack template, String path, String fallbackName, TagResolver resolver) {
-    String rawName = bankConfig == null ? fallbackName : bankConfig.getString(path + ".display-name", fallbackName);
-    if (rawName == null || rawName.isBlank()) {
-      rawName = fallbackName;
-    }
-
-    return itemService.builder(template.clone())
-        .name(MiniMessage.miniMessage().deserialize(rawName, resolver))
-        .lore(l -> {
-          l.tagResolver(resolver);
-          l.build();
-        })
-        .build();
-  }
-
-  private static FileConfiguration loadConfig() {
-    return fileReaderService.load(CONFIG_PATH, CONFIG_FILE, true);
-  }
-
-  private static ItemStack configuredItem(FileConfiguration cfg, String path, Material fallback) {
-    ConfigurationSection section = cfg.getSection(path);
-    if (section == null) {
-      return new ItemStack(fallback);
-    }
-
-    return configItemService.convertSectionToItem(section).orElseGet(() -> new ItemStack(fallback));
-  }
-
-  private static PageBounds readBounds(FileConfiguration cfg) {
-    ConfigurationSection bounds = cfg.getSection("layout.levels.bounds");
-    int x = bounds != null ? bounds.getInt("x", 1) : 1;
-    int y = bounds != null ? bounds.getInt("y", 2) : 2;
-    int width = bounds != null ? bounds.getInt("width", 7) : 7;
-    int height = bounds != null ? bounds.getInt("height", 1) : 1;
-    String alignmentRaw = bounds != null ? bounds.getString("alignment", "CENTER") : "CENTER";
-    return new PageBounds(x, y, width, height, parseAlignment(alignmentRaw));
-  }
-
-  private static PageNavigation buildNavigation(FileConfiguration cfg, ItemStack previous, ItemStack next) {
-    ConfigurationSection nav = cfg.getSection("layout.levels.navigation");
-    int previousSlot = nav != null ? nav.getInt("previous-slot", 45) : 45;
-    int nextSlot = nav != null ? nav.getInt("next-slot", 53) : 53;
-    boolean showCurrentPageAmount = nav == null || nav.getBoolean("show-current-page-amount", true);
-    boolean hidePreviousOnFirstPage = nav == null || nav.getBoolean("hide-previous-on-first-page", true);
-    boolean hideNextOnLastPage = nav == null || nav.getBoolean("hide-next-on-last-page", true);
-
-    return PageNavigation.builder()
-        .previousSlot(previousSlot)
-        .nextSlot(nextSlot)
-        .previousItem(previous)
-        .nextItem(next)
-        .showCurrentPageAmount(showCurrentPageAmount)
-        .hidePreviousOnFirstPage(hidePreviousOnFirstPage)
-        .hideNextOnLastPage(hideNextOnLastPage)
-        .build();
-  }
-
-  private static PageAlignment parseAlignment(String raw) {
-    if (raw == null) {
-      return PageAlignment.CENTER;
-    }
-
-    return switch (raw.trim().toUpperCase(Locale.ROOT)) {
-      case "LEFT" -> PageAlignment.LEFT;
-      case "RIGHT" -> PageAlignment.RIGHT;
-      default -> PageAlignment.CENTER;
-    };
-  }
-
-  private static Duration parseRefreshInterval(String raw) {
-    if (raw == null || raw.isBlank()) {
-      return Duration.ofSeconds(1);
-    }
-
-    String normalized = raw.trim().toLowerCase(Locale.ROOT);
-    try {
-      if (normalized.endsWith("ms")) {
-        return Duration.ofMillis(Long.parseLong(normalized.substring(0, normalized.length() - 2).trim()));
-      }
-
-      if (normalized.endsWith("s")) {
-        return Duration.ofSeconds(Long.parseLong(normalized.substring(0, normalized.length() - 1).trim()));
-      }
-
-      if (normalized.endsWith("m")) {
-        return Duration.ofMinutes(Long.parseLong(normalized.substring(0, normalized.length() - 1).trim()));
-      }
-
-      return Duration.ofSeconds(Long.parseLong(normalized));
-    } catch (Exception ignored) {
-      return Duration.ofSeconds(1);
-    }
+  private enum ClickEffectType {
+    GENERAL,
+    UPGRADE_SUCCESS,
+    UPGRADE_FAILED
   }
 
   private record LevelContext(String bankId, UUID ownerUuid, boolean ownerBank) {}
@@ -863,25 +938,10 @@ public final class BankLevelMenu {
     }
   }
 
-  private enum LevelState {
-    UNLOCKED("items.unlocked"),
-    PREVIOUS_NEEDS_TO_BE_UNLOCKED("items.previous-needs-to-be-unlocked"),
-    CONDITIONS_NOT_TRUE("items.conditions-not-true"),
-    READY_FOR_UNLOCK("items.ready-for-unlock");
-
-    private final String path;
-
-    LevelState(String path) {
-      this.path = path;
-    }
-  }
-
-  private static BankService bankService() {
-    return servicesRef.getService(BankService.class);
-  }
+   private static BankService bankService() {
+     return servicesRef.getService(BankService.class);
+   }
 }
-
-
 
 
 

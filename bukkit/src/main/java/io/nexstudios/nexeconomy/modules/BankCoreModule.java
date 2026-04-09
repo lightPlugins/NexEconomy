@@ -6,6 +6,8 @@ import io.nexstudios.nexeconomy.service.bank.BankService;
 import io.nexstudios.nexeconomy.service.bank.DefaultBankService;
 import io.nexstudios.nexeconomy.service.bank.cache.BankAccountCacheService;
 import io.nexstudios.nexeconomy.service.bank.cache.BankAccountPresenceService;
+import io.nexstudios.nexeconomy.service.bank.effects.BankClickEffectService;
+import io.nexstudios.nexeconomy.service.bank.effects.DefaultBankClickEffectService;
 import io.nexstudios.nexeconomy.service.bank.interest.BankInterestService;
 import io.nexstudios.nexeconomy.service.bank.interest.DefaultBankInterestService;
 import io.nexstudios.nexeconomy.service.bank.level.BankLevelService;
@@ -29,6 +31,9 @@ public final class BankCoreModule implements ServiceModule {
     // Register base services first (no internal dependencies)
     services.register(BankRegistryService.class, DefaultBankRegistryService.class);
     services.register(BankRepositoryService.class, DefaultBankRepositoryService.class);
+
+    //Click action effects
+    services.register(BankClickEffectService.class, DefaultBankClickEffectService.class);
 
     // Register cache services before cache-dependent services
     services.register(BankAccountCacheService.class, BankAccountCacheService.class);

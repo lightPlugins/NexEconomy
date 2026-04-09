@@ -25,6 +25,35 @@ layout:
       hide-previous-on-first-page: true
       hide-next-on-last-page: true
 
+effects:
+  previous-page:
+    - id: play-sound
+      args:
+        sound: "minecraft:block.note_block.pling"
+        volume: 1
+        pitch: 1.5
+
+  next-page:
+    - id: play-sound
+      args:
+        sound: "minecraft:block.note_block.pling"
+        volume: 1
+        pitch: 1.5
+
+  deny-upgrade:
+    - id: play-sound
+      args:
+        sound: "minecraft:block.note_block.bass"
+        volume: 1
+        pitch: 0.5
+
+  successful-upgrade:
+    - id: play-sound
+      args:
+        sound: "minecraft:block.note_block.pling"
+        volume: 1
+        pitch: 1.5
+
 items:
   fill:
     item: "minecraft:black_stained_glass_pane"
@@ -51,19 +80,30 @@ items:
       - "<yellow>│ <gray>Bank: <yellow><bank-name></yellow>"
       - "<yellow>│ <gray>Current level: <yellow><current-level></yellow>"
       - "<yellow>│ <gray>Required level: <yellow><required-level></yellow>"
+      - "<yellow>│ <gray>Max balance: <yellow><max-balance></yellow>"
       - "<yellow>│ <gray>Interest rate: <yellow><interest-rate></yellow>"
       - "<yellow>│ <gray>Reason: <red><upgrade-reason></red>"
       - ""
       - "<dark_gray>Unlock the previous level first</dark_gray>"
+    effects:
+      - id: play-sound
+        args:
+          sound: "minecraft:block.note_block.bass"
+          volume: 1
+          pitch: 0.5
 
   conditions-not-met:
     item: "minecraft:red_stained_glass_pane"
-    display-name: "<dark_gray>» <red>Conditions not true</red>"
+    display-name: "<dark_gray>» <red>Conditions not met</red>"
     lore:
       - ""
       - "<yellow>│ <gray>Bank: <yellow><bank-name></yellow>"
-      - "<yellow>│ <gray>Role: <yellow><role-name></yellow>"
+      - ""
+      - "<gray>Upgrade Values"
+      - "<yellow>│ <gray>Max balance: <yellow><max-balance></yellow>"
       - "<yellow>│ <gray>Interest rate: <yellow><interest-rate></yellow>"
+      - ""
+      - "<gray>Upgrade Costs"
       - "<yellow>│ <gray>Upgrade cost: <yellow><upgrade-cost></yellow>"
       - "<yellow>│ <gray>Wallet balance: <yellow><wallet-balance></yellow>"
       - "<yellow>│ <gray>Missing: <red><missing-funds></red>"

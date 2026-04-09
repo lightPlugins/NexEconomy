@@ -19,6 +19,7 @@ import io.nexstudios.nexeconomy.definition.AmountNotation;
 import io.nexstudios.nexeconomy.definition.CurrencyDefinition;
 import io.nexstudios.nexeconomy.definition.MantissaAmount;
 import io.nexstudios.nexeconomy.service.bank.BankService;
+import io.nexstudios.nexeconomy.service.bank.effects.BankClickEffectService;
 import io.nexstudios.nexeconomy.service.bank.transaction.BankTransactionService;
 import io.nexstudios.nexlogic.bukkit.services.entity.nexeconomy.BankTransactionEntity;
 import io.nexstudios.nexlogic.bukkit.services.items.config.ConfigItemService;
@@ -35,6 +36,7 @@ import net.kyori.adventure.text.serializer.legacy.LegacyComponentSerializer;
 import org.bukkit.Bukkit;
 import org.bukkit.Material;
 import org.bukkit.OfflinePlayer;
+import org.bukkit.entity.Player;
 import org.bukkit.inventory.ItemStack;
 import org.jetbrains.annotations.NotNull;
 
@@ -168,6 +170,7 @@ public class BankTransactionMenu {
     ctx.slot(SLOT_BACK).setPlannedItem(() -> MenuItem.of(buildBackButton(config)));
     ctx.slot(SLOT_BACK).onClick(clickCtx -> {
       clickCtx.cancel();
+      triggerGeneralClick(clickCtx.viewer().uniqueId());
       if (servicesRef == null) {
         return;
       }
@@ -438,6 +441,7 @@ public class BankTransactionMenu {
 
       @Override
       public void onClick(ClickContext ctx) {
+        triggerGeneralClick(ctx.viewer().uniqueId());
         if (ctx.action() == ClickAction.RIGHT_CLICK) {
           ctx.stateStore().cycleToPreviousMode(
               ctx.viewer(),
@@ -500,6 +504,7 @@ public class BankTransactionMenu {
 
       @Override
       public void onClick(ClickContext ctx) {
+        triggerGeneralClick(ctx.viewer().uniqueId());
         if (ctx.action() == ClickAction.RIGHT_CLICK) {
           ctx.stateStore().cycleToPreviousMode(
               ctx.viewer(),
@@ -542,6 +547,22 @@ public class BankTransactionMenu {
           l.build();
         })
         .build();
+  }
+
+  private static void triggerGeneralClick(UUID viewerUuid) {
+    if (servicesRef == null || viewerUuid == null) {
+      return;
+    }
+
+    Player player = Bukkit.getPlayer(viewerUuid);
+    if (player == null) {
+      return;
+    }
+
+    BankClickEffectService effects = servicesRef.getService(BankClickEffectService.class);
+    if (effects != null) {
+      effects.executeGeneralClick(player);
+    }
   }
 
   private static PageSortControl<TransactionEntry> buildSortControl(FileConfiguration config,

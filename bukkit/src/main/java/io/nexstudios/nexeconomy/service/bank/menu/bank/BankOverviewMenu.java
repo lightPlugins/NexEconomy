@@ -26,6 +26,7 @@ import io.nexstudios.nexeconomy.definition.MantissaAmount;
 import io.nexstudios.nexeconomy.service.bank.definition.BankDefinition;
 import io.nexstudios.nexeconomy.service.bank.BankService;
 import io.nexstudios.nexeconomy.service.bank.cache.BankAccountCacheService;
+import io.nexstudios.nexeconomy.service.bank.effects.BankClickEffectService;
 import io.nexstudios.nexeconomy.service.bank.registry.BankRegistryService;
 import io.nexstudios.nexeconomy.service.bank.repo.BankRepositoryService;
 import io.nexstudios.nexeconomy.service.registry.CurrencyRegistryService;
@@ -41,6 +42,7 @@ import net.kyori.adventure.text.minimessage.tag.resolver.TagResolver;
 import net.kyori.adventure.text.serializer.legacy.LegacyComponentSerializer;
 import org.bukkit.Bukkit;
 import org.bukkit.Material;
+import org.bukkit.entity.Player;
 import org.bukkit.inventory.ItemStack;
 import org.jetbrains.annotations.NotNull;
 
@@ -213,11 +215,28 @@ public class BankOverviewMenu {
         navigation,
         Optional.of((entry, index, clickCtx) -> {
           clickCtx.cancel();
+          triggerGeneralClick(clickCtx.viewer().uniqueId());
           if (accessor != null) {
             BankDetailMenu.open(accessor, clickCtx.viewer(), entry.bankName(), entry.ownerUuid(), entry.category() == Category.OWN_BANK);
           }
         })
     );
+  }
+
+  private static void triggerGeneralClick(UUID viewerUuid) {
+    if (accessor == null || viewerUuid == null) {
+      return;
+    }
+
+    Player player = Bukkit.getPlayer(viewerUuid);
+    if (player == null) {
+      return;
+    }
+
+    BankClickEffectService effects = accessor.getService(BankClickEffectService.class);
+    if (effects != null) {
+      effects.executeGeneralClick(player);
+    }
   }
 
   private static ItemStack renderBankPlaceholder(FileConfiguration bankConfig,
