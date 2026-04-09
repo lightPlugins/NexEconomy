@@ -173,7 +173,6 @@ public final class BankDetailMenu {
         .interactionHooks(new MenuInteractionHooks() {
           @Override
           public void onClose(MenuKey key, ViewerRef viewer, CloseReason reason) {
-            logger.logger().info("Menu closed with reason: " + reason);
             CONTEXTS.remove(viewer.uniqueId());
             LAST_DATA.remove(viewer.uniqueId());
           }
