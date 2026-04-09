@@ -82,7 +82,6 @@ public final class BankLevelMenu {
   private static FileReaderService fileReaderService;
   private static ConfigItemService configItemService;
   private static FileConfiguration bankConfig;
-  private static ItemStack fillTemplate;
   private static ItemStack unlockedTemplate;
   private static ItemStack previousNeedsUnlockedTemplate;
   private static ItemStack conditionsNotMetTemplate;
@@ -93,6 +92,8 @@ public final class BankLevelMenu {
   private static int SLOT_BACK = DEFAULT_BACK_SLOT;
 
   private static final Map<UUID, LevelContext> CONTEXTS = new ConcurrentHashMap<>();
+  private static final Map<UUID, BankAccountCacheService.View> LAST_VIEWS = new ConcurrentHashMap<>();
+  private static final Map<UUID, CompletableFuture<BankAccountCacheService.View>> REFRESH_TASKS = new ConcurrentHashMap<>();
 
   private BankLevelMenu() {}
 
@@ -107,7 +108,7 @@ public final class BankLevelMenu {
     bankConfig = loadConfig();
 
     SLOT_BACK = bankConfig.getInt("layout.slots.back", DEFAULT_BACK_SLOT);
-    fillTemplate = configuredItem(bankConfig, "items.fill", Material.BLACK_STAINED_GLASS_PANE);
+    ItemStack fillTemplate = configuredItem(bankConfig, "items.fill", Material.BLACK_STAINED_GLASS_PANE);
     unlockedTemplate = configuredItem(bankConfig, "items.unlocked", Material.LIME_STAINED_GLASS_PANE);
     previousNeedsUnlockedTemplate = configuredItem(bankConfig, "items.previous-needs-to-be-unlocked", Material.RED_STAINED_GLASS_PANE);
     conditionsNotMetTemplate = configuredItem(bankConfig, "items.conditions-not-met", Material.RED_STAINED_GLASS_PANE);
@@ -127,6 +128,8 @@ public final class BankLevelMenu {
           @Override
           public void onClose(MenuKey key, ViewerRef viewer, CloseReason reason) {
             CONTEXTS.remove(viewer.uniqueId());
+            LAST_VIEWS.remove(viewer.uniqueId());
+            REFRESH_TASKS.remove(viewer.uniqueId());
           }
         })
         .addPagedArea(buildPagedArea())
@@ -138,6 +141,8 @@ public final class BankLevelMenu {
 
   public static void open(@NotNull ServiceAccessor services, @NotNull ViewerRef viewer, @NotNull String bankId, @NotNull UUID ownerUuid, boolean ownerBank) {
     CONTEXTS.put(viewer.uniqueId(), new LevelContext(bankId, ownerUuid, ownerBank));
+    LAST_VIEWS.remove(viewer.uniqueId());
+    REFRESH_TASKS.remove(viewer.uniqueId());
     services.getService(MenuService.class).open(viewer, KEY);
   }
 
@@ -190,11 +195,17 @@ public final class BankLevelMenu {
 
       CurrencyDefinition currency = currencyRegistry.currency(definition.currencyIdLower());
       BankAccountCacheService.View bankView = bankCache == null ? null : bankCache.get(context.bankId(), context.ownerUuid());
-      if (bankView == null) {
+      if (bankView != null) {
+        LAST_VIEWS.put(viewerUuid, bankView);
+      } else {
+        bankView = LAST_VIEWS.get(viewerUuid);
         if (bankCache != null) {
-          bankCache.loadOrCreate(context.bankId(), context.ownerUuid()).whenComplete((view, error) -> scheduleRefresh(player));
+          refreshBankViewAsync(player, context.bankId(), context.ownerUuid(), viewerUuid);
         }
-        return List.of();
+
+        if (bankView == null) {
+          return List.of();
+        }
       }
 
       BankDefinition.LevelDefinition[] levels = definition.levels() == null
@@ -423,7 +434,7 @@ public final class BankLevelMenu {
           Placeholder.parsed("cost", bankService().formatBalanceWithCurrency(cost, currency))
       )));
       triggerUpgradeSuccess(player);
-      refreshOpenView(player);
+      refreshBankViewAsync(player, entry.bankId(), entry.ownerUuid(), player.getUniqueId());
     })).exceptionally(ex -> {
       Bukkit.getScheduler().runTask(plugin, () -> {
         triggerUpgradeFailed(player);
@@ -508,6 +519,31 @@ public final class BankLevelMenu {
 
     menuService.findOpenView(ViewerRef.of(player.getUniqueId(), player.getName()))
         .ifPresent(MenuView::requestRefresh);
+  }
+
+  private static void refreshBankViewAsync(Player player, String bankId, UUID ownerUuid, UUID viewerUuid) {
+    if (player == null || bankId == null || ownerUuid == null || viewerUuid == null) {
+      return;
+    }
+
+    BankAccountCacheService bankCache = servicesRef.getService(BankAccountCacheService.class);
+    if (bankCache == null) {
+      return;
+    }
+
+    REFRESH_TASKS.computeIfAbsent(viewerUuid, ignored ->
+        bankCache.loadOrCreate(bankId, ownerUuid).thenApply(view -> {
+          if (view != null) {
+            LAST_VIEWS.put(viewerUuid, view);
+          }
+          return view;
+        }).whenComplete((view, error) -> {
+          REFRESH_TASKS.remove(viewerUuid);
+          if (error == null) {
+            scheduleRefresh(player);
+          }
+        })
+    );
   }
 
   private static void scheduleRefresh(Player player) {
@@ -619,12 +655,13 @@ public final class BankLevelMenu {
         return Duration.ofMillis(Long.parseLong(normalized.substring(0, normalized.length() - 2).trim()));
       }
 
+      long duration = Long.parseLong(normalized.substring(0, normalized.length() - 1).trim());
       if (normalized.endsWith("s")) {
-        return Duration.ofSeconds(Long.parseLong(normalized.substring(0, normalized.length() - 1).trim()));
+        return Duration.ofSeconds(duration);
       }
 
       if (normalized.endsWith("m")) {
-        return Duration.ofMinutes(Long.parseLong(normalized.substring(0, normalized.length() - 1).trim()));
+        return Duration.ofMinutes(duration);
       }
 
       return Duration.ofSeconds(Long.parseLong(normalized));
