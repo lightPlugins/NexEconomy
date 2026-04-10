@@ -77,6 +77,7 @@ public final class BankAccountCacheService implements Service {
 
   private final ConcurrentHashMap<Key, CompletableFuture<View>> inFlight = new ConcurrentHashMap<>();
   private final ConcurrentHashMap<WithdrawUsageKey, WithdrawUsageEntry> withdrawUsageByKey = new ConcurrentHashMap<>();
+  private final ConcurrentHashMap<Key, AtomicLong> versionByKey = new ConcurrentHashMap<>();
 
   private final AtomicBoolean cleanupRunning = new AtomicBoolean(false);
 
@@ -161,6 +162,7 @@ public final class BankAccountCacheService implements Service {
     if (bank == null || owner == null) return;
 
     Key key = new Key(normalize(bank), owner);
+    bumpVersion(key);
     byKey.remove(key, e);
     inFlight.remove(key);
     invalidateWithdrawUsage(bankAccountId);
@@ -170,6 +172,7 @@ public final class BankAccountCacheService implements Service {
     if (bankIdLower == null || bankIdLower.isBlank() || ownerUuid == null) return;
 
     Key key = new Key(normalize(bankIdLower), ownerUuid);
+    bumpVersion(key);
     Entry e = byKey.remove(key);
     inFlight.remove(key);
 
@@ -234,9 +237,10 @@ public final class BankAccountCacheService implements Service {
     CompletableFuture<View> inflight = inFlight.get(key);
     if (inflight != null) return inflight;
 
+    long expectedVersion = currentVersion(key);
     return inFlight.computeIfAbsent(key, ignored -> {
       CompletableFuture<View> f = loadFresh(bank, ownerUuid).thenApply(view -> {
-        put(key, view);
+        putIfCurrentVersion(key, view, expectedVersion);
         return view;
       });
 
@@ -284,9 +288,10 @@ public final class BankAccountCacheService implements Service {
 
   private void refreshAsync(Key key, UUID ownerUuid) {
     // Properly handle concurrent invalidate() calls during refresh
+    long expectedVersion = currentVersion(key);
     inFlight.computeIfAbsent(key, ignored ->
         loadFresh(key.bankIdLower(), ownerUuid).thenApply(view -> {
-          put(key, view);
+          putIfCurrentVersion(key, view, expectedVersion);
           return view;
         }).whenComplete((r, e) -> {
           inFlight.remove(key);
@@ -317,6 +322,23 @@ public final class BankAccountCacheService implements Service {
     byAccountId.put(view.account().getId(), entry);
 
     maybeCleanupAsync();
+  }
+
+  private void putIfCurrentVersion(Key key, View view, long expectedVersion) {
+    if (key == null || view == null) return;
+    if (currentVersion(key) != expectedVersion) return;
+    put(key, view);
+  }
+
+  private long currentVersion(Key key) {
+    if (key == null) return 0L;
+    AtomicLong version = versionByKey.get(key);
+    return version == null ? 0L : version.get();
+  }
+
+  private void bumpVersion(Key key) {
+    if (key == null) return;
+    versionByKey.computeIfAbsent(key, ignored -> new AtomicLong(0L)).incrementAndGet();
   }
 
   private void maybeCleanupAsync() {

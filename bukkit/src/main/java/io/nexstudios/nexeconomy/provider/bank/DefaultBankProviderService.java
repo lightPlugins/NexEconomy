@@ -146,7 +146,7 @@ public final class DefaultBankProviderService implements BankProviderService, Se
             accessContext(id, access, ownerUuid, null, null, null, null, null, null, null, null),
             access.members()
         ))
-        .exceptionally(ex -> failure(ex, baseCtx, List.<BankMemberEntity>of()));
+        .exceptionally(ex -> failure(ex, baseCtx, List.of()));
   }
 
   @Override
@@ -178,7 +178,7 @@ public final class DefaultBankProviderService implements BankProviderService, Se
     }).exceptionally(ex -> {
       Throwable root = rootCause(ex);
       BankResponse.Status status = mapStatus(root);
-      return BankResponse.failure(status, messageFor(status, root), baseCtx, List.<BankMemberEntity>of());
+      return BankResponse.failure(status, messageFor(status, root), baseCtx, List.of());
     });
   }
 
@@ -363,11 +363,50 @@ public final class DefaultBankProviderService implements BankProviderService, Se
       return completed(BankResponse.failure(BankResponse.Status.INVALID_ARGUMENT, "Owner or invitee UUID is null.", baseCtx, Boolean.FALSE));
     }
 
-    return bankService.acceptInviteFromOwner(ownerUuid, inviteeUuid)
-        .thenApply(ok -> ok
-            ? BankResponse.success("Invite accepted.", baseCtx, Boolean.TRUE)
-            : BankResponse.failure(BankResponse.Status.INVITE_NOT_FOUND, "Invite not found.", baseCtx, Boolean.FALSE)
-        )
+    return repo.findInvitesForInviteeFromOwner(inviteeUuid, ownerUuid).thenCompose(rows -> {
+      InviteLookupRow selected = selectPreferredInvite(rows, true);
+      if (selected == null) {
+        return completed(BankResponse.failure(BankResponse.Status.INVITE_NOT_FOUND, "Invite not found.", baseCtx, Boolean.FALSE));
+      }
+
+      if (isExpired(selected)) {
+        return repo.deleteInvite(selected.bankAccountId(), inviteeUuid).thenApply(ignored ->
+            BankResponse.failure(BankResponse.Status.INVITE_EXPIRED, "Invite expired.", BankResponse.context(
+                selected.bankIdLower(),
+                selected.bankAccountId(),
+                ownerUuid,
+                null,
+                inviteeUuid,
+                selected.roleIdLower(),
+                null,
+                null,
+                null,
+                null,
+                null,
+                null
+            ), Boolean.FALSE)
+        );
+      }
+
+      return bankService.acceptInvite(selected.bankIdLower(), ownerUuid, inviteeUuid)
+          .thenApply(ok -> ok
+              ? BankResponse.success("Invite accepted.", BankResponse.context(
+                  selected.bankIdLower(),
+                  selected.bankAccountId(),
+                  ownerUuid,
+                  null,
+                  inviteeUuid,
+                  selected.roleIdLower(),
+                  null,
+                  null,
+                  null,
+                  null,
+                  null,
+                  null
+              ), Boolean.TRUE)
+              : BankResponse.failure(BankResponse.Status.INVITE_NOT_FOUND, "Invite not found.", baseCtx, Boolean.FALSE)
+          );
+    })
         .exceptionally(ex -> failure(ex, baseCtx, Boolean.FALSE));
   }
 
@@ -427,11 +466,31 @@ public final class DefaultBankProviderService implements BankProviderService, Se
       return completed(BankResponse.failure(BankResponse.Status.INVALID_ARGUMENT, "Owner or invitee UUID is null.", baseCtx, Boolean.FALSE));
     }
 
-    return bankService.denyInviteFromOwner(ownerUuid, inviteeUuid)
-        .thenApply(ok -> ok
-            ? BankResponse.success("Invite denied.", baseCtx, Boolean.TRUE)
-            : BankResponse.failure(BankResponse.Status.INVITE_NOT_FOUND, "Invite not found.", baseCtx, Boolean.FALSE)
-        )
+    return repo.findInvitesForInviteeFromOwner(inviteeUuid, ownerUuid).thenCompose(rows -> {
+      InviteLookupRow selected = selectPreferredInvite(rows, true);
+      if (selected == null) {
+        return completed(BankResponse.failure(BankResponse.Status.INVITE_NOT_FOUND, "Invite not found.", baseCtx, Boolean.FALSE));
+      }
+
+      return repo.deleteInvite(selected.bankAccountId(), inviteeUuid).thenApply(deleted ->
+          Boolean.TRUE.equals(deleted)
+              ? BankResponse.success("Invite denied.", BankResponse.context(
+                  selected.bankIdLower(),
+                  selected.bankAccountId(),
+                  ownerUuid,
+                  null,
+                  inviteeUuid,
+                  selected.roleIdLower(),
+                  null,
+                  null,
+                  null,
+                  null,
+                  null,
+                  null
+              ), Boolean.TRUE)
+              : BankResponse.failure(BankResponse.Status.INVITE_NOT_FOUND, "Invite not found.", baseCtx, Boolean.FALSE)
+      );
+    })
         .exceptionally(ex -> failure(ex, baseCtx, Boolean.FALSE));
   }
 
@@ -976,6 +1035,89 @@ public final class DefaultBankProviderService implements BankProviderService, Se
     }
 
     return null;
+  }
+
+  private static InviteLookupRow selectPreferredInvite(List<InviteLookupRow> rows, boolean preferActive) {
+    InviteLookupRow selected = null;
+    if (rows == null || rows.isEmpty()) {
+      return null;
+    }
+
+    for (InviteLookupRow row : rows) {
+      if (row == null) {
+        continue;
+      }
+      if (selected == null) {
+        selected = row;
+        continue;
+      }
+
+      int cmp = compareInvites(row, selected, preferActive);
+      if (cmp < 0) {
+        selected = row;
+      }
+    }
+
+    return selected;
+  }
+
+  private static int compareInvites(InviteLookupRow left, InviteLookupRow right, boolean preferActive) {
+    if (left == right) {
+      return 0;
+    }
+    if (left == null) {
+      return 1;
+    }
+    if (right == null) {
+      return -1;
+    }
+
+    if (preferActive) {
+      int activeCmp = Boolean.compare(isExpired(left), isExpired(right));
+      if (activeCmp != 0) {
+        return activeCmp;
+      }
+    }
+
+    int expiryCmp = compareExpiry(left.expiresAt(), right.expiresAt());
+    if (expiryCmp != 0) {
+      return expiryCmp;
+    }
+
+    int bankCmp = normalize(left.bankIdLower()).compareTo(normalize(right.bankIdLower()));
+    if (bankCmp != 0) {
+      return bankCmp;
+    }
+
+    UUID leftAccount = left.bankAccountId();
+    UUID rightAccount = right.bankAccountId();
+    if (leftAccount == null && rightAccount == null) {
+      return 0;
+    }
+    if (leftAccount == null) {
+      return 1;
+    }
+    if (rightAccount == null) {
+      return -1;
+    }
+    return leftAccount.compareTo(rightAccount);
+  }
+
+  private static int compareExpiry(java.time.Instant left, java.time.Instant right) {
+    if (left == null && right == null) {
+      return 0;
+    }
+    if (left == null) {
+      return 1;
+    }
+    if (right == null) {
+      return -1;
+    }
+    return left.compareTo(right);
+  }
+
+  private static boolean isExpired(InviteLookupRow row) {
+    return row != null && row.expiresAt() != null && row.expiresAt().isBefore(java.time.Instant.now());
   }
 
   private static BankResponse.BankContext context(

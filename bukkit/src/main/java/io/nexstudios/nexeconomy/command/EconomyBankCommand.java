@@ -101,7 +101,7 @@ public final class EconomyBankCommand implements Service {
     this.services = accessor;
   }
 
-  @Command(value = "overview", permission = "nexeconomy.bank.overview")
+  @Command(value = "overview", permission = "nexeconomy.bank.overview", playerOnly = true)
   public int openBankOverview(NexPaperCommandSource source) {
     Player sender = (Player) source.sender();
     if (sender == null) return 0;
