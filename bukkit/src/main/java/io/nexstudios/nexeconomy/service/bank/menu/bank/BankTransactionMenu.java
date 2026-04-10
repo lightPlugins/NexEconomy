@@ -18,9 +18,8 @@ import io.nexstudios.nexeconomy.NexEconomyPlugin;
 import io.nexstudios.nexeconomy.definition.AmountNotation;
 import io.nexstudios.nexeconomy.definition.CurrencyDefinition;
 import io.nexstudios.nexeconomy.definition.MantissaAmount;
-import io.nexstudios.nexeconomy.service.bank.BankService;
+import io.nexstudios.nexeconomy.provider.bank.BankProviderService;
 import io.nexstudios.nexeconomy.service.bank.effects.BankClickEffectService;
-import io.nexstudios.nexeconomy.service.bank.transaction.BankTransactionService;
 import io.nexstudios.nexlogic.bukkit.services.entity.nexeconomy.BankTransactionEntity;
 import io.nexstudios.nexlogic.bukkit.services.items.config.ConfigItemService;
 import io.nexstudios.nexlogic.common.services.logging.LoggerService;
@@ -63,8 +62,7 @@ import java.util.concurrent.ConcurrentHashMap;
 @Dependencies({
     ItemService.class,
     MenuService.class,
-    BankService.class,
-    BankTransactionService.class,
+    BankProviderService.class,
     LoggerService.class,
     FileReaderService.class
 })
@@ -91,6 +89,7 @@ public class BankTransactionMenu {
   private static LoggerService logger;
   private static ServiceAccessor servicesRef;
   private static ItemService itemService;
+  private static BankProviderService bankProvider;
   private static FileReaderService fileReaderService;
   private static ConfigItemService configItemService;
   private static FileConfiguration bankConfig;
@@ -106,6 +105,7 @@ public class BankTransactionMenu {
     logger = services.getService(LoggerService.class);
     servicesRef = services;
     itemService = services.getService(ItemService.class);
+    bankProvider = services.getService(BankProviderService.class);
     fileReaderService = services.getService(FileReaderService.class);
     configItemService = NexEconomyPlugin.getNexLogicService().getService(ConfigItemService.class);
 
@@ -191,12 +191,6 @@ public class BankTransactionMenu {
         TransactionContext ctx = CONTEXTS.get(viewer.uniqueId());
         if (ctx == null) {
           logger.logger().warning("Transaction context not found for viewer " + viewer.uniqueId());
-          return List.of();
-        }
-
-        BankTransactionService transService = servicesRef.getService(BankTransactionService.class);
-        if (transService == null) {
-          logger.logger().warning("BankTransactionService not available");
           return List.of();
         }
 
@@ -290,11 +284,6 @@ public class BankTransactionMenu {
     if (mantissa == null) return "0";
 
     MantissaAmount amount = MantissaAmount.of(new BigDecimal(mantissa), exp3);
-    BankService bankService = servicesRef == null ? null : servicesRef.getService(BankService.class);
-    if (bankService != null) {
-      return bankService.formatBalanceWithCurrency(amount, entry.currency());
-    }
-
     String shown = AmountNotation.formatShort(amount, fractionDigits(entry.currency()));
     String symbol = symbolFor(entry.currency(), amount.toHuman());
     return symbol.isBlank() ? shown : shown + " " + symbol;
@@ -331,21 +320,22 @@ public class BankTransactionMenu {
       return;
     }
 
-    BankTransactionService transService = servicesRef.getService(BankTransactionService.class);
-    if (transService == null) {
+    BankProviderService provider = bankProvider;
+    if (provider == null) {
       if (logger != null) {
-        logger.logger().warning("BankTransactionService not available");
+        logger.logger().warning("BankProviderService not available");
       }
       return;
     }
 
-    CompletableFuture<List<TransactionEntry>> load = transService.transactionsVisibleTo(
+    CompletableFuture<List<TransactionEntry>> load = provider.transactions(
             ctx.bankId(),
             ctx.ownerUuid(),
             viewerUuid,
             100
-        )
-        .thenApply(transactions -> {
+        ).thenApply(response -> {
+          if (response == null || response.isFailure()) return List.of();
+          List<BankTransactionEntity> transactions = response.payload();
           if (transactions == null) return List.of();
           return transactions.stream()
               .filter(java.util.Objects::nonNull)
