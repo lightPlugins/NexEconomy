@@ -19,21 +19,19 @@ import io.nexstudios.nexeconomy.definition.AmountNotation;
 import io.nexstudios.nexeconomy.definition.CurrencyDefinition;
 import io.nexstudios.nexeconomy.definition.CurrencyType;
 import io.nexstudios.nexeconomy.definition.MantissaAmount;
+import io.nexstudios.nexeconomy.provider.bank.BankProviderService;
+import io.nexstudios.nexeconomy.provider.bank.BankResponse;
 import io.nexstudios.nexeconomy.service.bank.cache.BankAccountCacheService;
-import io.nexstudios.nexeconomy.service.bank.BankService;
 import io.nexstudios.nexeconomy.service.bank.effects.BankClickEffectService;
 import io.nexstudios.nexeconomy.service.bank.definition.BankDefinition;
-import io.nexstudios.nexeconomy.service.bank.level.BankLevelService;
 import io.nexstudios.nexeconomy.service.economy.EconomyPlayerCacheService;
 import io.nexstudios.nexeconomy.service.economy.repo.EconomyPlayer;
-import io.nexstudios.nexeconomy.service.bank.registry.BankRegistryService;
 import io.nexstudios.nexeconomy.service.registry.CurrencyRegistryService;
 import io.nexstudios.languageservice.service.component.ComponentService;
 import io.nexstudios.nexlogic.bukkit.services.entity.nexeconomy.BankMemberEntity;
 import io.nexstudios.nexlogic.bukkit.services.entity.nexeconomy.BankWithdrawUsageEntity;
 import io.nexstudios.nexlogic.bukkit.services.items.config.ConfigItemService;
 import io.nexstudios.nexlogic.bukkit.services.heads.HeadService;
-import io.nexstudios.nexlogic.common.services.logging.LoggerService;
 import io.nexstudios.serviceregistry.di.Dependencies;
 import io.nexstudios.serviceregistry.di.ServiceAccessor;
 import lombok.extern.slf4j.Slf4j;
@@ -47,6 +45,7 @@ import org.bukkit.Material;
 import org.bukkit.OfflinePlayer;
 import org.bukkit.entity.Player;
 import org.bukkit.inventory.ItemStack;
+import org.bukkit.plugin.Plugin;
 import org.jetbrains.annotations.NotNull;
 
 import java.nio.file.Path;
@@ -65,11 +64,9 @@ import java.util.concurrent.ConcurrentHashMap;
     ItemService.class,
     MenuService.class,
     ComponentService.class,
-    BankService.class,
-    BankRegistryService.class,
+    BankProviderService.class,
     BankAccountCacheService.class,
     EconomyPlayerCacheService.class,
-    BankLevelService.class,
     CurrencyRegistryService.class,
     FileReaderService.class,
     TextRequestDialogService.class,
@@ -104,9 +101,8 @@ public final class BankDetailMenu {
   private static final Map<UUID, BankContext> CONTEXTS = new ConcurrentHashMap<>();
   private static final Map<UUID, BankData> LAST_DATA = new ConcurrentHashMap<>();
   private static ServiceAccessor servicesRef;
-  private static org.bukkit.plugin.Plugin plugin;
+  private static Plugin plugin;
   private static HeadService headService;
-  private static LoggerService logger;
   private static ComponentService componentService;
   private static ItemService itemService;
   private static FileReaderService fileReaderService;
@@ -129,7 +125,6 @@ public final class BankDetailMenu {
 
   public static void register(@NotNull ServiceAccessor services) {
     servicesRef = services;
-    logger = services.getService(LoggerService.class);
     headService = NexEconomyPlugin.getNexLogicService().getService(HeadService.class);
     plugin = services.getService(PaperPluginService.class).plugin();
     componentService = services.getService(ComponentService.class);
@@ -233,12 +228,12 @@ public final class BankDetailMenu {
   }
 
   private static BankData loadBankData(Player player, BankContext context) {
-    BankRegistryService bankRegistry = servicesRef.getService(BankRegistryService.class);
     BankAccountCacheService bankCache = servicesRef.getService(BankAccountCacheService.class);
     CurrencyRegistryService currencies = servicesRef.getService(CurrencyRegistryService.class);
-    BankLevelService levelService = servicesRef.getService(BankLevelService.class);
+    BankProviderService provider = servicesRef.getService(BankProviderService.class);
 
-    BankDefinition definition = bankRegistry.bank(context.bankId()).orElse(null);
+    BankResponse<BankDefinition> bankResponse = provider == null ? null : provider.bank(context.bankId()).join();
+    BankDefinition definition = bankResponse == null ? null : bankResponse.payload();
     if (definition == null) return null;
 
     CurrencyDefinition currency = currencies.currency(definition.currencyIdLower());
@@ -275,8 +270,10 @@ public final class BankDetailMenu {
     int level = bankView.account() == null || bankView.account().getLevel() <= 0
         ? 1
         : bankView.account().getLevel();
-    int maxLevel = levelService.getMaxLevel(context.bankId());
-    MantissaAmount maxBalance = levelService.getMaxBalance(context.bankId(), level);
+    int maxLevel = definition.levels() == null || definition.levels().isEmpty()
+        ? 1
+        : definition.levels().stream().mapToInt(BankDefinition.LevelDefinition::level).max().orElse(1);
+    MantissaAmount maxBalance = resolveMaxBalance(definition, level);
 
     MantissaAmount remainingCapacity = maxBalance.subtract(bankBalance);
     if (remainingCapacity.compareTo(MantissaAmount.zero()) < 0) remainingCapacity = MantissaAmount.zero();
@@ -495,10 +492,12 @@ public final class BankDetailMenu {
     String maxBalance = AmountNotation.formatShort(data.maxBalance(), data.currency().fractionDigits());
     String remainingCapacity = AmountNotation.formatShort(data.remainingCapacity(), data.currency().fractionDigits());
     String interestRate = currentInterestRate(data);
+    String currency = data.currency.symbolPlural();
 
     return TagResolver.resolver(List.of(
         Placeholder.parsed("bank-name", data.definition().nameMiniMessage()),
         Placeholder.parsed("bank-id", data.definition().idLower()),
+        Placeholder.parsed("currency",  currency),
         Placeholder.parsed("owner-name", ownerName),
         Placeholder.parsed("owner-uuid", data.context().ownerUuid().toString()),
         Placeholder.parsed("bank-type", data.context().ownerBank() ? "Owner" : "Member"),
@@ -701,12 +700,12 @@ public final class BankDetailMenu {
 
     TextRequestDialogService textService = servicesRef.getService(TextRequestDialogService.class);
     TextRequestDialog dialog = textService.create()
-        .title(localizedLegacy(player, withdraw ? "bank.detail.dialog.withdraw.title" : "bank.detail.dialog.deposit.title"))
-        .body(localizedLegacy(player, withdraw ? "bank.detail.dialog.withdraw.body" : "bank.detail.dialog.deposit.body"))
-        .placeholder(localizedLegacy(player, "bank.detail.dialog.amount.placeholder"))
+        .title(localizedLegacy(player, withdraw ? "bank.detail.dialog.withdraw.title" : "bank.detail.dialog.deposit.title", false))
+        .body(localizedLegacy(player, withdraw ? "bank.detail.dialog.withdraw.body" : "bank.detail.dialog.deposit.body", false))
+        .placeholder(localizedLegacy(player, "bank.detail.dialog.amount.placeholder", false))
         .minCharacters(1)
         .maxCharacters(32)
-        .submitButton(localizedLegacy(player, withdraw ? "bank.detail.dialog.withdraw.submit" : "bank.detail.dialog.deposit.submit"));
+        .submitButton(localizedLegacy(player, withdraw ? "bank.detail.dialog.withdraw.submit" : "bank.detail.dialog.deposit.submit", false));
 
     dialog.show(player).thenAccept(raw -> {
       if (raw == null || raw.isBlank()) return;
@@ -738,10 +737,10 @@ public final class BankDetailMenu {
     String shown = AmountNotation.formatShort(balance, data.currency().fractionDigits());
     ConfirmDialogService confirmService = servicesRef.getService(ConfirmDialogService.class);
     ConfirmDialog confirm = confirmService.create()
-        .title(localizedLegacy(player, "bank.detail.dialog.deposit-all.title"))
-        .body(localizedLegacy(player, "bank.detail.dialog.deposit-all.body", Placeholder.parsed("amount", shown)))
-        .confirmButton(localizedLegacy(player, "bank.detail.dialog.deposit-all.confirm"))
-        .cancelButton(localizedLegacy(player, "bank.detail.dialog.cancel"));
+        .title(localizedLegacy(player, "bank.detail.dialog.deposit-all.title", false))
+        .body(localizedLegacy(player, "bank.detail.dialog.deposit-all.body", false, Placeholder.parsed("amount", shown)))
+        .confirmButton(localizedLegacy(player, "bank.detail.dialog.deposit-all.confirm", false))
+        .cancelButton(localizedLegacy(player, "bank.detail.dialog.cancel", false));
 
     confirm.show(player).thenAccept(result -> {
       if (!Boolean.TRUE.equals(result)) return;
@@ -762,10 +761,10 @@ public final class BankDetailMenu {
     String shown = AmountNotation.formatShort(balance, data.currency().fractionDigits());
     ConfirmDialogService confirmService = servicesRef.getService(ConfirmDialogService.class);
     ConfirmDialog confirm = confirmService.create()
-        .title(localizedLegacy(player, "bank.detail.dialog.withdraw-all.title"))
-        .body(localizedLegacy(player, "bank.detail.dialog.withdraw-all.body", Placeholder.parsed("amount", shown)))
-        .confirmButton(localizedLegacy(player, "bank.detail.dialog.withdraw-all.confirm"))
-        .cancelButton(localizedLegacy(player, "bank.detail.dialog.cancel"));
+        .title(localizedLegacy(player, "bank.detail.dialog.withdraw-all.title", false))
+        .body(localizedLegacy(player, "bank.detail.dialog.withdraw-all.body", false, Placeholder.parsed("amount", shown)))
+        .confirmButton(localizedLegacy(player, "bank.detail.dialog.withdraw-all.confirm", false))
+        .cancelButton(localizedLegacy(player, "bank.detail.dialog.cancel", false));
 
     confirm.show(player).thenAccept(result -> {
       if (!Boolean.TRUE.equals(result)) return;
@@ -774,9 +773,10 @@ public final class BankDetailMenu {
   }
 
   private static void executeDeposit(Player player, BankData data, MantissaAmount amount) {
-    BankService bankService = servicesRef.getService(BankService.class);
-    bankService.deposit(data.context().bankId(), data.context().ownerUuid(), player.getUniqueId(), amount)
-        .thenAccept(done -> Bukkit.getScheduler().runTask(plugin, () -> {
+    BankProviderService provider = servicesRef.getService(BankProviderService.class);
+    provider.deposit(data.context().bankId(), data.context().ownerUuid(), player.getUniqueId(), amount)
+        .thenAccept(response -> Bukkit.getScheduler().runTask(plugin, () -> {
+          MantissaAmount done = response == null ? MantissaAmount.zero() : response.payload();
           String shown = AmountNotation.formatShort(done, data.currency().fractionDigits());
           sendMessage(player, "bank.deposit.self", TagResolver.resolver(List.of(
               Placeholder.parsed("amount", shown),
@@ -797,9 +797,10 @@ public final class BankDetailMenu {
   }
 
   private static void executeWithdraw(Player player, BankData data, MantissaAmount amount) {
-    BankService bankService = servicesRef.getService(BankService.class);
-    bankService.withdraw(data.context().bankId(), data.context().ownerUuid(), player.getUniqueId(), amount)
-        .thenAccept(done -> Bukkit.getScheduler().runTask(plugin, () -> {
+    BankProviderService provider = servicesRef.getService(BankProviderService.class);
+    provider.withdraw(data.context().bankId(), data.context().ownerUuid(), player.getUniqueId(), amount)
+        .thenAccept(response -> Bukkit.getScheduler().runTask(plugin, () -> {
+          MantissaAmount done = response == null ? MantissaAmount.zero() : response.payload();
           applyWithdrawUsageOptimistically(player.getUniqueId(), data, done);
           String shown = AmountNotation.formatShort(done, data.currency().fractionDigits());
           sendMessage(player, "bank.withdraw.self", TagResolver.resolver(List.of(
@@ -876,12 +877,12 @@ public final class BankDetailMenu {
         .build());
   }
 
-  private static String localizedLegacy(Player player, String key, TagResolver... extraResolvers) {
+  private static String localizedLegacy(Player player, String key, Boolean withPrefix, TagResolver... extraResolvers) {
     if (componentService == null || player == null) {
       return key;
     }
 
-    var builder = componentService.builder(player, key, "NotDefined", true);
+    var builder = componentService.builder(player, key, "NotDefined", withPrefix);
     if (extraResolvers != null) {
       for (TagResolver resolver : extraResolvers) {
         if (resolver != null) {
@@ -998,6 +999,52 @@ public final class BankDetailMenu {
 
     BigDecimal human = AmountNotation.parseVaultHuman(input);
     return human == null ? null : MantissaAmount.of(human, 0);
+  }
+
+  private static MantissaAmount resolveMaxBalance(BankDefinition definition, int level) {
+    if (definition == null) {
+      return MantissaAmount.zero();
+    }
+
+    if (level <= 1) {
+      String raw = definition.defaultMaxBalanceRaw();
+      if (raw == null || raw.isBlank()) {
+        return MantissaAmount.zero();
+      }
+
+      MantissaAmount virtual = AmountNotation.parseVirtualMantissaAmount(raw);
+      if (virtual != null) {
+        return virtual;
+      }
+
+      BigDecimal vaultAmount = AmountNotation.parseVaultHuman(raw);
+      return vaultAmount == null ? MantissaAmount.zero() : MantissaAmount.of(vaultAmount, 0);
+    }
+
+    if (definition.levels() == null) {
+      return MantissaAmount.zero();
+    }
+
+    for (BankDefinition.LevelDefinition levelDef : definition.levels()) {
+      if (levelDef == null || levelDef.level() != level) {
+        continue;
+      }
+
+      String raw = levelDef.maxBalanceRaw();
+      if (raw == null || raw.isBlank()) {
+        return MantissaAmount.zero();
+      }
+
+      MantissaAmount virtual = AmountNotation.parseVirtualMantissaAmount(raw);
+      if (virtual != null) {
+        return virtual;
+      }
+
+      BigDecimal vaultAmount = AmountNotation.parseVaultHuman(raw);
+      return vaultAmount == null ? MantissaAmount.zero() : MantissaAmount.of(vaultAmount, 0);
+    }
+
+    return MantissaAmount.zero();
   }
 
   private static BankDefinition.RoleDefinition resolveRole(BankDefinition def,

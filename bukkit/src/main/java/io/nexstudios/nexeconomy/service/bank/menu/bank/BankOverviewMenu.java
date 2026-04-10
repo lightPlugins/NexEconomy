@@ -23,11 +23,10 @@ import io.nexstudios.menuservice.common.api.registry.DuplicateStrategy;
 import io.nexstudios.nexeconomy.NexEconomyPlugin;
 import io.nexstudios.nexeconomy.definition.CurrencyDefinition;
 import io.nexstudios.nexeconomy.definition.MantissaAmount;
+import io.nexstudios.nexeconomy.provider.bank.BankProviderService;
+import io.nexstudios.nexeconomy.provider.bank.BankResponse;
 import io.nexstudios.nexeconomy.service.bank.definition.BankDefinition;
-import io.nexstudios.nexeconomy.service.bank.BankService;
-import io.nexstudios.nexeconomy.service.bank.cache.BankAccountCacheService;
 import io.nexstudios.nexeconomy.service.bank.effects.BankClickEffectService;
-import io.nexstudios.nexeconomy.service.bank.registry.BankRegistryService;
 import io.nexstudios.nexeconomy.service.bank.repo.BankRepositoryService;
 import io.nexstudios.nexeconomy.service.registry.CurrencyRegistryService;
 import io.nexstudios.nexlogic.bukkit.services.heads.HeadService;
@@ -61,9 +60,7 @@ import java.util.UUID;
     ItemService.class,
     MenuService.class,
     ComponentService.class,
-    BankService.class,
-    BankRegistryService.class,
-    BankAccountCacheService.class,
+    BankProviderService.class,
     CurrencyRegistryService.class,
     LoggerService.class,
     FileReaderService.class
@@ -86,6 +83,7 @@ public class BankOverviewMenu {
   private static ConfigItemService configItemService;
   private static FileReaderService fileReaderService;
   private static ItemService itemService;
+  private static BankProviderService bankProvider;
 
   public static void register(@NotNull ServiceAccessor services) {
     MenuService menuService = services.getService(MenuService.class);
@@ -95,6 +93,7 @@ public class BankOverviewMenu {
     itemService = services.getService(ItemService.class);
     headService = NexEconomyPlugin.getNexLogicService().getService(HeadService.class);
     configItemService = NexEconomyPlugin.getNexLogicService().getService(ConfigItemService.class);
+    bankProvider = services.getService(BankProviderService.class);
 
     FileConfiguration bankConfig = loadConfig();
 
@@ -132,9 +131,6 @@ public class BankOverviewMenu {
                                                                ItemStack bankEntryTemplate,
                                                                ItemStack previousTemplate,
                                                                ItemStack nextTemplate) {
-    BankService bankService = accessor.getService(BankService.class);
-    BankRegistryService bankRegistry = accessor.getService(BankRegistryService.class);
-    BankAccountCacheService bankCache = accessor.getService(BankAccountCacheService.class);
     CurrencyRegistryService currencyRegistry = accessor.getService(CurrencyRegistryService.class);
 
     PageSource<BankEntry> source = (menuKey, viewer) -> {
@@ -142,7 +138,13 @@ public class BankOverviewMenu {
       List<BankEntry> entries = new ArrayList<>();
 
       try {
-        List<BankRepositoryService.BankAccountRef> allBanks = bankService.allBanks(viewerUuid).join();
+        BankProviderService provider = bankProvider;
+        if (provider == null) {
+          return entries;
+        }
+
+        BankResponse<List<BankRepositoryService.BankAccountRef>> bankListResponse = provider.banks(viewerUuid).join();
+        List<BankRepositoryService.BankAccountRef> allBanks = bankListResponse == null ? null : bankListResponse.payload();
         if (allBanks == null) {
           return entries;
         }
@@ -155,11 +157,13 @@ public class BankOverviewMenu {
           boolean isOwner = ref.ownerUuid().equals(viewerUuid);
           Category category = isOwner ? Category.OWN_BANK : Category.MEMBER_BANK;
 
+          BankDefinition bankDefinition = null;
           String displayName = ref.bankIdLower();
           try {
-            var bankDefOpt = bankService.bank(ref.bankIdLower()).join();
-            if (bankDefOpt.isPresent()) {
-              displayName = bankDefOpt.get().nameMiniMessage();
+            BankResponse<BankDefinition> bankResponse = provider.bank(ref.bankIdLower()).join();
+            bankDefinition = bankResponse == null ? null : bankResponse.payload();
+            if (bankDefinition != null) {
+              displayName = bankDefinition.nameMiniMessage();
             }
           } catch (Exception e) {
             if (logger != null) {
@@ -169,18 +173,10 @@ public class BankOverviewMenu {
 
           String ownerName = Optional.ofNullable(Bukkit.getOfflinePlayer(ref.ownerUuid()).getName())
               .orElse(ref.ownerUuid().toString());
-          BankAccountCacheService.View cachedView = bankCache == null ? null : bankCache.get(ref.bankAccountId());
-          if (cachedView == null && bankCache != null) {
-            bankCache.loadOrCreate(ref.bankIdLower(), ref.ownerUuid());
-          }
-
-          MantissaAmount balanceAmount = cachedView != null && cachedView.balance() != null
-              ? cachedView.balance()
-              : MantissaAmount.zero();
-          BankDefinition bankDefinition = bankRegistry.bank(ref.bankIdLower()).orElse(null);
-          String currency = resolveCurrencySymbol(bankRegistry, currencyRegistry, ref.bankIdLower(), balanceAmount);
+          MantissaAmount balanceAmount = loadVisibleBalance(provider, ref.bankIdLower(), ref.ownerUuid(), viewerUuid);
+          String currency = resolveCurrencySymbol(currencyRegistry.currency(bankDefinition == null ? null : bankDefinition.currencyIdLower()), balanceAmount);
           CurrencyDefinition currencyDefinition = bankDefinition == null ? null : currencyRegistry.currency(bankDefinition.currencyIdLower());
-          String balanceText = formatBalanceText(bankService, balanceAmount, currencyDefinition, currency);
+          String balanceText = formatBalanceText(balanceAmount, currencyDefinition, currency);
 
           entries.add(new BankEntry(
               ref.bankIdLower(),
@@ -416,40 +412,35 @@ public class BankOverviewMenu {
     }
   }
 
-  private static MantissaAmount loadBalance(BankService bankService, String bankId, UUID ownerUuid, UUID viewerUuid) {
-    try {
-      MantissaAmount balance = bankService.balanceVisibleTo(bankId, ownerUuid, viewerUuid).join();
-      return balance == null ? MantissaAmount.zero() : balance;
-    } catch (Exception e) {
-      return MantissaAmount.zero();
-    }
-  }
-
-  private static String formatBalanceText(BankService bankService,
-                                         MantissaAmount balance,
+  private static String formatBalanceText(MantissaAmount balance,
                                          CurrencyDefinition definition,
                                          String currencySymbol) {
-    String formatted = bankService.formatBalance(balance, definition == null ? 0 : definition.fractionDigits());
+    String formatted = io.nexstudios.nexeconomy.definition.AmountNotation.formatShort(balance, definition == null ? 0 : definition.fractionDigits());
     return (currencySymbol == null || currencySymbol.isBlank()) ? formatted : formatted + " " + currencySymbol;
   }
 
-  private static String resolveCurrencySymbol(BankRegistryService bankRegistry,
-                                             CurrencyRegistryService currencyRegistry,
-                                             String bankId,
-                                             MantissaAmount balance) {
-    BankDefinition bank = bankRegistry.bank(bankId).orElse(null);
-    if (bank == null) {
-      return "";
-    }
-
-    CurrencyDefinition currency = currencyRegistry.currency(bank.currencyIdLower());
+  private static String resolveCurrencySymbol(CurrencyDefinition currency, MantissaAmount balance) {
     if (currency == null) {
-      return bank.currencyIdLower();
+      return "";
     }
 
     return balance != null && balance.toHuman().compareTo(java.math.BigDecimal.ONE) == 0
         ? currency.symbolSingular()
         : currency.symbolPlural();
+  }
+
+  private static MantissaAmount loadVisibleBalance(BankProviderService provider, String bankId, UUID ownerUuid, UUID viewerUuid) {
+    if (provider == null || bankId == null || ownerUuid == null || viewerUuid == null) {
+      return MantissaAmount.zero();
+    }
+
+    try {
+      BankResponse<MantissaAmount> response = provider.visibleBalance(bankId, ownerUuid, viewerUuid).join();
+      MantissaAmount amount = response == null ? null : response.payload();
+      return amount == null ? MantissaAmount.zero() : amount;
+    } catch (Exception ignored) {
+      return MantissaAmount.zero();
+    }
   }
 
   private static FileConfiguration loadConfig() {
