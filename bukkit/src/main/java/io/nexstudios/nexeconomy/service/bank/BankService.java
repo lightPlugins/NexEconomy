@@ -59,6 +59,10 @@ public interface BankService extends Service {
 
   CompletableFuture<Boolean> lockBankForPlayer(String bankId, UUID ownerUuid, UUID lockedByUuid);
 
+  CompletableFuture<BankAccountEntity> createBank(String bankId, UUID ownerUuid);
+
+  CompletableFuture<BankAccountEntity> deleteBank(String bankId, UUID ownerUuid);
+
   CompletableFuture<Boolean> lockAllBankAccountsForPlayer(UUID playerUuid, UUID lockedByUuid, String reason);
 
   CompletableFuture<Boolean> unlockAllBankAccountsForPlayer(UUID playerUuid, UUID unlockedByUuid);

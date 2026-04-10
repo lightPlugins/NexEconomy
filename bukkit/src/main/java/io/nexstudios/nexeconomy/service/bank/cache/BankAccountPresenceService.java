@@ -171,6 +171,22 @@ public final class BankAccountPresenceService implements Service {
     }
   }
 
+  public void onBankDeleted(UUID bankAccountId) {
+    if (bankAccountId == null) return;
+
+    onlineRefsByAccount.remove(bankAccountId);
+
+    for (Map.Entry<UUID, Set<UUID>> entry : accountsByPlayer.entrySet()) {
+      if (entry == null || entry.getKey() == null) continue;
+
+      accountsByPlayer.computeIfPresent(entry.getKey(), (playerUuid, existing) -> {
+        Set<UUID> next = new HashSet<>(existing);
+        next.remove(bankAccountId);
+        return Set.copyOf(next);
+      });
+    }
+  }
+
   public Optional<Set<UUID>> bankAccountIdsIfTracked(UUID playerUuid) {
     if (playerUuid == null) return Optional.empty();
 

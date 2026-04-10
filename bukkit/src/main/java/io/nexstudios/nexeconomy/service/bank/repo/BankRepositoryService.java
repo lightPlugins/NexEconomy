@@ -25,6 +25,8 @@ public interface BankRepositoryService extends Service {
 
   CompletableFuture<BankAccountEntity> createAccountIfMissing(String bankIdLower, UUID ownerUuid);
 
+  CompletableFuture<Boolean> deleteBankAccount(UUID bankAccountId);
+
   CompletableFuture<MantissaAmount> loadBalance(UUID bankAccountId);
 
   CompletableFuture<MantissaAmount> setBalance(UUID bankAccountId, MantissaAmount newBalance);

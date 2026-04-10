@@ -16,9 +16,10 @@ import io.nexstudios.nexeconomy.definition.AmountNotation;
 import io.nexstudios.nexeconomy.definition.CurrencyDefinition;
 import io.nexstudios.nexeconomy.definition.MantissaAmount;
 import io.nexstudios.nexeconomy.service.bank.BankService;
-import io.nexstudios.nexeconomy.service.bank.cache.BankAccountCacheService;
+import io.nexstudios.nexeconomy.provider.bank.BankProviderService;
 import io.nexstudios.nexeconomy.service.bank.effects.BankClickEffectService;
 import io.nexstudios.nexeconomy.service.bank.definition.BankDefinition;
+import io.nexstudios.nexeconomy.service.bank.cache.BankAccountCacheService;
 import io.nexstudios.nexeconomy.service.bank.level.BankLevelService;
 import io.nexstudios.nexeconomy.service.bank.registry.BankRegistryService;
 import io.nexstudios.nexeconomy.service.bank.sync.BankRedisSyncService;
@@ -55,14 +56,9 @@ import java.util.concurrent.ConcurrentHashMap;
     ItemService.class,
     MenuService.class,
     ComponentService.class,
-    BankService.class,
-    BankLevelService.class,
-    BankAccountCacheService.class,
-    BankRegistryService.class,
+    BankProviderService.class,
     EconomyPlayerCacheService.class,
-    EconomyService.class,
     CurrencyRegistryService.class,
-    BankRedisSyncService.class,
     FileReaderService.class
 })
 public final class BankLevelMenu {
@@ -81,6 +77,7 @@ public final class BankLevelMenu {
   private static ItemService itemService;
   private static FileReaderService fileReaderService;
   private static ConfigItemService configItemService;
+  private static BankProviderService bankProvider;
   private static FileConfiguration bankConfig;
   private static ItemStack unlockedTemplate;
   private static ItemStack previousNeedsUnlockedTemplate;
@@ -104,6 +101,7 @@ public final class BankLevelMenu {
     itemService = services.getService(ItemService.class);
     fileReaderService = services.getService(FileReaderService.class);
     configItemService = NexEconomyPlugin.getNexLogicService().getService(ConfigItemService.class);
+    bankProvider = services.getService(BankProviderService.class);
 
     bankConfig = loadConfig();
 
@@ -347,101 +345,35 @@ public final class BankLevelMenu {
 
   private static void attemptUpgrade(ViewerRef viewer, LevelEntry entry) {
     Player player = Bukkit.getPlayer(viewer.uniqueId());
-    if (player == null) {
+    BankProviderService provider = bankProvider;
+    if (player == null || provider == null || entry == null) {
       return;
     }
 
-    BankRegistryService bankRegistry = servicesRef.getService(BankRegistryService.class);
-    BankLevelService levelService = servicesRef.getService(BankLevelService.class);
-    BankAccountCacheService bankCache = servicesRef.getService(BankAccountCacheService.class);
-    CurrencyRegistryService currencies = servicesRef.getService(CurrencyRegistryService.class);
-    EconomyService economy = servicesRef.getService(EconomyService.class);
+    provider.levelUp(entry.bankId(), entry.ownerUuid(), player.getUniqueId())
+        .thenAccept(response -> Bukkit.getScheduler().runTask(plugin, () -> {
+          if (response == null || response.isFailure()) {
+            triggerUpgradeFailed(player);
+            sendMessage(player, "bank.errors.internal", Placeholder.parsed("error", response == null ? "Upgrade failed" : response.message()));
+            return;
+          }
 
-    BankDefinition definition = bankRegistry.bank(entry.bankId()).orElse(null);
-    if (definition == null) {
-      sendMessage(player, "bank.errors.bank-not-available", Placeholder.parsed("bank", entry.bankName()));
-      triggerUpgradeFailed(player);
-      return;
-    }
-
-    CurrencyDefinition currency = currencies.currency(definition.currencyIdLower());
-    if (currency == null) {
-      sendMessage(player, "bank.errors.internal", Placeholder.parsed("error", "Currency not found"));
-      triggerUpgradeFailed(player);
-      return;
-    }
-
-    BankDefinition.LevelDefinition levelDef = findLevel(definition, entry.level());
-    if (levelDef == null) {
-      sendMessage(player, "bank.errors.internal", Placeholder.parsed("error", "Level definition not found"));
-      triggerUpgradeFailed(player);
-      return;
-    }
-
-    String permission = levelDef.permission() == null ? "" : levelDef.permission().trim();
-    if (!permission.isBlank() && !player.hasPermission(permission)) {
-      sendMessage(player, "bank.level.permission-denied", Placeholder.parsed("bank", entry.bankName()));
-      triggerUpgradeFailed(player);
-      return;
-    }
-
-    BankAccountCacheService.View currentView = bankCache == null ? null : bankCache.get(entry.bankAccountId());
-    List<BankMemberEntity> currentMembers = currentView == null || currentView.members() == null ? List.of() : currentView.members();
-    BankMemberEntity currentMember = findMember(currentMembers, player.getUniqueId());
-    BankDefinition.RoleDefinition currentRole = resolveRole(definition, new LevelContext(entry.bankId(), entry.ownerUuid(), false), player.getUniqueId(), currentMember);
-    if (currentRole != null && !currentRole.canUpgrade()) {
-      sendMessage(player, "bank.level.role-cannot-upgrade", Placeholder.parsed("bank", entry.bankName()));
-      triggerUpgradeFailed(player);
-      return;
-    }
-
-    MantissaAmount cost = levelService.getUpgradeCost(entry.bankId(), entry.level());
-    MantissaAmount wallet = currentWalletBalance(player.getUniqueId(), currency, servicesRef.getService(EconomyPlayerCacheService.class));
-    if (wallet.compareTo(cost) < 0) {
-      sendMessage(player, "bank.level.insufficient-funds", TagResolver.resolver(List.of(
-          Placeholder.parsed("bank", entry.bankName()),
-          Placeholder.parsed("required", bankService().formatBalanceWithCurrency(cost, currency)),
-          Placeholder.parsed("currency", currency.symbolPlural())
-      )));
-      triggerUpgradeFailed(player);
-      return;
-    }
-
-    economy.remove(player, currency.id(), cost).thenCompose(removed -> {
-      if (!removed) {
-        return CompletableFuture.completedFuture(false);
-      }
-
-      return levelService.upgrade(entry.bankAccountId(), entry.level())
-          .thenCompose(success -> {
-            if (Boolean.TRUE.equals(success)) {
-              return CompletableFuture.completedFuture(true);
-            }
-
-            return economy.add(player, currency.id(), cost).thenApply(refund -> false);
+          triggerUpgradeSuccess(player);
+          sendMessage(player, "bank.level.upgraded", TagResolver.resolver(List.of(
+              Placeholder.parsed("bank", entry.bankName()),
+              Placeholder.parsed("level", String.valueOf(response.payload() == null ? entry.level() : response.payload())),
+              Placeholder.parsed("cost", entry.upgradeCostText())
+          )));
+          refreshBankViewAsync(player, entry.bankId(), entry.ownerUuid(), player.getUniqueId());
+          refreshOpenView(player);
+        }))
+        .exceptionally(ex -> {
+          Bukkit.getScheduler().runTask(plugin, () -> {
+            triggerUpgradeFailed(player);
+            sendMessage(player, "bank.errors.internal", Placeholder.parsed("error", rootMessage(ex)));
           });
-    }).thenAccept(success -> Bukkit.getScheduler().runTask(plugin, () -> {
-      if (!Boolean.TRUE.equals(success)) {
-        triggerUpgradeFailed(player);
-        sendMessage(player, "bank.errors.internal", Placeholder.parsed("error", "Upgrade failed"));
-        return;
-      }
-
-      invalidateBankAccount(entry.bankAccountId());
-      sendMessage(player, "bank.level.upgraded", TagResolver.resolver(List.of(
-          Placeholder.parsed("bank", entry.bankName()),
-          Placeholder.parsed("level", String.valueOf(entry.level())),
-          Placeholder.parsed("cost", bankService().formatBalanceWithCurrency(cost, currency))
-      )));
-      triggerUpgradeSuccess(player);
-      refreshBankViewAsync(player, entry.bankId(), entry.ownerUuid(), player.getUniqueId());
-    })).exceptionally(ex -> {
-      Bukkit.getScheduler().runTask(plugin, () -> {
-        triggerUpgradeFailed(player);
-        sendMessage(player, "bank.errors.internal", Placeholder.parsed("error", rootMessage(ex)));
-      });
-      return null;
-    });
+          return null;
+        });
   }
 
   private static void triggerGeneralClick(UUID viewerUuid) {

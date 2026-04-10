@@ -5,9 +5,14 @@ import io.nexstudios.nexeconomy.service.bank.BankService;
 import io.nexstudios.nexeconomy.service.bank.cache.BankAccountCacheService;
 import io.nexstudios.nexeconomy.service.bank.definition.BankDefinition;
 import io.nexstudios.nexeconomy.service.bank.level.BankLevelService;
+import io.nexstudios.nexeconomy.service.bank.registry.BankRegistryService;
 import io.nexstudios.nexeconomy.service.bank.repo.BankRepositoryService;
 import io.nexstudios.nexeconomy.service.bank.repo.InviteLookupRow;
 import io.nexstudios.nexeconomy.service.bank.sync.BankRedisSyncService;
+import io.nexstudios.nexeconomy.service.economy.EconomyPlayerCacheService;
+import io.nexstudios.nexeconomy.service.economy.EconomyService;
+import io.nexstudios.nexeconomy.service.economy.repo.EconomyPlayer;
+import io.nexstudios.nexeconomy.service.registry.CurrencyRegistryService;
 import io.nexstudios.nexlogic.bukkit.services.entity.nexeconomy.BankAccountEntity;
 import io.nexstudios.nexlogic.bukkit.services.entity.nexeconomy.BankInviteEntity;
 import io.nexstudios.nexlogic.bukkit.services.entity.nexeconomy.BankMemberEntity;
@@ -32,24 +37,36 @@ import java.util.concurrent.CompletableFuture;
 @SuppressWarnings("unused")
 @Dependencies({
     BankService.class,
+    BankRegistryService.class,
     BankLevelService.class,
     BankRepositoryService.class,
     BankAccountCacheService.class,
+    CurrencyRegistryService.class,
+    EconomyService.class,
+    EconomyPlayerCacheService.class,
     BankRedisSyncService.class
 })
 public final class DefaultBankProviderService implements BankProviderService, Service {
 
   private final BankService bankService;
+  private final BankRegistryService bankRegistry;
   private final BankLevelService levelService;
   private final BankRepositoryService repo;
   private final BankAccountCacheService cache;
+  private final CurrencyRegistryService currencies;
+  private final EconomyService economy;
+  private final EconomyPlayerCacheService economyCache;
   private final BankRedisSyncService redisSync;
 
   public DefaultBankProviderService(ServiceAccessor accessor) {
     this.bankService = accessor.getService(BankService.class);
+    this.bankRegistry = accessor.getService(BankRegistryService.class);
     this.levelService = accessor.getService(BankLevelService.class);
     this.repo = accessor.getService(BankRepositoryService.class);
     this.cache = accessor.getService(BankAccountCacheService.class);
+    this.currencies = accessor.getService(CurrencyRegistryService.class);
+    this.economy = accessor.getService(EconomyService.class);
+    this.economyCache = accessor.getService(EconomyPlayerCacheService.class);
     this.redisSync = accessor.getService(BankRedisSyncService.class);
   }
 
@@ -631,7 +648,19 @@ public final class DefaultBankProviderService implements BankProviderService, Se
 
   @Override
   public CompletableFuture<BankResponse<Integer>> levelUp(String bankId, UUID ownerUuid, UUID actorUuid) {
-    return resolveTargetLevel(bankId, ownerUuid, actorUuid, true);
+    String id = normalize(bankId);
+    BankResponse.BankContext baseCtx = BankResponse.context(id, null, ownerUuid, actorUuid, null, null, null, null, null, null, null, null);
+
+    if (id.isBlank()) {
+      return completed(BankResponse.failure(BankResponse.Status.INVALID_ARGUMENT, "Bank id is blank.", baseCtx, 1));
+    }
+    if (ownerUuid == null || actorUuid == null) {
+      return completed(BankResponse.failure(BankResponse.Status.INVALID_ARGUMENT, "Owner or actor UUID is null.", baseCtx, 1));
+    }
+
+    return loadAccess(id, ownerUuid)
+        .thenCompose(access -> upgradeOneLevel(access, ownerUuid, actorUuid))
+        .exceptionally(ex -> failure(ex, baseCtx, 1));
   }
 
   @Override
@@ -763,14 +792,72 @@ public final class DefaultBankProviderService implements BankProviderService, Se
   public CompletableFuture<BankResponse<Boolean>> createBank(String bankId, UUID ownerUuid) {
     String id = normalize(bankId);
     BankResponse.BankContext ctx = BankResponse.context(id, null, ownerUuid, null, null, null, null, null, null, null, null, null);
-    return completed(BankResponse.failure(BankResponse.Status.NOT_IMPLEMENTED, "Bank creation is not implemented yet.", ctx, Boolean.FALSE));
+    if (id.isBlank()) {
+      return completed(BankResponse.failure(BankResponse.Status.INVALID_ARGUMENT, "Bank id is blank.", ctx, Boolean.FALSE));
+    }
+    if (ownerUuid == null) {
+      return completed(BankResponse.failure(BankResponse.Status.INVALID_ARGUMENT, "Owner UUID is null.", ctx, Boolean.FALSE));
+    }
+
+    return bankService.createBank(id, ownerUuid)
+        .thenApply(account -> {
+          if (account == null || account.getId() == null) {
+            return BankResponse.failure(BankResponse.Status.BANK_UNAVAILABLE, "Bank account could not be created.", ctx, Boolean.FALSE);
+          }
+
+          BankResponse.BankContext resultCtx = BankResponse.context(
+              id,
+              account.getId(),
+              ownerUuid,
+              null,
+              null,
+              null,
+              null,
+              account.getLevel(),
+              null,
+              null,
+              null,
+              null
+          );
+          return BankResponse.success("Bank account ready.", resultCtx, Boolean.TRUE);
+        })
+        .exceptionally(ex -> failure(ex, ctx, Boolean.FALSE));
   }
 
   @Override
   public CompletableFuture<BankResponse<Boolean>> deleteBank(String bankId, UUID actorUuid) {
     String id = normalize(bankId);
     BankResponse.BankContext ctx = BankResponse.context(id, null, null, actorUuid, null, null, null, null, null, null, null, null);
-    return completed(BankResponse.failure(BankResponse.Status.NOT_IMPLEMENTED, "Bank deletion is not implemented yet.", ctx, Boolean.FALSE));
+    if (id.isBlank()) {
+      return completed(BankResponse.failure(BankResponse.Status.INVALID_ARGUMENT, "Bank id is blank.", ctx, Boolean.FALSE));
+    }
+    if (actorUuid == null) {
+      return completed(BankResponse.failure(BankResponse.Status.INVALID_ARGUMENT, "Actor UUID is null.", ctx, Boolean.FALSE));
+    }
+
+    return bankService.deleteBank(id, actorUuid)
+        .thenApply(account -> {
+          if (account == null || account.getId() == null) {
+            return BankResponse.failure(BankResponse.Status.BANK_NOT_FOUND, "Bank not found.", ctx, Boolean.FALSE);
+          }
+
+          BankResponse.BankContext resultCtx = BankResponse.context(
+              id,
+              account.getId(),
+              account.getOwnerUuid(),
+              actorUuid,
+              null,
+              null,
+              account.getLevel(),
+              null,
+              null,
+              null,
+              null,
+              null
+          );
+          return BankResponse.success("Bank account deleted.", resultCtx, Boolean.TRUE);
+        })
+        .exceptionally(ex -> failure(ex, ctx, Boolean.FALSE));
   }
 
   private CompletableFuture<BankResponse<Integer>> resolveTargetLevel(String bankId, UUID ownerUuid, UUID actorUuid, boolean up) {
@@ -859,6 +946,103 @@ public final class DefaultBankProviderService implements BankProviderService, Se
       String message = targetLevel > currentLevel ? "Bank level upgraded." : "Bank level downgraded.";
       return BankResponse.success(message, ctx, targetLevel);
     }).exceptionally(ex -> failure(ex, baseCtx, currentLevel));
+  }
+
+  private CompletableFuture<BankResponse<Integer>> upgradeOneLevel(BankAccess access, UUID ownerUuid, UUID actorUuid) {
+    String id = access == null ? "" : access.bankId();
+    BankAccountEntity acc = access == null ? null : access.account();
+    UUID bankAccountId = acc == null ? null : acc.getId();
+    int currentLevel = normalizeLevel(acc == null ? null : acc.getLevel());
+    int targetLevel = currentLevel + 1;
+    BankResponse.BankContext baseCtx = BankResponse.context(id, bankAccountId, ownerUuid, actorUuid, null, null, currentLevel, currentLevel, targetLevel, null, null, null);
+
+    if (access == null || access.definition() == null || bankAccountId == null) {
+      return completed(BankResponse.failure(BankResponse.Status.BANK_NOT_FOUND, "Bank not found.", baseCtx, currentLevel));
+    }
+
+    BankDefinition def = access.definition();
+    int maxLevel = levelService.getMaxLevel(id);
+    if (targetLevel > maxLevel) {
+      return completed(BankResponse.failure(BankResponse.Status.MAX_LEVEL_REACHED, "The maximum level has been reached.", baseCtx, currentLevel));
+    }
+
+    Player actor = actorUuid == null ? null : Bukkit.getPlayer(actorUuid);
+    if (actor == null || !actor.isOnline()) {
+      return completed(BankResponse.failure(BankResponse.Status.INVALID_ARGUMENT, "Player must be online.", baseCtx, currentLevel));
+    }
+
+    BankDefinition.LevelDefinition targetDef = findLevel(def, targetLevel);
+    if (targetDef != null && isNotBlank(targetDef.permission()) && !actor.hasPermission(targetDef.permission())) {
+      return completed(BankResponse.failure(BankResponse.Status.NO_PERMISSION, "You do not have permission for this level.", baseCtx, currentLevel));
+    }
+
+    if (!Objects.equals(ownerUuid, actorUuid)) {
+      BankDefinition.MemberSystem ms = def.memberSystem();
+      if (ms == null || !ms.enabled() || ms.rolesByIdLower() == null) {
+        return completed(BankResponse.failure(BankResponse.Status.BANK_UNAVAILABLE, "Member system is disabled.", baseCtx, currentLevel));
+      }
+
+      BankMemberEntity actorMember = findMember(access.members(), actorUuid);
+      if (actorMember == null) {
+        return completed(BankResponse.failure(BankResponse.Status.NOT_MEMBER, "You are not a member of this bank.", baseCtx, currentLevel));
+      }
+
+      BankDefinition.RoleDefinition actorRole = ms.rolesByIdLower().get(normalize(actorMember.getRoleIdLower()));
+      if (actorRole == null || !actorRole.canUpgrade()) {
+        return completed(BankResponse.failure(BankResponse.Status.NO_PERMISSION, "Your role cannot upgrade this bank.", baseCtx, currentLevel));
+      }
+    }
+
+    var currency = currencies == null ? null : currencies.currency(def.currencyIdLower());
+    if (currency == null) {
+      return completed(BankResponse.failure(BankResponse.Status.CURRENCY_NOT_CONFIGURED, "Currency is not configured.", baseCtx, currentLevel));
+    }
+
+    MantissaAmount cost = normalizeAmount(levelService.getUpgradeCost(id, targetLevel));
+    MantissaAmount currentBalance = access.balance();
+    MantissaAmount maxBalance = normalizeAmount(levelService.getMaxBalance(id, targetLevel));
+    MantissaAmount wallet = resolveWalletBalance(actorUuid, currency.id());
+
+    if (wallet.compareTo(cost) < 0) {
+      BankResponse.BankContext ctx = BankResponse.context(id, bankAccountId, ownerUuid, actorUuid, null, null, currentLevel, currentLevel, targetLevel, cost, currentBalance, maxBalance);
+      return completed(BankResponse.failure(BankResponse.Status.INSUFFICIENT_FUNDS, "Insufficient funds.", ctx, currentLevel));
+    }
+
+    return economy.remove(actor, currency.id(), cost).thenCompose(removed -> {
+      if (!Boolean.TRUE.equals(removed)) {
+        BankResponse.BankContext ctx = BankResponse.context(id, bankAccountId, ownerUuid, actorUuid, null, null, currentLevel, currentLevel, targetLevel, cost, currentBalance, maxBalance);
+        return completed(BankResponse.failure(BankResponse.Status.INSUFFICIENT_FUNDS, "Insufficient funds.", ctx, currentLevel));
+      }
+
+      return repo.updateBankLevel(bankAccountId, targetLevel).thenCompose(updated -> {
+        if (!Boolean.TRUE.equals(updated)) {
+          BankResponse.BankContext ctx = BankResponse.context(id, bankAccountId, ownerUuid, actorUuid, null, null, currentLevel, currentLevel, targetLevel, cost, currentBalance, maxBalance);
+          return economy.add(actor, currency.id(), cost).thenApply(refunded -> BankResponse.failure(BankResponse.Status.INTERNAL_ERROR, "Failed to update bank level.", ctx, currentLevel));
+        }
+
+        invalidate(bankAccountId);
+        if (levelService != null) {
+          levelService.invalidate(bankAccountId);
+        }
+
+        BankResponse.BankContext ctx = BankResponse.context(id, bankAccountId, ownerUuid, actorUuid, null, null, currentLevel, targetLevel, targetLevel, cost, currentBalance, maxBalance);
+        return completed(BankResponse.success("Bank level upgraded.", ctx, targetLevel));
+      }).exceptionallyCompose(ex -> economy.add(actor, currency.id(), cost).thenCompose(refunded -> CompletableFuture.failedFuture(ex)));
+    }).exceptionally(ex -> failure(ex, baseCtx, currentLevel));
+  }
+
+  private MantissaAmount resolveWalletBalance(UUID playerUuid, String currencyId) {
+    if (playerUuid == null || currencyId == null || currencyId.isBlank() || economyCache == null) {
+      return MantissaAmount.zero();
+    }
+
+    EconomyPlayer player = economyCache.getOnline(playerUuid);
+    if (player == null) {
+      return MantissaAmount.zero();
+    }
+
+    EconomyPlayer.BalanceEntry entry = player.entry(currencyId);
+    return entry == null || entry.amount() == null ? MantissaAmount.zero() : MantissaAmount.normalize(entry.amount());
   }
 
   private CompletableFuture<BankAccountEntity> resolveAccount(String bankId, UUID ownerUuid) {

@@ -1,7 +1,7 @@
 package io.nexstudios.nexeconomy.service.bank.listener;
 
 import io.nexstudios.framework.paper.services.ServiceListener;
-import io.nexstudios.nexeconomy.service.bank.BankService;
+import io.nexstudios.nexeconomy.provider.bank.BankProviderService;
 import io.nexstudios.nexeconomy.service.bank.cache.BankAccountPresenceService;
 import io.nexstudios.nexeconomy.service.bank.definition.BankDefinition;
 import io.nexstudios.nexeconomy.service.bank.registry.BankRegistryService;
@@ -19,18 +19,18 @@ import java.util.concurrent.CompletableFuture;
 
 @Dependencies({
     BankRegistryService.class,
-    BankService.class,
+    BankProviderService.class,
     BankAccountPresenceService.class
 })
 public final class BankPlayerListener implements ServiceListener {
 
   private final BankRegistryService bankRegistry;
-  private final BankService bankService;
+  private final BankProviderService bankProvider;
   private final BankAccountPresenceService presence;
 
   public BankPlayerListener(ServiceAccessor accessor) {
     this.bankRegistry = accessor.getService(BankRegistryService.class);
-    this.bankService = accessor.getService(BankService.class);
+    this.bankProvider = accessor.getService(BankProviderService.class);
     this.presence = accessor.getService(BankAccountPresenceService.class);
   }
 
@@ -46,7 +46,7 @@ public final class BankPlayerListener implements ServiceListener {
       if (!def.enabled()) continue;
       if (!def.unlockedByDefault()) continue;
 
-      initialAccounts.add(bankService.getOrCreateAccount(def.idLower(), uuid));
+      initialAccounts.add(bankProvider.createBank(def.idLower(), uuid));
     }
 
     if (presence != null) {

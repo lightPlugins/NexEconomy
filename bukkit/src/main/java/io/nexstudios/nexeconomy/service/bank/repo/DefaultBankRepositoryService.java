@@ -145,6 +145,47 @@ public final class DefaultBankRepositoryService implements BankRepositoryService
   }
 
   @Override
+  public CompletableFuture<Boolean> deleteBankAccount(UUID bankAccountId) {
+    if (bankAccountId == null) return CompletableFuture.completedFuture(false);
+
+    return dbAsync.executeAsyncInTransaction(em -> {
+      BankAccountEntity account = em.find(BankAccountEntity.class, bankAccountId);
+      if (account == null) {
+        return false;
+      }
+
+      String bankIdLower = account.getBankIdLower();
+      UUID ownerUuid = account.getOwnerUuid();
+
+      em.createQuery("delete from BankTransactionEntity t where t.bankAccountId = :acc")
+          .setParameter("acc", bankAccountId)
+          .executeUpdate();
+
+      em.createQuery("delete from BankWithdrawUsageEntity u where u.bankAccountId = :acc")
+          .setParameter("acc", bankAccountId)
+          .executeUpdate();
+
+      em.createQuery("delete from BankInviteEntity i where i.bankAccountId = :acc")
+          .setParameter("acc", bankAccountId)
+          .executeUpdate();
+
+      em.createQuery("delete from BankMemberEntity m where m.bankAccountId = :acc")
+          .setParameter("acc", bankAccountId)
+          .executeUpdate();
+
+      if (bankIdLower != null && ownerUuid != null) {
+        em.createQuery("delete from BankUnlockEntity u where u.bankIdLower = :bank and u.ownerUuid = :owner")
+            .setParameter("bank", normalizeId(bankIdLower))
+            .setParameter("owner", ownerUuid)
+            .executeUpdate();
+      }
+
+      em.remove(account);
+      return true;
+    });
+  }
+
+  @Override
   public CompletableFuture<MantissaAmount> loadBalance(UUID bankAccountId) {
     if (bankAccountId == null) return CompletableFuture.completedFuture(MantissaAmount.zero());
 

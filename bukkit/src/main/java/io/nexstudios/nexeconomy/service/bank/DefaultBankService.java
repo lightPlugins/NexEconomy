@@ -339,6 +339,43 @@ public final class DefaultBankService implements BankService, Service {
   }
 
   @Override
+  public CompletableFuture<BankAccountEntity> createBank(String bankId, UUID ownerUuid) {
+    return getOrCreateAccount(bankId, ownerUuid);
+  }
+
+  @Override
+  public CompletableFuture<BankAccountEntity> deleteBank(String bankId, UUID ownerUuid) {
+    String bankIdLower = normalizeId(bankId);
+    if (bankIdLower.isBlank()) return CompletableFuture.failedFuture(new IllegalArgumentException("bankId is blank"));
+    if (ownerUuid == null) return CompletableFuture.failedFuture(new IllegalArgumentException("ownerUuid is null"));
+
+    BankDefinition def = banks.bank(bankIdLower).orElse(null);
+    if (def == null || !def.enabled()) return CompletableFuture.failedFuture(new IllegalStateException("bank not available"));
+
+    return requireOwnerNotLocked(ownerUuid)
+        .thenCompose(v -> requireUnlockedIfNeeded(bankIdLower, ownerUuid, def))
+        .thenCompose(v -> repo.findAccount(bankIdLower, ownerUuid))
+        .thenCompose(accOpt -> {
+          BankAccountEntity acc = accOpt.orElse(null);
+          if (acc == null || acc.getId() == null) {
+            return CompletableFuture.failedFuture(new IllegalStateException("bank not found"));
+          }
+
+          UUID accountId = acc.getId();
+          return repo.deleteBankAccount(accountId).thenApply(deleted -> {
+            if (!Boolean.TRUE.equals(deleted)) {
+              throw new IllegalStateException("bank not found");
+            }
+
+            if (cache != null) cache.invalidate(accountId);
+            if (redisSync != null) redisSync.publishInvalidateAccount(accountId);
+            if (presence != null) presence.onBankDeleted(accountId);
+            return acc;
+          });
+        });
+  }
+
+  @Override
   public CompletableFuture<List<BankMemberEntity>> members(String bankId, UUID ownerUuid) {
     String bankIdLower = normalizeId(bankId);
     if (bankIdLower.isBlank()) return CompletableFuture.failedFuture(new IllegalArgumentException("bankId is blank"));
