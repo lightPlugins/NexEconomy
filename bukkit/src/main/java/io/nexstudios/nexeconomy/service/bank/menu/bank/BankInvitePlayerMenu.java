@@ -4,11 +4,7 @@ import io.nexstudios.configservice.config.ConfigurationSection;
 import io.nexstudios.configservice.config.FileConfiguration;
 import io.nexstudios.configservice.service.singlereader.FileReaderService;
 import io.nexstudios.itemservice.bukkit.service.item.ItemService;
-import io.nexstudios.menuservice.common.api.MenuKey;
-import io.nexstudios.menuservice.common.api.MenuPopulateContext;
-import io.nexstudios.menuservice.common.api.MenuService;
-import io.nexstudios.menuservice.common.api.MenuSlot;
-import io.nexstudios.menuservice.common.api.ViewerRef;
+import io.nexstudios.menuservice.common.api.*;
 import io.nexstudios.menuservice.common.api.builder.MenuDefinitionBuilder;
 import io.nexstudios.menuservice.common.api.interaction.InteractionPolicies;
 import io.nexstudios.menuservice.common.api.item.MenuItem;
@@ -23,6 +19,7 @@ import io.nexstudios.nexeconomy.NexEconomyPlugin;
 import io.nexstudios.nexeconomy.provider.bank.BankProviderService;
 import io.nexstudios.nexeconomy.provider.bank.BankResponse;
 import io.nexstudios.nexeconomy.service.bank.effects.BankClickEffectService;
+import io.nexstudios.nexeconomy.service.bank.menu.BankInviteFlowState;
 import io.nexstudios.nexeconomy.service.bank.menu.extra.BankExtraItemSupport;
 import io.nexstudios.nexeconomy.service.bank.definition.BankDefinition;
 import io.nexstudios.nexlogic.bukkit.services.entity.nexeconomy.BankMemberEntity;
@@ -81,6 +78,7 @@ public final class BankInvitePlayerMenu {
   private static FileConfiguration config;
   private static ItemStack fillTemplate;
   private static ItemStack infoTemplate;
+  private static ItemStack emptyTemplate;
   private static ItemStack playerEntryTemplate;
   private static ItemStack previousTemplate;
   private static ItemStack nextTemplate;
@@ -106,6 +104,7 @@ public final class BankInvitePlayerMenu {
 
     fillTemplate = configuredItem(config, "items.fill", Material.BLACK_STAINED_GLASS_PANE);
     infoTemplate = configuredItem(config, "items.info", Material.PAPER);
+    emptyTemplate = configuredItem(config, "items.empty", Material.BARRIER);
     playerEntryTemplate = configuredItem(config, "items.player-entry", Material.PLAYER_HEAD);
     previousTemplate = configuredItem(config, "items.navigation.previous", Material.ARROW);
     nextTemplate = configuredItem(config, "items.navigation.next", Material.ARROW);
@@ -119,9 +118,9 @@ public final class BankInvitePlayerMenu {
         .refreshInterval(parseRefreshInterval(config.getString("menu.refresh-interval", "1")))
         .interactionPolicy(InteractionPolicies.locked())
         .fillEmptySlotsWith(MenuItem.of(fillTemplate))
-        .interactionHooks(new io.nexstudios.menuservice.common.api.MenuInteractionHooks() {
+        .interactionHooks(new MenuInteractionHooks() {
           @Override
-          public void onClose(MenuKey key, ViewerRef viewer, io.nexstudios.menuservice.common.api.CloseReason reason) {
+          public void onClose(MenuKey key, ViewerRef viewer, CloseReason reason) {
             if (!BankInviteFlowState.consumeTransition(viewer.uniqueId())) {
               BankInviteFlowState.clear(viewer.uniqueId());
             }
@@ -211,10 +210,6 @@ public final class BankInvitePlayerMenu {
   private static PagedAreaDefinition<PlayerEntry> buildPagedArea() {
     PageSource<PlayerEntry> source = (menuKey, viewer) -> {
       List<PlayerEntry> entries = new ArrayList<>();
-      if (Bukkit.getOnlinePlayers().isEmpty()) {
-        return entries;
-      }
-
       UUID viewerUuid = viewer == null ? null : viewer.uniqueId();
       if (viewerUuid == null) {
         return entries;
@@ -240,7 +235,11 @@ public final class BankInvitePlayerMenu {
         if (memberUuids.contains(online.getUniqueId())) {
           continue;
         }
-        entries.add(new PlayerEntry(online.getUniqueId(), online.getName().isBlank() ? online.getUniqueId().toString() : online.getName()));
+        entries.add(new PlayerEntry(online.getUniqueId(), online.getName().isBlank() ? online.getUniqueId().toString() : online.getName(), false));
+      }
+
+      if (entries.isEmpty()) {
+        entries.add(PlayerEntry.empty());
       }
 
       return entries;
@@ -253,13 +252,18 @@ public final class BankInvitePlayerMenu {
         AREA_ID,
         bounds,
         source,
-        (entry, index) -> PlannedMenuItemSupplier.withHead(
-            MenuItem.of(renderPlayerItem(entry)),
-            headService.loadHead(entry.playerUuid())
-        ),
+        (entry, index) -> entry.placeholder()
+            ? () -> MenuItem.of(renderEmptyPlayerItem())
+            : PlannedMenuItemSupplier.withHead(
+                MenuItem.of(renderPlayerItem(entry)),
+                headService.loadHead(entry.playerUuid())
+            ),
         navigation,
         Optional.of((entry, index, clickCtx) -> {
           clickCtx.cancel();
+          if (entry.placeholder()) {
+            return;
+          }
           triggerGeneralClick(clickCtx.viewer().uniqueId());
           BankInviteFlowState.selectTarget(clickCtx.viewer().uniqueId(), entry.playerUuid(), entry.playerName());
           BankInviteFlowState.markTransition(clickCtx.viewer().uniqueId());
@@ -277,6 +281,11 @@ public final class BankInvitePlayerMenu {
     ));
 
     return renderConfiguredItem(playerEntryTemplate, "items.player-entry", entry.playerName(), resolver);
+  }
+
+  private static ItemStack renderEmptyPlayerItem() {
+    TagResolver resolver = TagResolver.resolver(List.of());
+    return renderConfiguredItem(emptyTemplate, "items.empty", "No players available", resolver);
   }
 
   private static BankDefinition resolveDefinition(BankInviteFlowState.InviteContext state) {
@@ -455,7 +464,11 @@ public final class BankInvitePlayerMenu {
     return uuid.toString();
   }
 
-  private record PlayerEntry(UUID playerUuid, String playerName) {}
+  private record PlayerEntry(UUID playerUuid, String playerName, boolean placeholder) {
+    static PlayerEntry empty() {
+      return new PlayerEntry(null, "No players available", true);
+    }
+  }
 }
 
 

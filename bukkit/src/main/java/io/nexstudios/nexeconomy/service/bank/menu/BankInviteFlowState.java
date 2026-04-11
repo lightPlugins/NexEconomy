@@ -1,18 +1,20 @@
-package io.nexstudios.nexeconomy.service.bank.menu.bank;
+package io.nexstudios.nexeconomy.service.bank.menu;
+
+import lombok.AccessLevel;
+import lombok.NoArgsConstructor;
 
 import java.util.Locale;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentMap;
 
-final class BankInviteFlowState {
+@NoArgsConstructor(access = AccessLevel.PRIVATE)
+public final class BankInviteFlowState {
 
   private static final ConcurrentMap<UUID, InviteContext> CONTEXTS = new ConcurrentHashMap<>();
   private static final ConcurrentMap<UUID, Boolean> TRANSITIONS = new ConcurrentHashMap<>();
 
-  private BankInviteFlowState() {}
-
-  static void start(UUID viewerUuid, String bankId, UUID ownerUuid, boolean ownerBank) {
+  public static void start(UUID viewerUuid, String bankId, UUID ownerUuid, boolean ownerBank) {
     if (viewerUuid == null) {
       return;
     }
@@ -20,36 +22,36 @@ final class BankInviteFlowState {
     CONTEXTS.put(viewerUuid, new InviteContext(normalize(bankId), ownerUuid, ownerBank, null, null, null, null));
   }
 
-  static InviteContext get(UUID viewerUuid) {
+  public static InviteContext get(UUID viewerUuid) {
     return viewerUuid == null ? null : CONTEXTS.get(viewerUuid);
   }
 
-  static InviteContext selectTarget(UUID viewerUuid, UUID targetUuid, String targetName) {
+  public static InviteContext selectTarget(UUID viewerUuid, UUID targetUuid, String targetName) {
     return update(viewerUuid, context -> context.withTarget(targetUuid, targetName));
   }
 
-  static InviteContext selectRole(UUID viewerUuid, String roleId, String roleName) {
+  public static InviteContext selectRole(UUID viewerUuid, String roleId, String roleName) {
     return update(viewerUuid, context -> context.withRole(roleId, roleName));
   }
 
-  static InviteContext clearRole(UUID viewerUuid) {
+  public static InviteContext clearRole(UUID viewerUuid) {
     return update(viewerUuid, context -> context.withRole(null, null));
   }
 
-  static void clear(UUID viewerUuid) {
+  public static void clear(UUID viewerUuid) {
     if (viewerUuid != null) {
       CONTEXTS.remove(viewerUuid);
       TRANSITIONS.remove(viewerUuid);
     }
   }
 
-  static void markTransition(UUID viewerUuid) {
+  public static void markTransition(UUID viewerUuid) {
     if (viewerUuid != null) {
       TRANSITIONS.put(viewerUuid, Boolean.TRUE);
     }
   }
 
-  static boolean consumeTransition(UUID viewerUuid) {
+  public static boolean consumeTransition(UUID viewerUuid) {
     if (viewerUuid == null) {
       return false;
     }
@@ -74,7 +76,7 @@ final class BankInviteFlowState {
     InviteContext apply(InviteContext context);
   }
 
-  record InviteContext(String bankId, UUID ownerUuid, boolean ownerBank, UUID targetUuid, String targetName, String roleId, String roleName) {
+  public record InviteContext(String bankId, UUID ownerUuid, boolean ownerBank, UUID targetUuid, String targetName, String roleId, String roleName) {
     InviteContext withTarget(UUID newTargetUuid, String newTargetName) {
       return new InviteContext(bankId, ownerUuid, ownerBank, newTargetUuid, newTargetName, null, null);
     }

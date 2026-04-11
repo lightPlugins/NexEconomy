@@ -52,11 +52,11 @@ items:
       - "<dark_gray>Right click: previous mode</dark_gray>"
 
   back:
-    item: "minecraft:arrow"
-    display-name: "<yellow>Back</yellow>"
+    item: "minecraft:redstone"
+    display-name: "<yellow>Close</yellow>"
     lore:
       - ""
-      - "<dark_gray>Return to the previous menu</dark_gray>"
+      - "<dark_gray>Close the menu</dark_gray>"
 
   # If you use player_head as item for bank entries, the menu will automatically replace the skull owner with the bank owner's texture.
   bank-entry:

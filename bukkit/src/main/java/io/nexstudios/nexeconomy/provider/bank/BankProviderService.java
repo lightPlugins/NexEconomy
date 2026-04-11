@@ -46,6 +46,8 @@ public interface BankProviderService extends Service {
 
   CompletableFuture<BankResponse<BankInviteEntity>> invite(String bankId, UUID ownerUuid, UUID actorUuid, UUID inviteeUuid, String roleId);
 
+  CompletableFuture<BankResponse<Boolean>> changeMemberRole(String bankId, UUID ownerUuid, UUID actorUuid, UUID memberUuid, String roleId);
+
   CompletableFuture<BankResponse<Boolean>> acceptInvite(String bankId, UUID ownerUuid, UUID inviteeUuid);
 
   CompletableFuture<BankResponse<Boolean>> acceptInviteFromOwner(UUID ownerUuid, UUID inviteeUuid);

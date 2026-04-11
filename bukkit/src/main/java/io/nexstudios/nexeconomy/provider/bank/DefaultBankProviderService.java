@@ -620,6 +620,27 @@ public final class DefaultBankProviderService implements BankProviderService, Se
   }
 
   @Override
+  public CompletableFuture<BankResponse<Boolean>> changeMemberRole(String bankId, UUID ownerUuid, UUID actorUuid, UUID memberUuid, String roleId) {
+    String id = normalize(bankId);
+    String normalizedRole = normalize(roleId);
+    BankResponse.BankContext baseCtx = BankResponse.context(id, null, ownerUuid, actorUuid, memberUuid, normalizedRole, null, null, null, null, null, null);
+
+    if (id.isBlank()) {
+      return completed(BankResponse.failure(BankResponse.Status.INVALID_ARGUMENT, "Bank id is blank.", baseCtx, Boolean.FALSE));
+    }
+    if (ownerUuid == null || actorUuid == null || memberUuid == null) {
+      return completed(BankResponse.failure(BankResponse.Status.INVALID_ARGUMENT, "Owner, actor or member UUID is null.", baseCtx, Boolean.FALSE));
+    }
+
+    return bankService.changeMemberRole(id, ownerUuid, actorUuid, memberUuid, normalizedRole)
+        .thenApply(ok -> Boolean.TRUE.equals(ok)
+            ? BankResponse.success("Member role updated.", baseCtx, Boolean.TRUE)
+            : BankResponse.failure(BankResponse.Status.NO_PERMISSION, "You are not allowed to change this member.", baseCtx, Boolean.FALSE)
+        )
+        .exceptionally(ex -> failure(ex, baseCtx, Boolean.FALSE));
+  }
+
+  @Override
   public CompletableFuture<BankResponse<Integer>> level(String bankId, UUID ownerUuid) {
     String id = normalize(bankId);
     BankResponse.BankContext baseCtx = BankResponse.context(id, null, ownerUuid, null, null, null, null, null, null, null, null, null);

@@ -35,6 +35,8 @@ public interface BankService extends Service {
 
   CompletableFuture<BankInviteEntity> invite(String bankId, UUID ownerUuid, UUID actorUuid, UUID inviteeUuid, String roleId);
 
+  CompletableFuture<Boolean> changeMemberRole(String bankId, UUID ownerUuid, UUID actorUuid, UUID memberUuid, String roleId);
+
   CompletableFuture<Boolean> acceptInvite(String bankId, UUID ownerUuid, UUID inviteeUuid);
 
   CompletableFuture<MantissaAmount> balance(String bankId, UUID ownerUuid);
@@ -43,7 +45,6 @@ public interface BankService extends Service {
 
   CompletableFuture<MantissaAmount> withdraw(String bankId, UUID ownerUuid, UUID actorUuid, MantissaAmount amount);
 
-  CompletableFuture<Boolean> acceptInviteFromOwner(UUID ownerUuid, UUID inviteeUuid);
 
   CompletableFuture<Boolean> denyInviteFromOwner(UUID ownerUuid, UUID inviteeUuid);
 

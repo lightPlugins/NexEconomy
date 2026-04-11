@@ -45,6 +45,14 @@ items:
       - ""
       - "<dark_gray>Choose a player to continue</dark_gray>"
 
+  empty:
+    item: "minecraft:barrier"
+    display-name: "<red>No players available</red>"
+    lore:
+      - ""
+      - "<dark_gray>There is nobody online to invite right now.</dark_gray>"
+      - "<dark_gray>Please try again later.</dark_gray>"
+
   player-entry:
     item: "minecraft:player_head"
     display-name: "<dark_gray>» <yellow><player-name></yellow>"

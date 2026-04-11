@@ -33,6 +33,7 @@ import io.nexstudios.nexlogic.bukkit.services.entity.nexeconomy.BankMemberEntity
 import io.nexstudios.nexlogic.bukkit.services.entity.nexeconomy.BankWithdrawUsageEntity;
 import io.nexstudios.nexlogic.bukkit.services.items.config.ConfigItemService;
 import io.nexstudios.nexlogic.bukkit.services.heads.HeadService;
+import io.nexstudios.nexlogic.common.services.logging.LoggerService;
 import io.nexstudios.serviceregistry.di.Dependencies;
 import io.nexstudios.serviceregistry.di.ServiceAccessor;
 import lombok.extern.slf4j.Slf4j;
@@ -65,6 +66,7 @@ import java.util.concurrent.ConcurrentHashMap;
 @Dependencies({
     ItemService.class,
     MenuService.class,
+    LoggerService.class,
     ComponentService.class,
     BankProviderService.class,
     BankAccountCacheService.class,
@@ -88,6 +90,7 @@ public final class BankDetailMenu {
   private static final int DEFAULT_TRANSACTIONS_SLOT = 22;
   private static final int DEFAULT_LEVEL_SLOT = 31;
   private static final int DEFAULT_INVITE_SLOT = 30;
+  private static final int DEFAULT_MEMBER_SLOT = 29;
   private static final int DEFAULT_WITHDRAW_SLOT = 23;
   private static final int DEFAULT_WITHDRAW_ALL_SLOT = 24;
   private static final int DEFAULT_BACK_SLOT = 49;
@@ -98,6 +101,7 @@ public final class BankDetailMenu {
   private static int SLOT_TRANSACTIONS = DEFAULT_TRANSACTIONS_SLOT;
   private static int SLOT_LEVEL = DEFAULT_LEVEL_SLOT;
   private static int SLOT_INVITE = DEFAULT_INVITE_SLOT;
+  private static int SLOT_MEMBER = DEFAULT_MEMBER_SLOT;
   private static int SLOT_WITHDRAW = DEFAULT_WITHDRAW_SLOT;
   private static int SLOT_WITHDRAW_ALL = DEFAULT_WITHDRAW_ALL_SLOT;
   private static int SLOT_BACK = DEFAULT_BACK_SLOT;
@@ -106,6 +110,7 @@ public final class BankDetailMenu {
   private static final Map<UUID, BankData> LAST_DATA = new ConcurrentHashMap<>();
   private static ServiceAccessor servicesRef;
   private static Plugin plugin;
+  private static LoggerService loggerService;
   private static HeadService headService;
   private static ComponentService componentService;
   private static ItemService itemService;
@@ -118,9 +123,13 @@ public final class BankDetailMenu {
   private static ItemStack depositAllTemplate;
   private static ItemStack depositAllDisabledTemplate;
   private static ItemStack transactionsTemplate;
+  private static ItemStack transactionsDisabledTemplate;
   private static ItemStack levelTemplate;
+  private static ItemStack levelDisabledTemplate;
   private static ItemStack inviteTemplate;
   private static ItemStack inviteDisabledTemplate;
+  private static ItemStack memberTemplate;
+  private static ItemStack memberDisabledTemplate;
   private static ItemStack withdrawTemplate;
   private static ItemStack withdrawDisabledTemplate;
   private static ItemStack withdrawAllTemplate;
@@ -134,6 +143,7 @@ public final class BankDetailMenu {
     servicesRef = services;
     headService = NexEconomyPlugin.getNexLogicService().getService(HeadService.class);
     plugin = services.getService(PaperPluginService.class).plugin();
+    loggerService = services.getService(LoggerService.class);
     componentService = services.getService(ComponentService.class);
     itemService = services.getService(ItemService.class);
     fileReaderService = services.getService(FileReaderService.class);
@@ -147,6 +157,7 @@ public final class BankDetailMenu {
     SLOT_TRANSACTIONS = bankConfig.getInt("layout.slots.transactions", DEFAULT_TRANSACTIONS_SLOT);
     SLOT_LEVEL = bankConfig.getInt("layout.slots.level", DEFAULT_LEVEL_SLOT);
     SLOT_INVITE = bankConfig.getInt("layout.slots.invite", DEFAULT_INVITE_SLOT);
+    SLOT_MEMBER = bankConfig.getInt("layout.slots.member", DEFAULT_MEMBER_SLOT);
     SLOT_WITHDRAW = bankConfig.getInt("layout.slots.withdraw", DEFAULT_WITHDRAW_SLOT);
     SLOT_WITHDRAW_ALL = bankConfig.getInt("layout.slots.withdraw-all", DEFAULT_WITHDRAW_ALL_SLOT);
     SLOT_BACK = bankConfig.getInt("layout.slots.back", DEFAULT_BACK_SLOT);
@@ -157,9 +168,13 @@ public final class BankDetailMenu {
     depositAllTemplate = configuredItem(bankConfig, "items.deposit-all", Material.IRON_BLOCK);
     depositAllDisabledTemplate = configuredItem(bankConfig, "items.deposit-all-disabled", Material.BARRIER);
     transactionsTemplate = configuredItem(bankConfig, "items.transactions", Material.BOOK);
+    transactionsDisabledTemplate = configuredItem(bankConfig, "items.transactions-disabled", Material.BARRIER);
     levelTemplate = configuredItem(bankConfig, "items.level", Material.EXPERIENCE_BOTTLE);
+    levelDisabledTemplate = configuredItem(bankConfig, "items.level-disabled", Material.BARRIER);
     inviteTemplate = configuredItem(bankConfig, "items.invite", Material.PLAYER_HEAD);
     inviteDisabledTemplate = configuredItem(bankConfig, "items.invite-disabled", Material.BARRIER);
+    memberTemplate = configuredItem(bankConfig, "items.member", Material.PLAYER_HEAD);
+    memberDisabledTemplate = configuredItem(bankConfig, "items.member-disabled", Material.BARRIER);
     withdrawTemplate = configuredItem(bankConfig, "items.withdraw", Material.GOLD_INGOT);
     withdrawDisabledTemplate = configuredItem(bankConfig, "items.withdraw-disabled", Material.BARRIER);
     withdrawAllTemplate = configuredItem(bankConfig, "items.withdraw-all", Material.GOLD_BLOCK);
@@ -228,6 +243,7 @@ public final class BankDetailMenu {
     setDepositButtons(ctx, data);
     setTransactionButton(ctx, data);
     setInviteButton(ctx, data);
+    setMemberButton(ctx, data);
     setLevelButton(ctx, data);
     setWithdrawButtons(ctx, data);
     setConfiguredButton(ctx, SLOT_BACK, backTemplate, "items.back", "Back", detailResolver(data), clickCtx -> {
@@ -274,6 +290,7 @@ public final class BankDetailMenu {
     MantissaAmount walletBalance = currentWalletBalance(player.getUniqueId(), currency);
 
     List<BankMemberEntity> members = bankView.members() == null ? List.of() : bankView.members();
+    int memberCount = members.size();
 
     BankMemberEntity viewerMember = findMember(members, viewerUuid);
     BankDefinition.RoleDefinition role = resolveRole(definition, context, viewerUuid, viewerMember);
@@ -343,6 +360,7 @@ public final class BankDetailMenu {
         depositDisabledReason,
         withdrawEnabled,
         withdrawDisabledReason,
+        memberCount,
         hourlyLimitText,
         hourlyUsedText,
         dailyLimitText,
@@ -416,6 +434,16 @@ public final class BankDetailMenu {
 
   private static void setTransactionButton(MenuPopulateContext ctx, BankData data) {
     TagResolver resolver = detailResolver(data);
+    boolean canViewLog = data.context().ownerBank() || (data.role() != null && data.role().canViewLog());
+
+    if (!canViewLog) {
+      setConfiguredButton(ctx, SLOT_TRANSACTIONS, transactionsDisabledTemplate, "items.transactions-disabled", "Transactions", resolver, clickCtx -> {
+        clickCtx.cancel();
+        triggerGeneralClick(clickCtx.viewer().uniqueId());
+      });
+      return;
+    }
+
     setConfiguredButton(ctx, SLOT_TRANSACTIONS, transactionsTemplate, "items.transactions", "Transactions", resolver, clickCtx -> {
       clickCtx.cancel();
       triggerGeneralClick(clickCtx.viewer().uniqueId());
@@ -444,14 +472,58 @@ public final class BankDetailMenu {
     setConfiguredButton(ctx, SLOT_INVITE, inviteTemplate, "items.invite", "Invite", resolver, clickCtx -> {
       clickCtx.cancel();
       triggerGeneralClick(clickCtx.viewer().uniqueId());
+
+      if(data.context().ownerUuid() == null) {
+        return;
+      }
+
       if (servicesRef != null) {
         BankInvitePlayerMenu.open(servicesRef, clickCtx.viewer(), data.context().bankId(), data.context().ownerUuid(), data.context().ownerBank());
       }
     });
   }
 
+  private static void setMemberButton(MenuPopulateContext ctx, BankData data) {
+    TagResolver resolver = detailResolver(data);
+    boolean isOwner = data.context().ownerUuid() != null && data.context().ownerUuid().equals(ctx.viewer().uniqueId());
+    boolean memberEnabled = data.definition() != null
+        && data.definition().memberSystem() != null
+        && data.definition().memberSystem().enabled()
+        && data.memberCount() > 0
+        && (isOwner || (data.role() != null && data.role().canKick()));
+
+    if (!memberEnabled) {
+      setConfiguredButton(ctx, SLOT_MEMBER, memberDisabledTemplate, "items.member-disabled", "Members", resolver, clickCtx -> {
+        clickCtx.cancel();
+        triggerGeneralClick(clickCtx.viewer().uniqueId());
+      });
+      return;
+    }
+
+    setConfiguredButton(ctx, SLOT_MEMBER, memberTemplate, "items.member", "Members", resolver, clickCtx -> {
+      clickCtx.cancel();
+      triggerGeneralClick(clickCtx.viewer().uniqueId());
+      if (servicesRef != null) {
+        UUID ownerUuid = data.context().ownerUuid();
+        if (ownerUuid != null) {
+          BankMemberMenu.open(servicesRef, clickCtx.viewer(), data.context().bankId(), ownerUuid, data.context().ownerBank());
+        }
+      }
+    });
+  }
+
   private static void setLevelButton(MenuPopulateContext ctx, BankData data) {
     TagResolver resolver = detailResolver(data);
+    boolean canUpgrade = data.context().ownerBank() || (data.role() != null && data.role().canUpgrade());
+
+    if (!canUpgrade) {
+      setConfiguredButton(ctx, SLOT_LEVEL, levelDisabledTemplate, "items.level-disabled", "Levels", resolver, clickCtx -> {
+        clickCtx.cancel();
+        triggerGeneralClick(clickCtx.viewer().uniqueId());
+      });
+      return;
+    }
+
     setConfiguredButton(ctx, SLOT_LEVEL, levelTemplate, "items.level", "Levels", resolver, clickCtx -> {
       clickCtx.cancel();
       triggerGeneralClick(clickCtx.viewer().uniqueId());
@@ -541,9 +613,14 @@ public final class BankDetailMenu {
     boolean memberSystemEnabled = data.definition() != null
         && data.definition().memberSystem() != null
         && data.definition().memberSystem().enabled();
+    boolean hasMembers = data.memberCount() > 0;
     boolean ownerCanInvite = data.context().ownerBank();
     boolean roleCanInvite = role != null && role.canInvite();
     boolean inviteEnabled = memberSystemEnabled && (ownerCanInvite || roleCanInvite);
+    boolean roleCanKick = role != null && role.canKick();
+    boolean memberEnabled = memberSystemEnabled && hasMembers && (ownerCanInvite || roleCanKick);
+    boolean canViewLog = data.context().ownerBank() || (role != null && role.canViewLog());
+    boolean canUpgrade = data.context().ownerBank() || (role != null && role.canUpgrade());
     String inviteReason = !memberSystemEnabled
         ? "<red>The member system is disabled."
         : ownerCanInvite
@@ -553,6 +630,27 @@ public final class BankDetailMenu {
                 : roleCanInvite
                     ? "<green>Your role can invite players."
                     : "<red>Your role cannot invite players.";
+    String memberReason = !memberSystemEnabled
+        ? "<red>The member system is disabled."
+        : !hasMembers
+            ? "<red>This bank has no members yet."
+        : ownerCanInvite
+            ? "<green>As the owner, you can manage members."
+            : role == null
+                ? "<red>No role is available."
+                : roleCanKick
+                    ? "<green>Your role can manage members."
+                    : "<red>Your role cannot manage members.";
+    String logReason = !memberSystemEnabled
+        ? "<red>The member system is disabled."
+        : canViewLog
+            ? "<green>Your role can view the transaction log."
+            : "<red>Your role cannot view the transaction log.";
+    String levelReason = !memberSystemEnabled
+        ? "<red>The member system is disabled."
+        : canUpgrade
+            ? "<green>Your role can upgrade the bank level."
+            : "<red>Your role cannot upgrade the bank level.";
     String bankBalance = AmountNotation.formatShort(data.bankBalance(), data.currency().fractionDigits());
     String walletBalance = AmountNotation.formatShort(data.walletBalance(), data.currency().fractionDigits());
     String maxBalance = AmountNotation.formatShort(data.maxBalance(), data.currency().fractionDigits());
@@ -589,6 +687,15 @@ public final class BankDetailMenu {
         Placeholder.parsed("invite-status", inviteEnabled ? "Enabled" : "Disabled"),
         Placeholder.parsed("invite-reason", inviteReason),
         Placeholder.parsed("invite-disabled-reason", inviteReason),
+        Placeholder.parsed("member-status", memberEnabled ? "Enabled" : "Disabled"),
+        Placeholder.parsed("member-reason", memberReason),
+        Placeholder.parsed("member-disabled-reason", memberReason),
+        Placeholder.parsed("log-status", canViewLog ? "Enabled" : "Disabled"),
+        Placeholder.parsed("log-reason", logReason),
+        Placeholder.parsed("log-disabled-reason", logReason),
+        Placeholder.parsed("level-status", canUpgrade ? "Enabled" : "Disabled"),
+        Placeholder.parsed("level-reason", levelReason),
+        Placeholder.parsed("level-disabled-reason", levelReason),
         Placeholder.parsed("bank-lock-reason", data.bankLockReason()),
         Placeholder.parsed("bank-lock-suffix", bankLockSuffix),
         Placeholder.parsed("bank-lock-state", data.bankLocked() ? "Locked" : "Unlocked"),
@@ -814,7 +921,12 @@ public final class BankDetailMenu {
     Player player = Bukkit.getPlayer(viewer.uniqueId());
     if (player == null) return;
 
-    if (data != null && data.bankLocked()) {
+    if(data == null) {
+      loggerService.logger().warning("BankData was null when opening all deposit dialog. This should not happen. Viewer: " + viewer.uniqueId());
+      return;
+    }
+
+    if (data.bankLocked()) {
       sendMessage(player, "bank.errors.bank-accounts-locked", TagResolver.resolver(List.of()));
       return;
     }
@@ -843,10 +955,17 @@ public final class BankDetailMenu {
     Player player = Bukkit.getPlayer(viewer.uniqueId());
     if (player == null) return;
 
-    if (data != null && data.bankLocked()) {
+    if(data == null) {
+      loggerService.logger().warning("BankData was null when opening all withdraw dialog. This should not happen. Viewer: " + viewer.uniqueId());
+      sendMessage(player, "bank.detail.bank-empty", TagResolver.resolver(List.of()));
+      return;
+    }
+
+    if (data.bankLocked()) {
       sendMessage(player, "bank.errors.bank-accounts-locked", TagResolver.resolver(List.of()));
       return;
     }
+
 
     MantissaAmount balance = data.bankBalance();
     if (balance == null || balance.compareTo(MantissaAmount.zero()) <= 0) {
@@ -1370,6 +1489,7 @@ public final class BankDetailMenu {
       String depositDisabledReason,
       boolean withdrawEnabled,
       String withdrawDisabledReason,
+      int memberCount,
       String hourlyLimitText,
       String hourlyUsedText,
       String dailyLimitText,
@@ -1400,6 +1520,7 @@ public final class BankDetailMenu {
           depositDisabledReason,
           withdrawEnabled,
           withdrawDisabledReason,
+          memberCount,
           newHourlyLimitText,
           newHourlyUsedText,
           newDailyLimitText,

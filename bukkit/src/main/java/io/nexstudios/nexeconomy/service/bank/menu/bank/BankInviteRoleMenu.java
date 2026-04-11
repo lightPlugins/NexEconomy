@@ -31,6 +31,7 @@ import io.nexstudios.nexeconomy.provider.bank.BankResponse;
 import io.nexstudios.nexeconomy.service.bank.BankService;
 import io.nexstudios.nexeconomy.service.bank.definition.BankDefinition;
 import io.nexstudios.nexeconomy.service.bank.effects.BankClickEffectService;
+import io.nexstudios.nexeconomy.service.bank.menu.BankInviteFlowState;
 import io.nexstudios.nexeconomy.service.bank.menu.extra.BankExtraItemSupport;
 import io.nexstudios.nexeconomy.service.registry.CurrencyRegistryService;
 import io.nexstudios.languageservice.service.component.ComponentService;
