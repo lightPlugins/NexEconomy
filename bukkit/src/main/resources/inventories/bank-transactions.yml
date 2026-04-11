@@ -45,7 +45,8 @@ extra-items:
       - "<gray>It can be used for any purpose in the menu."
     effects:
       - id: send-message
-        message: "<yellow>You clicked the extra item!</yellow>"
+        args:
+          message: "<yellow>You clicked the extra item!</yellow>"
 
 items:
   # Default filler for empty slots.
@@ -82,13 +83,27 @@ items:
       - "<dark_gray>Left click: next mode</dark_gray>"
       - "<dark_gray>Right click: previous mode</dark_gray>"
 
-  # Template for a single transaction entry inside the paged area.
-  transaction-entry:
-    item: "minecraft:paper"
-    display-name: "<dark_gray>» <yellow><type-label></yellow>"
+  # Templates for transaction entries.
+  deposit:
+    item: "minecraft:lime_dye"
+    display-name: "<dark_gray>» <green><type-label></green>"
     lore:
       - ""
-      - "<yellow>│ <gray>Type: <yellow><type-label></yellow>"
+      - "<yellow>│ <gray>Type: <green><type-label></green>"
+      - "<yellow>│ <gray>Actor: <yellow><actor-name></yellow>"
+      - "<yellow>│ <gray>Amount: <yellow><amount></yellow>"
+      - "<yellow>│ <gray>Time: <yellow><time></yellow>"
+      - "<yellow>│ <gray>Bank ID: <yellow><bank-id></yellow>"
+      - "<yellow>│ <gray>Owner: <yellow><owner-name></yellow>"
+      - "<yellow>│ <gray>Owner UUID: <yellow><owner-uuid></yellow>"
+      - "<yellow>│ <gray>Bank type: <yellow><bank-type></yellow>"
+
+  withdraw:
+    item: "minecraft:red_dye"
+    display-name: "<dark_gray>» <red><type-label></red>"
+    lore:
+      - ""
+      - "<yellow>│ <gray>Type: <red><type-label></red>"
       - "<yellow>│ <gray>Actor: <yellow><actor-name></yellow>"
       - "<yellow>│ <gray>Amount: <yellow><amount></yellow>"
       - "<yellow>│ <gray>Time: <yellow><time></yellow>"

@@ -110,7 +110,7 @@ public final class EconomyBankCommand implements Service {
     return 1;
   }
 
-  @Command(value = "balance <bank>", permission = "nexeconomy.bank.balance")
+  @Command(value = "balance <bank>", permission = "nexeconomy.bank.balance", playerOnly = true)
   public int balanceSelf(
       NexPaperCommandSource source,
       @Arg("bank") @Suggest(BankSuggestion.class) String bank
@@ -143,7 +143,7 @@ public final class EconomyBankCommand implements Service {
     return 1;
   }
 
-  @Command(value = "transactions <bank>", permission = "nexeconomy.bank.transactions")
+  @Command(value = "transactions <bank>", permission = "nexeconomy.bank.transactions", playerOnly = true)
   public int transactionsSelf(
       NexPaperCommandSource source,
       @Arg("bank") @Suggest(BankSuggestion.class) String bank
@@ -201,7 +201,7 @@ public final class EconomyBankCommand implements Service {
     return 1;
   }
 
-  @Command(value = "members <bank>", permission = "nexeconomy.bank.members")
+  @Command(value = "members <bank>", permission = "nexeconomy.bank.members", playerOnly = true)
   public int membersSelf(
       NexPaperCommandSource source,
       @Arg("bank") @Suggest(BankSuggestion.class) String bank
@@ -239,7 +239,7 @@ public final class EconomyBankCommand implements Service {
     return 1;
   }
 
-  @Command(value = "deposit <bank> <amount>", permission = "nexeconomy.bank.deposit")
+  @Command(value = "deposit <bank> <amount>", permission = "nexeconomy.bank.deposit", playerOnly = true)
   public int depositSelf(
       NexPaperCommandSource source,
       @Arg("bank") @Suggest(BankSuggestion.class) String bank,
@@ -281,7 +281,7 @@ public final class EconomyBankCommand implements Service {
     return 1;
   }
 
-  @Command(value = "withdraw <bank> <amount>", permission = "nexeconomy.bank.withdraw")
+  @Command(value = "withdraw <bank> <amount>", permission = "nexeconomy.bank.withdraw", playerOnly = true)
   public int withdrawSelf(
       NexPaperCommandSource source,
       @Arg("bank") @Suggest(BankSuggestion.class) String bank,
@@ -323,7 +323,7 @@ public final class EconomyBankCommand implements Service {
     return 1;
   }
 
-  @Command(value = "invite <bank> <player> <role>", permission = "nexeconomy.bank.invite")
+  @Command(value = "invite <bank> <player> <role>", permission = "nexeconomy.bank.invite", playerOnly = true)
   public int inviteSelf(
       NexPaperCommandSource source,
       @Arg("bank") @Suggest(BankSuggestion.class) String bank,
@@ -378,7 +378,7 @@ public final class EconomyBankCommand implements Service {
 
   // --- other (member) commands ---
 
-  @Command(value = "other list", permission = "nexeconomy.bank.other.list")
+  @Command(value = "other list", permission = "nexeconomy.bank.other.list", playerOnly = true)
   public int otherList(NexPaperCommandSource source) {
     Player sender = (Player) source.sender();
     if (sender == null) return 0;
@@ -417,7 +417,7 @@ public final class EconomyBankCommand implements Service {
     return 1;
   }
 
-  @Command(value = "other transactions <bank> <owner>", permission = "nexeconomy.bank.other.transactions")
+  @Command(value = "other transactions <bank> <owner>", permission = "nexeconomy.bank.other.transactions", playerOnly = true)
   public int transactionsOther(
       NexPaperCommandSource source,
       @Arg("bank") @Suggest(BankSuggestion.class) String bank,
@@ -488,7 +488,7 @@ public final class EconomyBankCommand implements Service {
     return 1;
   }
 
-  @Command(value = "other balance <bank> <owner>", permission = "nexeconomy.bank.other.balance")
+  @Command(value = "other balance <bank> <owner>", permission = "nexeconomy.bank.other.balance", playerOnly = true)
   public int balanceOther(
       NexPaperCommandSource source,
       @Arg("bank") @Suggest(BankSuggestion.class) String bank,
@@ -531,7 +531,7 @@ public final class EconomyBankCommand implements Service {
     return 1;
   }
 
-  @Command(value = "other members <bank> <owner>", permission = "nexeconomy.bank.other.members")
+  @Command(value = "other members <bank> <owner>", permission = "nexeconomy.bank.other.members", playerOnly = true)
   public int membersOther(
       NexPaperCommandSource source,
       @Arg("bank") @Suggest(BankSuggestion.class) String bank,
@@ -579,7 +579,7 @@ public final class EconomyBankCommand implements Service {
     return 1;
   }
 
-  @Command(value = "other deposit <bank> <owner> <amount>", permission = "nexeconomy.bank.other.deposit")
+  @Command(value = "other deposit <bank> <owner> <amount>", permission = "nexeconomy.bank.other.deposit", playerOnly = true)
   public int depositOther(
       NexPaperCommandSource source,
       @Arg("bank") @Suggest(BankSuggestion.class) String bank,
@@ -628,7 +628,7 @@ public final class EconomyBankCommand implements Service {
     return 1;
   }
 
-  @Command(value = "other withdraw <bank> <owner> <amount>", permission = "nexeconomy.bank.other.withdraw")
+  @Command(value = "other withdraw <bank> <owner> <amount>", permission = "nexeconomy.bank.other.withdraw", playerOnly = true)
   public int withdrawOther(
       NexPaperCommandSource source,
       @Arg("bank") @Suggest(BankSuggestion.class) String bank,
@@ -677,7 +677,7 @@ public final class EconomyBankCommand implements Service {
     return 1;
   }
 
-  @Command(value = "other invite <bank> <owner> <player> [role]", permission = "nexeconomy.bank.other.invite")
+  @Command(value = "other invite <bank> <owner> <player> [role]", permission = "nexeconomy.bank.other.invite", playerOnly = true)
   public int inviteOther(
       NexPaperCommandSource source,
       @Arg("bank") @Suggest(BankSuggestion.class) String bank,
@@ -736,7 +736,7 @@ public final class EconomyBankCommand implements Service {
     return 1;
   }
 
-  @Command(value = "other invites", permission = "nexeconomy.bank.other.invites")
+  @Command(value = "other invites", permission = "nexeconomy.bank.other.invites", playerOnly = true)
   public int invitesOther(NexPaperCommandSource source) {
     Player sender = (Player) source.sender();
     if (sender == null) return 0;
@@ -774,7 +774,7 @@ public final class EconomyBankCommand implements Service {
     return 1;
   }
 
-  @Command(value = "leave <bank> <owner>", permission = "nexeconomy.bank.leave")
+  @Command(value = "leave <bank> <owner>", permission = "nexeconomy.bank.leave", playerOnly = true)
   public int leave(
       NexPaperCommandSource source,
       @Arg("bank") @Suggest(BankSuggestion.class) String bank,
@@ -826,7 +826,7 @@ public final class EconomyBankCommand implements Service {
     return 1;
   }
 
-  @Command(value = "other accept <owner>", permission = "nexeconomy.bank.other.accept")
+  @Command(value = "other accept <owner>", permission = "nexeconomy.bank.other.accept", playerOnly = true)
   public int acceptOther(
       NexPaperCommandSource source,
       @Arg("owner") @Suggest(BankOwnerSuggestion.class) String ownerName
@@ -847,7 +847,7 @@ public final class EconomyBankCommand implements Service {
     return 1;
   }
 
-  @Command(value = "other accept <owner> <bank>", permission = "nexeconomy.bank.other.accept")
+  @Command(value = "other accept <owner> <bank>", permission = "nexeconomy.bank.other.accept", playerOnly = true)
   public int acceptOtherWithBank(
       NexPaperCommandSource source,
       @Arg("owner") @Suggest(BankOwnerSuggestion.class) String ownerName,
@@ -868,7 +868,7 @@ public final class EconomyBankCommand implements Service {
     return 1;
   }
 
-  @Command(value = "other deny <owner>", permission = "nexeconomy.bank.other.deny")
+  @Command(value = "other deny <owner>", permission = "nexeconomy.bank.other.deny", playerOnly = true)
   public int denyOther(
       NexPaperCommandSource source,
       @Arg("owner") @Suggest(BankOwnerSuggestion.class) String ownerName

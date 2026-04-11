@@ -763,6 +763,74 @@ public final class DefaultBankProviderService implements BankProviderService, Se
   }
 
   @Override
+  public CompletableFuture<BankResponse<Boolean>> isAnyBankAccountLockedForPlayer(UUID playerUuid) {
+    BankResponse.BankContext baseCtx = BankResponse.context(null, null, playerUuid, null, null, null, null, null, null, null, null, null);
+    if (playerUuid == null) {
+      return completed(BankResponse.failure(BankResponse.Status.INVALID_ARGUMENT, "Player UUID is null.", baseCtx, Boolean.FALSE));
+    }
+
+    return bankService.isAnyBankAccountLockedForPlayer(playerUuid)
+        .thenApply(locked -> BankResponse.success(
+            locked ? "Player accounts are locked." : "Player accounts are unlocked.",
+            baseCtx,
+            locked
+        ))
+        .exceptionally(ex -> failure(ex, baseCtx, Boolean.FALSE));
+  }
+
+  @Override
+  public CompletableFuture<BankResponse<Boolean>> lockAllBankAccountsForPlayer(UUID playerUuid, UUID lockedByUuid, String reason) {
+    BankResponse.BankContext baseCtx = BankResponse.context(null, null, playerUuid, lockedByUuid, null, null, null, null, null, null, null, null);
+    if (playerUuid == null || lockedByUuid == null) {
+      return completed(BankResponse.failure(BankResponse.Status.INVALID_ARGUMENT, "Player or lock UUID is null.", baseCtx, Boolean.FALSE));
+    }
+
+    return isAnyBankAccountLockedForPlayer(playerUuid).thenCompose(lockState -> {
+      if (!lockState.isSuccess()) {
+        return completed(lockState);
+      }
+
+      if (Boolean.TRUE.equals(lockState.payload())) {
+        return completed(BankResponse.failure(BankResponse.Status.ALREADY_LOCKED, "Player bank accounts are already locked.", lockState.context(), Boolean.FALSE));
+      }
+
+      return bankService.lockAllBankAccountsForPlayer(playerUuid, lockedByUuid, reason).thenApply(changed -> {
+        if (Boolean.TRUE.equals(changed)) {
+          return BankResponse.success("Player bank accounts locked.", baseCtx, Boolean.TRUE);
+        }
+
+        return BankResponse.failure(BankResponse.Status.INTERNAL_ERROR, "Player bank accounts could not be locked.", baseCtx, Boolean.FALSE);
+      });
+    }).exceptionally(ex -> failure(ex, baseCtx, Boolean.FALSE));
+  }
+
+  @Override
+  public CompletableFuture<BankResponse<Boolean>> unlockAllBankAccountsForPlayer(UUID playerUuid, UUID unlockedByUuid) {
+    BankResponse.BankContext baseCtx = BankResponse.context(null, null, playerUuid, unlockedByUuid, null, null, null, null, null, null, null, null);
+    if (playerUuid == null || unlockedByUuid == null) {
+      return completed(BankResponse.failure(BankResponse.Status.INVALID_ARGUMENT, "Player or unlock UUID is null.", baseCtx, Boolean.FALSE));
+    }
+
+    return isAnyBankAccountLockedForPlayer(playerUuid).thenCompose(lockState -> {
+      if (!lockState.isSuccess()) {
+        return completed(lockState);
+      }
+
+      if (!Boolean.TRUE.equals(lockState.payload())) {
+        return completed(BankResponse.failure(BankResponse.Status.ALREADY_UNLOCKED, "Player bank accounts are already unlocked.", lockState.context(), Boolean.FALSE));
+      }
+
+      return bankService.unlockAllBankAccountsForPlayer(playerUuid, unlockedByUuid).thenApply(changed -> {
+        if (Boolean.TRUE.equals(changed)) {
+          return BankResponse.success("Player bank accounts unlocked.", baseCtx, Boolean.TRUE);
+        }
+
+        return BankResponse.failure(BankResponse.Status.INTERNAL_ERROR, "Player bank accounts could not be unlocked.", baseCtx, Boolean.FALSE);
+      });
+    }).exceptionally(ex -> failure(ex, baseCtx, Boolean.FALSE));
+  }
+
+  @Override
   public CompletableFuture<BankResponse<List<BankTransactionEntity>>> transactions(String bankId, UUID ownerUuid, UUID viewerUuid, int limit) {
     String id = normalize(bankId);
     BankResponse.BankContext baseCtx = BankResponse.context(id, null, ownerUuid, viewerUuid, null, null, null, null, null, null, null, null);
@@ -779,7 +847,7 @@ public final class DefaultBankProviderService implements BankProviderService, Se
 
     int effectiveLimit = Math.min(limit, 100);
 
-    return loadAccess(id, ownerUuid)
+    return loadAccess(id, ownerUuid, true)
         .thenCompose(access -> loadTransactions(id, access, ownerUuid, viewerUuid, effectiveLimit, baseCtx))
         .exceptionally(ex -> {
       Throwable root = rootCause(ex);
@@ -1057,6 +1125,10 @@ public final class DefaultBankProviderService implements BankProviderService, Se
   }
 
   private CompletableFuture<BankAccess> loadAccess(String bankId, UUID ownerUuid) {
+    return loadAccess(bankId, ownerUuid, false);
+  }
+
+  private CompletableFuture<BankAccess> loadAccess(String bankId, UUID ownerUuid, boolean ignoreLockChecks) {
     String id = normalize(bankId);
     if (id.isBlank()) {
       return CompletableFuture.failedFuture(new IllegalArgumentException("bankId is blank"));
@@ -1072,6 +1144,14 @@ public final class DefaultBankProviderService implements BankProviderService, Se
       }
       if (!def.enabled()) {
         return CompletableFuture.failedFuture(new IllegalStateException("bank disabled"));
+      }
+
+      if (ignoreLockChecks) {
+        if (cache == null) {
+          return CompletableFuture.failedFuture(new IllegalStateException("BankAccountCacheService not available"));
+        }
+
+        return cache.loadOrCreate(id, ownerUuid).thenApply(view -> new BankAccess(id, def, view));
       }
 
       return requireOwnerNotLocked(ownerUuid)
@@ -1104,13 +1184,13 @@ public final class DefaultBankProviderService implements BankProviderService, Se
       });
     }
 
-    return requireActorNotLocked(viewerUuid).thenCompose(v -> {
-      BankDefinition.MemberSystem ms = access.definition() == null ? null : access.definition().memberSystem();
+    return loadAccess(bankId, ownerUuid, true).thenCompose(viewAccess -> {
+      BankDefinition.MemberSystem ms = viewAccess.definition() == null ? null : viewAccess.definition().memberSystem();
       if (ms == null || !ms.enabled() || ms.rolesByIdLower() == null) {
         return completed(BankResponse.failure(BankResponse.Status.BANK_UNAVAILABLE, "Member system is disabled.", baseCtx, List.<BankTransactionEntity>of()));
       }
 
-      BankMemberEntity member = findMember(access.members(), viewerUuid);
+      BankMemberEntity member = findMember(viewAccess.members(), viewerUuid);
       if (member == null) {
         return completed(BankResponse.failure(BankResponse.Status.NOT_MEMBER, "You are not a member of this bank.", baseCtx, List.<BankTransactionEntity>of()));
       }
@@ -1120,8 +1200,8 @@ public final class DefaultBankProviderService implements BankProviderService, Se
         return completed(BankResponse.failure(BankResponse.Status.NO_PERMISSION, "You do not have permission.", baseCtx, List.<BankTransactionEntity>of()));
       }
 
-      return repo.listRecentTransactions(access.accountId(), effectiveLimit).thenApply(list -> {
-        BankResponse.BankContext ctx = accessContext(bankId, access, ownerUuid, viewerUuid, null, null, null, null, null, null, null);
+      return repo.listRecentTransactions(viewAccess.accountId(), effectiveLimit).thenApply(list -> {
+        BankResponse.BankContext ctx = accessContext(bankId, viewAccess, ownerUuid, viewerUuid, null, null, null, null, null, null, null);
         return BankResponse.success("Transactions loaded.", ctx, list == null ? List.<BankTransactionEntity>of() : list);
       });
     });

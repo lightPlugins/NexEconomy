@@ -268,9 +268,14 @@ public final class BankDetailMenu {
 
     BankMemberEntity viewerMember = findMember(members, viewerUuid);
     BankDefinition.RoleDefinition role = resolveRole(definition, context, viewerUuid, viewerMember);
+    BankResponse<Boolean> accountLockResponse = provider == null ? null : provider.isAnyBankAccountLockedForPlayer(context.ownerUuid()).join();
+    BankResponse<Boolean> lockResponse = provider == null ? null : provider.isLocked(context.bankId(), context.ownerUuid()).join();
+    boolean accountsLocked = accountLockResponse != null && accountLockResponse.isSuccess() && Boolean.TRUE.equals(accountLockResponse.payload());
+    boolean bankLocked = accountsLocked || (lockResponse != null && lockResponse.isSuccess() && Boolean.TRUE.equals(lockResponse.payload()));
+    String bankLockReason = accountsLocked ? "Bank accounts are locked." : "Bank is locked.";
 
-    boolean canDeposit = role != null && role.canDeposit();
-    boolean canWithdraw = role != null && role.withdraw() != null && role.withdraw().canWithdraw();
+    boolean canDeposit = !bankLocked && role != null && role.canDeposit();
+    boolean canWithdraw = !bankLocked && role != null && role.withdraw() != null && role.withdraw().canWithdraw();
 
     int level = bankView.account() == null || bankView.account().getLevel() <= 0
         ? 1
@@ -287,7 +292,9 @@ public final class BankDetailMenu {
         && bankBalance.compareTo(maxBalance) >= 0;
 
     boolean depositEnabled = canDeposit && walletBalance.compareTo(MantissaAmount.zero()) > 0 && !bankFull && remainingCapacity.compareTo(MantissaAmount.zero()) > 0;
-    String depositDisabledReason = !canDeposit
+    String depositDisabledReason = bankLocked
+        ? bankLockReason
+        : !canDeposit
         ? "Your role cannot deposit."
         : walletBalance.compareTo(MantissaAmount.zero()) <= 0
             ? "Your wallet is empty."
@@ -296,7 +303,9 @@ public final class BankDetailMenu {
                 : "No deposit capacity left.";
 
     boolean withdrawEnabled = canWithdraw && bankBalance.compareTo(MantissaAmount.zero()) > 0;
-    String withdrawDisabledReason = !canWithdraw
+    String withdrawDisabledReason = bankLocked
+        ? bankLockReason
+        : !canWithdraw
         ? "Your role cannot withdraw."
         : bankBalance.compareTo(MantissaAmount.zero()) <= 0
             ? "The bank is empty."
@@ -319,6 +328,8 @@ public final class BankDetailMenu {
         maxBalance,
         remainingCapacity,
         bankFull,
+        bankLocked,
+        bankLockReason,
         depositEnabled,
         depositDisabledReason,
         withdrawEnabled,
@@ -498,6 +509,7 @@ public final class BankDetailMenu {
     String remainingCapacity = AmountNotation.formatShort(data.remainingCapacity(), data.currency().fractionDigits());
     String interestRate = currentInterestRate(data);
     String currency = data.currency.symbolPlural();
+    String bankLockSuffix = data.bankLocked() ? " <dark_gray>(<red>Bank is locked</red>)</dark_gray>" : "";
 
     return TagResolver.resolver(List.of(
         Placeholder.parsed("bank-name", data.definition().nameMiniMessage()),
@@ -524,6 +536,9 @@ public final class BankDetailMenu {
         Placeholder.parsed("withdraw-status", data.withdrawEnabled() ? "Enabled" : "Disabled"),
         Placeholder.parsed("withdraw-reason", data.withdrawDisabledReason()),
         Placeholder.parsed("withdraw-disabled-reason", data.withdrawDisabledReason()),
+        Placeholder.parsed("bank-lock-reason", data.bankLockReason()),
+        Placeholder.parsed("bank-lock-suffix", bankLockSuffix),
+        Placeholder.parsed("bank-lock-state", data.bankLocked() ? "Locked" : "Unlocked"),
         Placeholder.parsed("can-deposit", data.depositEnabled() ? "Yes" : "No"),
         Placeholder.parsed("can-withdraw", data.withdrawEnabled() ? "Yes" : "No")
     ));
@@ -703,6 +718,11 @@ public final class BankDetailMenu {
     Player player = Bukkit.getPlayer(viewer.uniqueId());
     if (player == null) return;
 
+    if (data != null && data.bankLocked()) {
+      sendMessage(player, "bank.errors.bank-accounts-locked", TagResolver.resolver(List.of()));
+      return;
+    }
+
     TextRequestDialogService textService = servicesRef.getService(TextRequestDialogService.class);
     TextRequestDialog dialog = textService.create()
         .title(localizedLegacy(player, withdraw ? "bank.detail.dialog.withdraw.title" : "bank.detail.dialog.deposit.title", false))
@@ -733,6 +753,11 @@ public final class BankDetailMenu {
     Player player = Bukkit.getPlayer(viewer.uniqueId());
     if (player == null) return;
 
+    if (data != null && data.bankLocked()) {
+      sendMessage(player, "bank.errors.bank-accounts-locked", TagResolver.resolver(List.of()));
+      return;
+    }
+
     MantissaAmount balance = currentWalletBalance(player.getUniqueId(), data.currency());
     if (balance == null || balance.compareTo(MantissaAmount.zero()) <= 0) {
       sendMessage(player, "bank.detail.wallet-empty", TagResolver.resolver(List.of()));
@@ -756,6 +781,11 @@ public final class BankDetailMenu {
   private static void openAllWithdrawDialog(ViewerRef viewer, BankData data) {
     Player player = Bukkit.getPlayer(viewer.uniqueId());
     if (player == null) return;
+
+    if (data != null && data.bankLocked()) {
+      sendMessage(player, "bank.errors.bank-accounts-locked", TagResolver.resolver(List.of()));
+      return;
+    }
 
     MantissaAmount balance = data.bankBalance();
     if (balance == null || balance.compareTo(MantissaAmount.zero()) <= 0) {
@@ -1236,6 +1266,8 @@ public final class BankDetailMenu {
       MantissaAmount maxBalance,
       MantissaAmount remainingCapacity,
       boolean bankFull,
+      boolean bankLocked,
+      String bankLockReason,
       boolean depositEnabled,
       String depositDisabledReason,
       boolean withdrawEnabled,
@@ -1264,6 +1296,8 @@ public final class BankDetailMenu {
           maxBalance,
           remainingCapacity,
           bankFull,
+          bankLocked,
+          bankLockReason,
           depositEnabled,
           depositDisabledReason,
           withdrawEnabled,

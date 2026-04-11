@@ -61,7 +61,7 @@ items:
 
   deposit-disabled:
     item: "minecraft:barrier"
-    display-name: "<dark_gray>» <gray>Deposit"
+    display-name: "<dark_gray>» <gray>Deposit<bank-lock-suffix></gray>"
     lore:
       - ""
       - "<yellow>│ <gray>Status: <red><deposit-status></red>"
@@ -81,7 +81,7 @@ items:
 
   deposit-all-disabled:
     item: "minecraft:barrier"
-    display-name: "<dark_gray>» <gray>Deposit all"
+    display-name: "<dark_gray>» <gray>Deposit all<bank-lock-suffix></gray>"
     lore:
       - ""
       - "<yellow>│ <gray>Status: <red><deposit-status></red>"
@@ -123,7 +123,7 @@ items:
 
   withdraw-disabled:
     item: "minecraft:barrier"
-    display-name: "<dark_gray>» <gray>Withdraw"
+    display-name: "<dark_gray>» <gray>Withdraw<bank-lock-suffix></gray>"
     lore:
       - ""
       - "<yellow>│ <gray>Status: <red><withdraw-status></red>"
@@ -143,7 +143,7 @@ items:
 
   withdraw-all-disabled:
     item: "minecraft:barrier"
-    display-name: "<dark_gray>» <gray>Withdraw all"
+    display-name: "<dark_gray>» <gray>Withdraw all<bank-lock-suffix></gray>"
     lore:
       - ""
       - "<yellow>│ <gray>Status: <red><withdraw-status></red>"

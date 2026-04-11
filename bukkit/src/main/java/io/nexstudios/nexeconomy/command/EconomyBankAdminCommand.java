@@ -8,7 +8,8 @@ import io.nexstudios.commandservice.service.commands.source.NexPaperCommandSourc
 import io.nexstudios.languageservice.service.component.ComponentService;
 import io.nexstudios.nexeconomy.command.suggestions.BankSuggestion;
 import io.nexstudios.nexeconomy.command.suggestions.PlayerSuggestion;
-import io.nexstudios.nexeconomy.service.bank.BankService;
+import io.nexstudios.nexeconomy.provider.bank.BankProviderService;
+import io.nexstudios.nexeconomy.provider.bank.BankResponse;
 import io.nexstudios.serviceregistry.di.Dependencies;
 import io.nexstudios.serviceregistry.di.Service;
 import io.nexstudios.serviceregistry.di.ServiceAccessor;
@@ -16,6 +17,7 @@ import net.kyori.adventure.text.minimessage.tag.resolver.Placeholder;
 import net.kyori.adventure.text.minimessage.tag.resolver.TagResolver;
 import org.bukkit.Bukkit;
 import org.bukkit.OfflinePlayer;
+import org.bukkit.command.CommandSender;
 import org.bukkit.entity.Player;
 import org.jetbrains.annotations.Nullable;
 
@@ -27,16 +29,16 @@ import java.util.UUID;
     description = "Bank commands"
 )
 @Dependencies({
-    BankService.class,
+    BankProviderService.class,
     ComponentService.class
 })
 public final class EconomyBankAdminCommand implements Service {
 
-  private final BankService bankService;
+  private final BankProviderService bankProvider;
   private final ComponentService components;
 
   public EconomyBankAdminCommand(ServiceAccessor accessor) {
-    this.bankService = accessor.getService(BankService.class);
+    this.bankProvider = accessor.getService(BankProviderService.class);
     this.components = accessor.getService(ComponentService.class);
   }
 
@@ -46,7 +48,7 @@ public final class EconomyBankAdminCommand implements Service {
       @Arg("bank") @Suggest(BankSuggestion.class) String bank,
       @Arg("player") @Suggest(PlayerSuggestion.class) String playerName
   ) {
-    Player sender = (Player) source.sender();
+    CommandSender sender = source.sender();
     if (sender == null) return 0;
 
     String bankIdLower = normalize(bank);
@@ -63,8 +65,8 @@ public final class EconomyBankAdminCommand implements Service {
       return 0;
     }
 
-    bankService.unlockBankForPlayer(bankIdLower, target.getUniqueId(), sender.getUniqueId()).thenAccept(created -> {
-      if (Boolean.TRUE.equals(created)) {
+    bankProvider.unlock(bankIdLower, target.getUniqueId(), target.getUniqueId()).thenAccept(response -> {
+      if (response != null && response.isSuccess() && Boolean.TRUE.equals(response.payload())) {
         sender.sendMessage(components.builder(sender, "bank.admin.unlock.success-sender", "NotDefined", true)
             .resolver(TagResolver.resolver(
                 Placeholder.parsed("bank", bankIdLower),
@@ -78,12 +80,7 @@ public final class EconomyBankAdminCommand implements Service {
         return;
       }
 
-      sender.sendMessage(components.builder(sender, "bank.admin.unlock.already-unlocked", "NotDefined", true)
-          .resolver(TagResolver.resolver(
-              Placeholder.parsed("bank", bankIdLower),
-              Placeholder.parsed("player", target.getName())
-          ))
-          .build());
+      sendLockStateMessage(sender, response, "bank.admin.unlock.already-unlocked", "bank.admin.unlock.failed", bankIdLower, target.getName(), false);
     }).exceptionally(ex -> {
       String msg = ex == null || ex.getMessage() == null || ex.getMessage().isBlank()
           ? "Unknown"
@@ -104,7 +101,7 @@ public final class EconomyBankAdminCommand implements Service {
       @Arg("bank") @Suggest(BankSuggestion.class) String bank,
       @Arg("player") @Suggest(PlayerSuggestion.class) String playerName
   ) {
-    Player sender = (Player) source.sender();
+    CommandSender sender = source.sender();
     if (sender == null) return 0;
 
     String bankIdLower = normalize(bank);
@@ -121,8 +118,8 @@ public final class EconomyBankAdminCommand implements Service {
       return 0;
     }
 
-    bankService.lockBankForPlayer(bankIdLower, target.getUniqueId(), sender.getUniqueId()).thenAccept(changed -> {
-      if (Boolean.TRUE.equals(changed)) {
+    bankProvider.lock(bankIdLower, target.getUniqueId(), target.getUniqueId()).thenAccept(response -> {
+      if (response != null && response.isSuccess() && Boolean.TRUE.equals(response.payload())) {
         sender.sendMessage(components.builder(sender, "bank.admin.lock.success-sender", "NotDefined", true)
             .resolver(TagResolver.resolver(
                 Placeholder.parsed("bank", bankIdLower),
@@ -136,12 +133,7 @@ public final class EconomyBankAdminCommand implements Service {
         return;
       }
 
-      sender.sendMessage(components.builder(sender, "bank.admin.lock.already-locked", "NotDefined", true)
-          .resolver(TagResolver.resolver(
-              Placeholder.parsed("bank", bankIdLower),
-              Placeholder.parsed("player", target.getName())
-          ))
-          .build());
+      sendLockStateMessage(sender, response, "bank.admin.lock.already-locked", "bank.admin.lock.failed", bankIdLower, target.getName(), true);
     }).exceptionally(ex -> {
       String msg = ex == null || ex.getMessage() == null || ex.getMessage().isBlank()
           ? "Unknown"
@@ -162,7 +154,7 @@ public final class EconomyBankAdminCommand implements Service {
       @Arg("player") @Suggest(PlayerSuggestion.class) String player,
       @Arg("reason") @Nullable String reason
   ) {
-    Player sender = (Player) source.sender();
+    CommandSender sender = source.sender();
     if (sender == null) return 0;
 
     UUID targetUuid = resolveUuid(player);
@@ -173,20 +165,23 @@ public final class EconomyBankAdminCommand implements Service {
       return 0;
     }
 
-    bankService.lockAllBankAccountsForPlayer(targetUuid, sender.getUniqueId(), reason).thenAccept(changed -> {
-      if (Boolean.TRUE.equals(changed)) {
+    bankProvider.lockAllBankAccountsForPlayer(targetUuid, targetUuid, reason).thenAccept(response -> {
+      if (response != null && response.isSuccess() && Boolean.TRUE.equals(response.payload())) {
         sender.sendMessage(components.builder(sender, "bank.admin.lockaccounts.success-sender", "NotDefined", true)
-            .resolver(TagResolver.resolver(
-                Placeholder.parsed("player", nameOrUuid(targetUuid))
-            ))
+            .resolver(TagResolver.resolver(Placeholder.parsed("player", nameOrUuid(targetUuid))))
             .build());
         return;
       }
 
-      sender.sendMessage(components.builder(sender, "bank.admin.lockaccounts.already-locked", "NotDefined", true)
-          .resolver(TagResolver.resolver(
-              Placeholder.parsed("player", nameOrUuid(targetUuid))
-          ))
+      if (response != null && response.status() == BankResponse.Status.ALREADY_LOCKED) {
+        sender.sendMessage(components.builder(sender, "bank.admin.lockaccounts.already-locked", "NotDefined", true)
+            .resolver(TagResolver.resolver(Placeholder.parsed("player", nameOrUuid(targetUuid))))
+            .build());
+        return;
+      }
+
+      sender.sendMessage(components.builder(sender, "bank.admin.lockaccounts.failed", "NotDefined", true)
+          .resolver(TagResolver.resolver(Placeholder.parsed("player", nameOrUuid(targetUuid))))
           .build());
     }).exceptionally(ex -> {
       String msg = ex == null || ex.getMessage() == null || ex.getMessage().isBlank()
@@ -207,7 +202,7 @@ public final class EconomyBankAdminCommand implements Service {
       NexPaperCommandSource source,
       @Arg("player") String player
   ) {
-    Player sender = (Player) source.sender();
+    CommandSender sender = source.sender();
     if (sender == null) return 0;
 
     UUID targetUuid = resolveUuid(player);
@@ -218,20 +213,23 @@ public final class EconomyBankAdminCommand implements Service {
       return 0;
     }
 
-    bankService.unlockAllBankAccountsForPlayer(targetUuid, sender.getUniqueId()).thenAccept(changed -> {
-      if (Boolean.TRUE.equals(changed)) {
+    bankProvider.unlockAllBankAccountsForPlayer(targetUuid, targetUuid).thenAccept(response -> {
+      if (response != null && response.isSuccess() && Boolean.TRUE.equals(response.payload())) {
         sender.sendMessage(components.builder(sender, "bank.admin.unlock-accounts.success-sender", "NotDefined", true)
-            .resolver(TagResolver.resolver(
-                Placeholder.parsed("player", nameOrUuid(targetUuid))
-            ))
+            .resolver(TagResolver.resolver(Placeholder.parsed("player", nameOrUuid(targetUuid))))
             .build());
         return;
       }
 
-      sender.sendMessage(components.builder(sender, "bank.admin.unlock-accounts.not-locked", "NotDefined", true)
-          .resolver(TagResolver.resolver(
-              Placeholder.parsed("player", nameOrUuid(targetUuid))
-          ))
+      if (response != null && response.status() == BankResponse.Status.ALREADY_UNLOCKED) {
+        sender.sendMessage(components.builder(sender, "bank.admin.unlock-accounts.not-locked", "NotDefined", true)
+            .resolver(TagResolver.resolver(Placeholder.parsed("player", nameOrUuid(targetUuid))))
+            .build());
+        return;
+      }
+
+      sender.sendMessage(components.builder(sender, "bank.admin.unlock-accounts.failed", "NotDefined", true)
+          .resolver(TagResolver.resolver(Placeholder.parsed("player", nameOrUuid(targetUuid))))
           .build());
     }).exceptionally(ex -> {
       String msg = ex == null || ex.getMessage() == null || ex.getMessage().isBlank()
@@ -274,5 +272,30 @@ public final class EconomyBankAdminCommand implements Service {
 
   private static String normalize(String s) {
     return s == null ? "" : s.trim().toLowerCase(Locale.ROOT);
+  }
+
+  private void sendLockStateMessage(CommandSender sender,
+                                    BankResponse<Boolean> response,
+                                    String alreadyKey,
+                                    String failedKey,
+                                    String bankIdLower,
+                                    String playerName,
+                                    boolean lockAction) {
+    if (response != null && response.status() == (lockAction ? BankResponse.Status.ALREADY_LOCKED : BankResponse.Status.ALREADY_UNLOCKED)) {
+      sender.sendMessage(components.builder(sender, alreadyKey, "NotDefined", true)
+          .resolver(TagResolver.resolver(
+              Placeholder.parsed("bank", bankIdLower),
+              Placeholder.parsed("player", playerName)
+          ))
+          .build());
+      return;
+    }
+
+    sender.sendMessage(components.builder(sender, failedKey, "NotDefined", true)
+        .resolver(TagResolver.resolver(
+            Placeholder.parsed("bank", bankIdLower),
+            Placeholder.parsed("player", playerName)
+        ))
+        .build());
   }
 }

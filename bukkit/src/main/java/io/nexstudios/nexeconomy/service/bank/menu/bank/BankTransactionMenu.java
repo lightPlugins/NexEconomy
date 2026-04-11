@@ -97,6 +97,8 @@ public class BankTransactionMenu {
   private static int SLOT_FILTER = DEFAULT_FILTER_SLOT;
   private static int SLOT_SORT = DEFAULT_SORT_SLOT;
   private static int SLOT_BACK = DEFAULT_BACK_SLOT;
+  private static ItemStack TRANSACTION_DEPOSIT_TEMPLATE;
+  private static ItemStack TRANSACTION_WITHDRAW_TEMPLATE;
   private static List<BankExtraItemSupport.ExtraItemBinding> EXTRA_ITEMS = List.of();
   private static final Map<UUID, TransactionContext> CONTEXTS = new ConcurrentHashMap<>();
   private static final Map<UUID, List<TransactionEntry>> SNAPSHOTS = new ConcurrentHashMap<>();
@@ -119,7 +121,9 @@ public class BankTransactionMenu {
     ItemStack fillTemplate = configuredItem(bankConfig, "items.fill", Material.BLACK_STAINED_GLASS_PANE);
     ItemStack sortTemplate = configuredItem(bankConfig, "items.sort-button", Material.COMPARATOR);
     ItemStack filterTemplate = configuredItem(bankConfig, "items.filter-button", Material.HOPPER);
-    ItemStack transactionTemplate = configuredItem(bankConfig, "items.transaction-entry", Material.PAPER);
+    ItemStack transactionFallbackTemplate = new ItemStack(Material.PAPER);
+    TRANSACTION_DEPOSIT_TEMPLATE = configuredItem(bankConfig, "items.deposit", Material.LIME_DYE);
+    TRANSACTION_WITHDRAW_TEMPLATE = configuredItem(bankConfig, "items.withdraw", Material.RED_DYE);
     ItemStack previousTemplate = configuredItem(bankConfig, "items.navigation.previous", Material.SPECTRAL_ARROW);
     ItemStack nextTemplate = configuredItem(bankConfig, "items.navigation.next", Material.SPECTRAL_ARROW);
     Map<String, String> sortModes = readSortModes(bankConfig);
@@ -147,7 +151,7 @@ public class BankTransactionMenu {
         .addFilterControl(AREA_ID, filterControl)
         .addControlButton(buildSortControlButton(sortTemplate, sortControl, sortModes, bankConfig))
         .addControlButton(buildFilterControlButton(filterTemplate, filterControl, filterModes, bankConfig))
-        .addPagedArea(buildPagedArea(transactionTemplate, previousTemplate, nextTemplate, bankConfig))
+        .addPagedArea(buildPagedArea(transactionFallbackTemplate, previousTemplate, nextTemplate, bankConfig))
         .populator(ctx -> populate(ctx, bankConfig))
         .build();
 
@@ -233,7 +237,11 @@ public class BankTransactionMenu {
     String timestamp = getTimestamp(tx);
     String bankType = entry.ownerBank() ? "Owner" : "Member";
 
-    String rawName = config.getString("items.transaction-entry.display-name", "<dark_gray>» <yellow><type-label></yellow>");
+    String itemPath = transactionItemPath(tx);
+    ItemStack base = transactionTemplateFor(tx, template);
+    String rawName = itemPath == null
+        ? "<dark_gray>» <yellow><type-label></yellow>"
+        : config.getString(itemPath + ".display-name", "<dark_gray>» <yellow><type-label></yellow>");
     TagResolver resolver = TagResolver.resolver(List.of(
         Placeholder.parsed("type-label", typeLabel),
         Placeholder.parsed("actor-name", actorName),
@@ -246,9 +254,6 @@ public class BankTransactionMenu {
         Placeholder.parsed("currency", entry.currency() == null ? "" : entry.currency().id())
     ));
 
-    Material material = getMaterialForType(tx);
-
-    ItemStack base = template == null ? new ItemStack(material) : template.clone();
     return itemService.builder(base)
         .amount(1)
         .name(MiniMessage.miniMessage().deserialize(rawName, resolver))
@@ -257,15 +262,6 @@ public class BankTransactionMenu {
           l.build();
         })
         .build();
-  }
-
-  private static Material getMaterialForType(BankTransactionEntity tx) {
-    if (tx == null || tx.getType() == null) return Material.PAPER;
-    return switch (tx.getType()) {
-      case DEPOSIT -> Material.GREEN_HARNESS;
-      case WITHDRAW -> Material.RED_HARNESS;
-      default -> Material.PAPER;
-    };
   }
 
   private static String getTransactionType(BankTransactionEntity tx) {
@@ -623,6 +619,33 @@ public class BankTransactionMenu {
 
     return configItemService.convertSectionToItem(section)
         .orElseGet(() -> new ItemStack(fallback));
+  }
+
+  private static ItemStack transactionTemplateFor(BankTransactionEntity tx, ItemStack fallback) {
+    ItemStack selected = null;
+    if (tx != null && tx.getType() == BankTransactionEntity.Type.DEPOSIT) {
+      selected = TRANSACTION_DEPOSIT_TEMPLATE;
+    } else if (tx != null && tx.getType() == BankTransactionEntity.Type.WITHDRAW) {
+      selected = TRANSACTION_WITHDRAW_TEMPLATE;
+    }
+
+    if (selected != null) {
+      return selected.clone();
+    }
+
+    return fallback == null ? new ItemStack(Material.PAPER) : fallback.clone();
+  }
+
+  private static String transactionItemPath(BankTransactionEntity tx) {
+    if (tx == null || tx.getType() == null) {
+      return null;
+    }
+
+    return switch (tx.getType()) {
+      case DEPOSIT -> "items.deposit";
+      case WITHDRAW -> "items.withdraw";
+      default -> null;
+    };
   }
 
   private static FileConfiguration loadConfig() {
