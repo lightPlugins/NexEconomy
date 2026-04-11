@@ -20,6 +20,7 @@ import io.nexstudios.nexeconomy.definition.CurrencyDefinition;
 import io.nexstudios.nexeconomy.definition.MantissaAmount;
 import io.nexstudios.nexeconomy.provider.bank.BankProviderService;
 import io.nexstudios.nexeconomy.service.bank.effects.BankClickEffectService;
+import io.nexstudios.nexeconomy.service.bank.menu.extra.BankExtraItemSupport;
 import io.nexstudios.nexlogic.bukkit.services.entity.nexeconomy.BankTransactionEntity;
 import io.nexstudios.nexlogic.bukkit.services.items.config.ConfigItemService;
 import io.nexstudios.nexlogic.common.services.logging.LoggerService;
@@ -96,6 +97,7 @@ public class BankTransactionMenu {
   private static int SLOT_FILTER = DEFAULT_FILTER_SLOT;
   private static int SLOT_SORT = DEFAULT_SORT_SLOT;
   private static int SLOT_BACK = DEFAULT_BACK_SLOT;
+  private static List<BankExtraItemSupport.ExtraItemBinding> EXTRA_ITEMS = List.of();
   private static final Map<UUID, TransactionContext> CONTEXTS = new ConcurrentHashMap<>();
   private static final Map<UUID, List<TransactionEntry>> SNAPSHOTS = new ConcurrentHashMap<>();
   private static final Map<UUID, CompletableFuture<List<TransactionEntry>>> LOADS = new ConcurrentHashMap<>();
@@ -124,6 +126,7 @@ public class BankTransactionMenu {
     Map<String, String> filterModes = readFilterModes(bankConfig);
     PageSortControl<TransactionEntry> sortControl = buildSortControl(bankConfig, sortModes);
     PageFilterControl<TransactionEntry> filterControl = buildFilterControl(bankConfig, filterModes);
+    EXTRA_ITEMS = BankExtraItemSupport.loadBindings(bankConfig, configItemService);
 
     var def = MenuDefinitionBuilder.create()
         .key(KEY)
@@ -180,6 +183,8 @@ public class BankTransactionMenu {
         BankDetailMenu.open(servicesRef, clickCtx.viewer(), transCtx.bankId(), transCtx.ownerUuid(), transCtx.ownerBank());
       }
     });
+
+    BankExtraItemSupport.populate(ctx, servicesRef, EXTRA_ITEMS, "bank-transactions");
   }
 
   private static PagedAreaDefinition<TransactionEntry> buildPagedArea(ItemStack transactionTemplate,

@@ -24,6 +24,7 @@ import io.nexstudios.nexeconomy.provider.bank.BankResponse;
 import io.nexstudios.nexeconomy.service.bank.cache.BankAccountCacheService;
 import io.nexstudios.nexeconomy.service.bank.effects.BankClickEffectService;
 import io.nexstudios.nexeconomy.service.bank.definition.BankDefinition;
+import io.nexstudios.nexeconomy.service.bank.menu.extra.BankExtraItemSupport;
 import io.nexstudios.nexeconomy.service.economy.EconomyPlayerCacheService;
 import io.nexstudios.nexeconomy.service.economy.repo.EconomyPlayer;
 import io.nexstudios.nexeconomy.service.registry.CurrencyRegistryService;
@@ -120,6 +121,7 @@ public final class BankDetailMenu {
   private static ItemStack withdrawAllTemplate;
   private static ItemStack withdrawAllDisabledTemplate;
   private static ItemStack backTemplate;
+  private static List<BankExtraItemSupport.ExtraItemBinding> EXTRA_ITEMS = List.of();
 
   private BankDetailMenu() {}
 
@@ -155,6 +157,7 @@ public final class BankDetailMenu {
     withdrawAllTemplate = configuredItem(bankConfig, "items.withdraw-all", Material.GOLD_BLOCK);
     withdrawAllDisabledTemplate = configuredItem(bankConfig, "items.withdraw-all-disabled", Material.BARRIER);
     backTemplate = configuredItem(bankConfig, "items.back", Material.ARROW);
+    EXTRA_ITEMS = BankExtraItemSupport.loadBindings(bankConfig, configItemService);
 
     MenuService menuService = services.getService(MenuService.class);
 
@@ -225,6 +228,8 @@ public final class BankDetailMenu {
         BankOverviewMenu.open(servicesRef, clickCtx.viewer());
       }
     });
+
+    BankExtraItemSupport.populate(ctx, servicesRef, EXTRA_ITEMS, "bank-detail");
   }
 
   private static BankData loadBankData(Player player, BankContext context) {

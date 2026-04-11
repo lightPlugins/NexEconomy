@@ -14,8 +14,10 @@ menu:
   refresh-interval: "1"
 
 layout:
-  # Slot for the sort control button.
-  sort-button-slot: 8
+  # Standard slots used by the menu.
+  slots:
+    back: 49
+    sort-button: 8
 
   # Paged area used for bank entries.
   entries:
@@ -33,6 +35,8 @@ layout:
       hide-previous-on-first-page: true
       hide-next-on-last-page: true
 
+extra-items: []
+
 items:
   sort-button:
     item: "minecraft:comparator"
@@ -46,6 +50,13 @@ items:
       - " "
       - "<dark_gray>Left click: next mode</dark_gray>"
       - "<dark_gray>Right click: previous mode</dark_gray>"
+
+  back:
+    item: "minecraft:arrow"
+    display-name: "<yellow>Back</yellow>"
+    lore:
+      - ""
+      - "<dark_gray>Return to the previous menu</dark_gray>"
 
   # If you use player_head as item for bank entries, the menu will automatically replace the skull owner with the bank owner's texture.
   bank-entry:

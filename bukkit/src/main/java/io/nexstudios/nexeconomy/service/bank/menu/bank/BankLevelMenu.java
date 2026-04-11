@@ -21,10 +21,10 @@ import io.nexstudios.nexeconomy.service.bank.effects.BankClickEffectService;
 import io.nexstudios.nexeconomy.service.bank.definition.BankDefinition;
 import io.nexstudios.nexeconomy.service.bank.cache.BankAccountCacheService;
 import io.nexstudios.nexeconomy.service.bank.level.BankLevelService;
+import io.nexstudios.nexeconomy.service.bank.menu.extra.BankExtraItemSupport;
 import io.nexstudios.nexeconomy.service.bank.registry.BankRegistryService;
 import io.nexstudios.nexeconomy.service.bank.sync.BankRedisSyncService;
 import io.nexstudios.nexeconomy.service.economy.EconomyPlayerCacheService;
-import io.nexstudios.nexeconomy.service.economy.EconomyService;
 import io.nexstudios.nexeconomy.service.economy.repo.EconomyPlayer;
 import io.nexstudios.nexeconomy.service.registry.CurrencyRegistryService;
 import io.nexstudios.nexlogic.bukkit.services.items.config.ConfigItemService;
@@ -86,6 +86,7 @@ public final class BankLevelMenu {
   private static ItemStack previousTemplate;
   private static ItemStack nextTemplate;
   private static ItemStack backTemplate;
+  private static List<BankExtraItemSupport.ExtraItemBinding> EXTRA_ITEMS = List.of();
   private static int SLOT_BACK = DEFAULT_BACK_SLOT;
 
   private static final Map<UUID, LevelContext> CONTEXTS = new ConcurrentHashMap<>();
@@ -114,6 +115,7 @@ public final class BankLevelMenu {
     previousTemplate = configuredItem(bankConfig, "items.navigation.previous", Material.ARROW);
     nextTemplate = configuredItem(bankConfig, "items.navigation.next", Material.ARROW);
     backTemplate = configuredItem(bankConfig, "items.back", Material.ARROW);
+    EXTRA_ITEMS = BankExtraItemSupport.loadBindings(bankConfig, configItemService);
 
     var def = MenuDefinitionBuilder.create()
         .key(KEY)
@@ -152,6 +154,7 @@ public final class BankLevelMenu {
     }
 
     setBackButton(ctx, context);
+    BankExtraItemSupport.populate(ctx, servicesRef, EXTRA_ITEMS, "bank-level");
   }
 
   private static void setBackButton(MenuPopulateContext ctx, LevelContext context) {

@@ -27,6 +27,7 @@ import io.nexstudios.nexeconomy.provider.bank.BankProviderService;
 import io.nexstudios.nexeconomy.provider.bank.BankResponse;
 import io.nexstudios.nexeconomy.service.bank.definition.BankDefinition;
 import io.nexstudios.nexeconomy.service.bank.effects.BankClickEffectService;
+import io.nexstudios.nexeconomy.service.bank.menu.extra.BankExtraItemSupport;
 import io.nexstudios.nexeconomy.service.bank.repo.BankRepositoryService;
 import io.nexstudios.nexeconomy.service.registry.CurrencyRegistryService;
 import io.nexstudios.nexlogic.bukkit.services.heads.HeadService;
@@ -76,6 +77,7 @@ public class BankOverviewMenu {
 
   private static final int DEFAULT_ROWS = 6;
   private static final int DEFAULT_SORT_SLOT = 8;
+  private static final int DEFAULT_BACK_SLOT = 49;
 
   private static LoggerService logger;
   private static ServiceAccessor accessor;
@@ -84,6 +86,9 @@ public class BankOverviewMenu {
   private static FileReaderService fileReaderService;
   private static ItemService itemService;
   private static BankProviderService bankProvider;
+  private static ItemStack backTemplate;
+  private static List<BankExtraItemSupport.ExtraItemBinding> EXTRA_ITEMS = List.of();
+  private static int SLOT_BACK = DEFAULT_BACK_SLOT;
 
   public static void register(@NotNull ServiceAccessor services) {
     MenuService menuService = services.getService(MenuService.class);
@@ -99,12 +104,15 @@ public class BankOverviewMenu {
 
     Map<String, String> sortModes = readSortModes(bankConfig);
     PageSortControl<BankEntry> sortControl = buildSortControl(bankConfig, sortModes);
-    int sortButtonSlot = bankConfig.getInt("layout.sort-button-slot", DEFAULT_SORT_SLOT);
+    int sortButtonSlot = bankConfig.getInt("layout.slots.sort-button", DEFAULT_SORT_SLOT);
+    SLOT_BACK = bankConfig.getInt("layout.slots.back", DEFAULT_BACK_SLOT);
 
     ItemStack sortButtonTemplate = configuredItem(bankConfig, "items.sort-button", Material.COMPARATOR);
     ItemStack bankEntryTemplate = configuredItem(bankConfig, "items.bank-entry", Material.PLAYER_HEAD);
     ItemStack previousTemplate = configuredItem(bankConfig, "items.navigation.previous", Material.ARROW);
     ItemStack nextTemplate = configuredItem(bankConfig, "items.navigation.next", Material.ARROW);
+    backTemplate = configuredItem(bankConfig, "items.back", Material.ARROW);
+    EXTRA_ITEMS = BankExtraItemSupport.loadBindings(bankConfig, configItemService);
 
     var def = MenuDefinitionBuilder.create()
         .key(KEY)
@@ -116,7 +124,18 @@ public class BankOverviewMenu {
         .addControlButton(buildSortControlButton(sortButtonTemplate, sortControl, sortButtonSlot, bankConfig))
         .addPagedArea(buildPagedArea(bankConfig, bankEntryTemplate, previousTemplate, nextTemplate))
         .populator(ctx -> {
-          // Intentionally empty: visual content is provided via the paged area and control button definitions.
+          ctx.slot(SLOT_BACK).setPlannedItem(() -> MenuItem.of(backTemplate == null ? new ItemStack(Material.ARROW) : backTemplate.clone()));
+          ctx.slot(SLOT_BACK).onClick(clickCtx -> {
+            clickCtx.cancel();
+            triggerGeneralClick(clickCtx.viewer().uniqueId());
+
+            Player player = Bukkit.getPlayer(clickCtx.viewer().uniqueId());
+            if (player != null) {
+              player.closeInventory();
+            }
+          });
+
+          BankExtraItemSupport.populate(ctx, accessor, EXTRA_ITEMS, "bank-overview");
         })
         .build();
 

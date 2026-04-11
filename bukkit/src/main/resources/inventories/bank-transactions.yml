@@ -18,6 +18,7 @@ layout:
     filter: 0
     sort: 8
     back: 49
+    my-extra-item: 4
 
   # Paged transaction list.
   transactions:
@@ -34,6 +35,17 @@ layout:
       show-current-page-amount: true
       hide-previous-on-first-page: true
       hide-next-on-last-page: true
+
+extra-items:
+  my-extra-item:
+    item: "minecraft:diamond"
+    display-name: "<yellow>My Extra Item</yellow>"
+    lore:
+      - "<gray>This is an extra item defined in the config."
+      - "<gray>It can be used for any purpose in the menu."
+    effects:
+      - id: send-message
+        message: "<yellow>You clicked the extra item!</yellow>"
 
 items:
   # Default filler for empty slots.

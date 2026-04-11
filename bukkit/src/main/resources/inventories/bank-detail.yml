@@ -23,6 +23,8 @@ layout:
     withdraw-all: 25
     back: 49
 
+extra-items: []
+
 items:
   fill:
     item: "minecraft:black_stained_glass_pane"
