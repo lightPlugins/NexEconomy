@@ -19,6 +19,7 @@ layout:
     deposit-all: 20
     transactions: 22
     level: 31
+    invite: 30
     withdraw: 24
     withdraw-all: 25
     back: 49
@@ -47,6 +48,7 @@ items:
       - "<yellow>│ <gray>Wallet balance: <yellow><wallet-balance></yellow>"
       - ""
       - "<dark_gray>Deposit: <yellow><deposit-status></yellow><dark_gray> | Withdraw: <yellow><withdraw-status></yellow>"
+      - "<dark_gray>Invite: <yellow><invite-status></yellow>"
 
   deposit:
     item: "minecraft:iron_ingot"
@@ -109,6 +111,26 @@ items:
       - "<yellow>│ <gray>Interest rate at current level: <yellow><interest-rate></yellow>"
       - ""
       - "<dark_gray>Click to open the level menu</dark_gray>"
+
+  invite:
+    item: "minecraft:player_head"
+    display-name: "<dark_gray>» <yellow>Invite Player"
+    lore:
+      - ""
+      - "<yellow>│ <gray>Status: <yellow><invite-status></yellow>"
+      - "<yellow>│ <gray>Permission: <yellow><invite-reason></yellow>"
+      - ""
+      - "<dark_gray>Click to open the invite menu</dark_gray>"
+
+  invite-disabled:
+    item: "minecraft:barrier"
+    display-name: "<dark_gray>» <gray>Invite Player</gray>"
+    lore:
+      - ""
+      - "<yellow>│ <gray>Status: <red><invite-status></red>"
+      - "<yellow>│ <gray>Reason: <red><invite-disabled-reason></red>"
+      - ""
+      - "<dark_gray>Invites are currently unavailable</dark_gray>"
 
   withdraw:
     item: "minecraft:gold_ingot"

@@ -1,6 +1,8 @@
 package io.nexstudios.nexeconomy.service.bank.menu.register;
 
 import io.nexstudios.nexeconomy.service.bank.menu.bank.BankDetailMenu;
+import io.nexstudios.nexeconomy.service.bank.menu.bank.BankInvitePlayerMenu;
+import io.nexstudios.nexeconomy.service.bank.menu.bank.BankInviteRoleMenu;
 import io.nexstudios.nexeconomy.service.bank.menu.bank.BankLevelMenu;
 import io.nexstudios.nexeconomy.service.bank.menu.bank.BankOverviewMenu;
 import io.nexstudios.nexeconomy.service.bank.menu.bank.BankTransactionMenu;
@@ -18,6 +20,8 @@ public class RegisterMenuService implements Service {
   public void loadMenus() {
     BankOverviewMenu.register(accessor);
     BankDetailMenu.register(accessor);
+    BankInvitePlayerMenu.register(accessor);
+    BankInviteRoleMenu.register(accessor);
     BankLevelMenu.register(accessor);
     BankTransactionMenu.register(accessor);
   }

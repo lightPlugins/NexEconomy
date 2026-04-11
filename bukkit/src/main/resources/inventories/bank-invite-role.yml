@@ -1,0 +1,82 @@
+# Configuration for the BankInviteRoleMenu.
+# This menu shows available member roles and opens a confirmation dialog on click.
+
+menu:
+  title: "<yellow>Select Role</yellow>"
+  rows: 6
+  refresh-interval: "1"
+
+layout:
+  slots:
+    info: 4
+    back: 49
+
+  roles:
+    bounds:
+      x: 1
+      y: 2
+      width: 7
+      height: 3
+      alignment: "LEFT"
+
+    navigation:
+      previous-slot: 45
+      next-slot: 53
+      show-current-page-amount: true
+      hide-previous-on-first-page: true
+      hide-next-on-last-page: true
+
+extra-items: []
+
+items:
+  fill:
+    item: "minecraft:black_stained_glass_pane"
+    display-name: " "
+    lore: []
+
+  info:
+    item: "minecraft:book"
+    display-name: "<dark_gray>» <yellow>Select Role</yellow>"
+    lore:
+      - ""
+      - "<yellow>│ <gray>Bank: <yellow><bank-name></yellow>"
+      - "<yellow>│ <gray>Owner: <yellow><owner-name></yellow>"
+      - "<yellow>│ <gray>Target: <yellow><target-name></yellow>"
+      - ""
+      - "<dark_gray>Pick a role and confirm the invite</dark_gray>"
+
+  role-entry:
+    item: "minecraft:name_tag"
+    display-name: "<dark_gray>» <yellow><role-name></yellow>"
+    lore:
+      - ""
+      - "<yellow>│ <gray>Role ID: <yellow><role-id></yellow>"
+      - "<yellow>│ <gray>Priority: <yellow><priority></yellow>"
+      - "<yellow>│ <gray>Deposit: <green><can-deposit></green>"
+      - "<yellow>│ <gray>Withdraw: <green><can-withdraw></green>"
+      - "<yellow>│ <gray>Hourly limit: <yellow><hourly-limit></yellow>"
+      - "<yellow>│ <gray>Daily limit: <yellow><daily-limit></yellow>"
+      - "<yellow>│ <gray>Can invite: <green><can-invite></green>"
+      - "<yellow>│ <gray>Can kick: <green><can-kick></green>"
+      - "<yellow>│ <gray>Can upgrade: <green><can-upgrade></green>"
+      - "<yellow>│ <gray>Can view log: <green><can-view-log></green>"
+      - ""
+      - "<dark_gray>Click to open the confirmation dialog</dark_gray>"
+
+  navigation:
+    previous:
+      item: "minecraft:arrow"
+      display-name: "<yellow>Previous Page</yellow>"
+      lore: []
+    next:
+      item: "minecraft:arrow"
+      display-name: "<yellow>Next Page</yellow>"
+      lore: []
+
+  back:
+    item: "minecraft:arrow"
+    display-name: "<yellow>Back</yellow>"
+    lore:
+      - ""
+      - "<dark_gray>Return to player selection</dark_gray>"
+

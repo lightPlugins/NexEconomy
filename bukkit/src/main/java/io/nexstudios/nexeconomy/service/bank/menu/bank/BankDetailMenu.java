@@ -56,6 +56,7 @@ import java.time.ZoneId;
 import java.time.ZonedDateTime;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentHashMap;
@@ -86,6 +87,7 @@ public final class BankDetailMenu {
   private static final int DEFAULT_DEPOSIT_ALL_SLOT = 21;
   private static final int DEFAULT_TRANSACTIONS_SLOT = 22;
   private static final int DEFAULT_LEVEL_SLOT = 31;
+  private static final int DEFAULT_INVITE_SLOT = 30;
   private static final int DEFAULT_WITHDRAW_SLOT = 23;
   private static final int DEFAULT_WITHDRAW_ALL_SLOT = 24;
   private static final int DEFAULT_BACK_SLOT = 49;
@@ -95,6 +97,7 @@ public final class BankDetailMenu {
   private static int SLOT_DEPOSIT_ALL = DEFAULT_DEPOSIT_ALL_SLOT;
   private static int SLOT_TRANSACTIONS = DEFAULT_TRANSACTIONS_SLOT;
   private static int SLOT_LEVEL = DEFAULT_LEVEL_SLOT;
+  private static int SLOT_INVITE = DEFAULT_INVITE_SLOT;
   private static int SLOT_WITHDRAW = DEFAULT_WITHDRAW_SLOT;
   private static int SLOT_WITHDRAW_ALL = DEFAULT_WITHDRAW_ALL_SLOT;
   private static int SLOT_BACK = DEFAULT_BACK_SLOT;
@@ -116,6 +119,8 @@ public final class BankDetailMenu {
   private static ItemStack depositAllDisabledTemplate;
   private static ItemStack transactionsTemplate;
   private static ItemStack levelTemplate;
+  private static ItemStack inviteTemplate;
+  private static ItemStack inviteDisabledTemplate;
   private static ItemStack withdrawTemplate;
   private static ItemStack withdrawDisabledTemplate;
   private static ItemStack withdrawAllTemplate;
@@ -141,6 +146,7 @@ public final class BankDetailMenu {
     SLOT_DEPOSIT_ALL = bankConfig.getInt("layout.slots.deposit-all", DEFAULT_DEPOSIT_ALL_SLOT);
     SLOT_TRANSACTIONS = bankConfig.getInt("layout.slots.transactions", DEFAULT_TRANSACTIONS_SLOT);
     SLOT_LEVEL = bankConfig.getInt("layout.slots.level", DEFAULT_LEVEL_SLOT);
+    SLOT_INVITE = bankConfig.getInt("layout.slots.invite", DEFAULT_INVITE_SLOT);
     SLOT_WITHDRAW = bankConfig.getInt("layout.slots.withdraw", DEFAULT_WITHDRAW_SLOT);
     SLOT_WITHDRAW_ALL = bankConfig.getInt("layout.slots.withdraw-all", DEFAULT_WITHDRAW_ALL_SLOT);
     SLOT_BACK = bankConfig.getInt("layout.slots.back", DEFAULT_BACK_SLOT);
@@ -152,6 +158,8 @@ public final class BankDetailMenu {
     depositAllDisabledTemplate = configuredItem(bankConfig, "items.deposit-all-disabled", Material.BARRIER);
     transactionsTemplate = configuredItem(bankConfig, "items.transactions", Material.BOOK);
     levelTemplate = configuredItem(bankConfig, "items.level", Material.EXPERIENCE_BOTTLE);
+    inviteTemplate = configuredItem(bankConfig, "items.invite", Material.PLAYER_HEAD);
+    inviteDisabledTemplate = configuredItem(bankConfig, "items.invite-disabled", Material.BARRIER);
     withdrawTemplate = configuredItem(bankConfig, "items.withdraw", Material.GOLD_INGOT);
     withdrawDisabledTemplate = configuredItem(bankConfig, "items.withdraw-disabled", Material.BARRIER);
     withdrawAllTemplate = configuredItem(bankConfig, "items.withdraw-all", Material.GOLD_BLOCK);
@@ -219,6 +227,7 @@ public final class BankDetailMenu {
     setInfoPanel(ctx, data);
     setDepositButtons(ctx, data);
     setTransactionButton(ctx, data);
+    setInviteButton(ctx, data);
     setLevelButton(ctx, data);
     setWithdrawButtons(ctx, data);
     setConfiguredButton(ctx, SLOT_BACK, backTemplate, "items.back", "Back", detailResolver(data), clickCtx -> {
@@ -237,7 +246,7 @@ public final class BankDetailMenu {
     CurrencyRegistryService currencies = servicesRef.getService(CurrencyRegistryService.class);
     BankProviderService provider = servicesRef.getService(BankProviderService.class);
 
-    BankResponse<BankDefinition> bankResponse = provider == null ? null : provider.bank(context.bankId()).join();
+    BankResponse<BankDefinition> bankResponse = provider.bank(context.bankId()).join();
     BankDefinition definition = bankResponse == null ? null : bankResponse.payload();
     if (definition == null) return null;
 
@@ -268,8 +277,8 @@ public final class BankDetailMenu {
 
     BankMemberEntity viewerMember = findMember(members, viewerUuid);
     BankDefinition.RoleDefinition role = resolveRole(definition, context, viewerUuid, viewerMember);
-    BankResponse<Boolean> accountLockResponse = provider == null ? null : provider.isAnyBankAccountLockedForPlayer(context.ownerUuid()).join();
-    BankResponse<Boolean> lockResponse = provider == null ? null : provider.isLocked(context.bankId(), context.ownerUuid()).join();
+    BankResponse<Boolean> accountLockResponse = provider.isAnyBankAccountLockedForPlayer(context.ownerUuid()).join();
+    BankResponse<Boolean> lockResponse = provider.isLocked(context.bankId(), context.ownerUuid()).join();
     boolean accountsLocked = accountLockResponse != null && accountLockResponse.isSuccess() && Boolean.TRUE.equals(accountLockResponse.payload());
     boolean bankLocked = accountsLocked || (lockResponse != null && lockResponse.isSuccess() && Boolean.TRUE.equals(lockResponse.payload()));
     String bankLockReason = accountsLocked ? "Bank accounts are locked." : "Bank is locked.";
@@ -416,6 +425,31 @@ public final class BankDetailMenu {
     });
   }
 
+  private static void setInviteButton(MenuPopulateContext ctx, BankData data) {
+    TagResolver resolver = detailResolver(data);
+    boolean isOwner = data.context().ownerUuid() != null && data.context().ownerUuid().equals(ctx.viewer().uniqueId());
+    boolean inviteEnabled = data.definition() != null
+        && data.definition().memberSystem() != null
+        && data.definition().memberSystem().enabled()
+        && (isOwner || (data.role() != null && data.role().canInvite()));
+
+    if (!inviteEnabled) {
+      setConfiguredButton(ctx, SLOT_INVITE, inviteDisabledTemplate, "items.invite-disabled", "Invite", resolver, clickCtx -> {
+        clickCtx.cancel();
+        triggerGeneralClick(clickCtx.viewer().uniqueId());
+      });
+      return;
+    }
+
+    setConfiguredButton(ctx, SLOT_INVITE, inviteTemplate, "items.invite", "Invite", resolver, clickCtx -> {
+      clickCtx.cancel();
+      triggerGeneralClick(clickCtx.viewer().uniqueId());
+      if (servicesRef != null) {
+        BankInvitePlayerMenu.open(servicesRef, clickCtx.viewer(), data.context().bankId(), data.context().ownerUuid(), data.context().ownerBank());
+      }
+    });
+  }
+
   private static void setLevelButton(MenuPopulateContext ctx, BankData data) {
     TagResolver resolver = detailResolver(data);
     setConfiguredButton(ctx, SLOT_LEVEL, levelTemplate, "items.level", "Levels", resolver, clickCtx -> {
@@ -502,7 +536,23 @@ public final class BankDetailMenu {
 
   private static TagResolver detailResolver(BankData data) {
     String ownerName = nameOrUuid(data.context().ownerUuid());
-    String roleName = data.role() == null ? "unknown" : data.role().nameMiniMessage();
+    BankDefinition.RoleDefinition role = displayRole(data);
+    String roleName = role == null ? "unknown" : role.nameMiniMessage();
+    boolean memberSystemEnabled = data.definition() != null
+        && data.definition().memberSystem() != null
+        && data.definition().memberSystem().enabled();
+    boolean ownerCanInvite = data.context().ownerBank();
+    boolean roleCanInvite = role != null && role.canInvite();
+    boolean inviteEnabled = memberSystemEnabled && (ownerCanInvite || roleCanInvite);
+    String inviteReason = !memberSystemEnabled
+        ? "<red>The member system is disabled."
+        : ownerCanInvite
+            ? "<green>As the owner, you can invite players."
+                : role == null
+                ? "<red>No role is available."
+                : roleCanInvite
+                    ? "<green>Your role can invite players."
+                    : "<red>Your role cannot invite players.";
     String bankBalance = AmountNotation.formatShort(data.bankBalance(), data.currency().fractionDigits());
     String walletBalance = AmountNotation.formatShort(data.walletBalance(), data.currency().fractionDigits());
     String maxBalance = AmountNotation.formatShort(data.maxBalance(), data.currency().fractionDigits());
@@ -536,6 +586,9 @@ public final class BankDetailMenu {
         Placeholder.parsed("withdraw-status", data.withdrawEnabled() ? "Enabled" : "Disabled"),
         Placeholder.parsed("withdraw-reason", data.withdrawDisabledReason()),
         Placeholder.parsed("withdraw-disabled-reason", data.withdrawDisabledReason()),
+        Placeholder.parsed("invite-status", inviteEnabled ? "Enabled" : "Disabled"),
+        Placeholder.parsed("invite-reason", inviteReason),
+        Placeholder.parsed("invite-disabled-reason", inviteReason),
         Placeholder.parsed("bank-lock-reason", data.bankLockReason()),
         Placeholder.parsed("bank-lock-suffix", bankLockSuffix),
         Placeholder.parsed("bank-lock-state", data.bankLocked() ? "Locked" : "Unlocked"),
@@ -688,7 +741,10 @@ public final class BankDetailMenu {
   private static String formatLimitDisplay(CurrencyDefinition currency, String raw) {
     MantissaAmount limit = parseLimit(currency, raw);
     if (isUnlimited(limit)) return "∞";
-    return AmountNotation.formatShort(limit, currency == null ? 0 : currency.fractionDigits());
+    if (currency == null) {
+      return AmountNotation.formatShort(limit, 0);
+    }
+    return AmountNotation.formatShort(limit, currency.fractionDigits());
   }
 
   private static MantissaAmount zeroSafe(MantissaAmount amount) {
@@ -706,11 +762,12 @@ public final class BankDetailMenu {
   }
 
   private static long windowStartEpoch(ZoneId zone, boolean hourly) {
-    ZonedDateTime now = ZonedDateTime.now(zone == null ? ZoneId.of("UTC") : zone);
+    ZoneId effectiveZone = Objects.requireNonNullElse(zone, ZoneId.of("UTC"));
+    ZonedDateTime now = ZonedDateTime.now(effectiveZone);
     if (hourly) {
       return now.withMinute(0).withSecond(0).withNano(0).toEpochSecond();
     }
-    return now.toLocalDate().atStartOfDay(zone == null ? ZoneId.of("UTC") : zone).toEpochSecond();
+    return now.toLocalDate().atStartOfDay(effectiveZone).toEpochSecond();
   }
 
 
@@ -720,6 +777,10 @@ public final class BankDetailMenu {
 
     if (data != null && data.bankLocked()) {
       sendMessage(player, "bank.errors.bank-accounts-locked", TagResolver.resolver(List.of()));
+      return;
+    }
+
+    if (data == null || data.currency() == null) {
       return;
     }
 
@@ -1092,8 +1153,7 @@ public final class BankDetailMenu {
         : memberSystem.rolesByIdLower();
 
     if (viewerUuid != null && viewerUuid.equals(context.ownerUuid())) {
-      BankDefinition.RoleDefinition ownerRole = roles.get("owner");
-      if (ownerRole != null) return ownerRole;
+      return syntheticOwnerRole();
     }
 
     if (member != null) {
@@ -1103,6 +1163,44 @@ public final class BankDetailMenu {
     }
 
     return roles.get("member");
+  }
+
+  private static BankDefinition.RoleDefinition displayRole(BankData data) {
+    if (data == null) {
+      return null;
+    }
+
+    BankDefinition.RoleDefinition role = data.role();
+    if (data.context() != null && data.context().ownerBank()) {
+      BankDefinition.RoleDefinition configOwnerRole = configRole(data.definition());
+      if (configOwnerRole != null) {
+        return configOwnerRole;
+      }
+    }
+
+    return role;
+  }
+
+  private static BankDefinition.RoleDefinition configRole(BankDefinition def) {
+    if (def == null || def.memberSystem() == null || def.memberSystem().rolesByIdLower() == null) {
+      return null;
+    }
+
+    return def.memberSystem().rolesByIdLower().get("owner");
+  }
+
+  private static BankDefinition.RoleDefinition syntheticOwnerRole() {
+    return new BankDefinition.RoleDefinition(
+        "owner",
+        "<red>Owner</red>",
+        Integer.MAX_VALUE,
+        true,
+        new BankDefinition.WithdrawDefinition(true, "-1", "-1"),
+        true,
+        true,
+        true,
+        true
+    );
   }
 
   private static BankMemberEntity findMember(List<BankMemberEntity> members, UUID viewerUuid) {

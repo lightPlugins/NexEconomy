@@ -1,0 +1,73 @@
+# Configuration for the BankInvitePlayerMenu.
+# This menu shows all online players as player heads so a bank invite can be started.
+
+menu:
+  title: "<yellow>Invite Player</yellow>"
+  rows: 6
+  refresh-interval: "1"
+
+layout:
+  slots:
+    info: 4
+    back: 49
+
+  players:
+    bounds:
+      x: 1
+      y: 2
+      width: 7
+      height: 3
+      alignment: "LEFT"
+
+    navigation:
+      previous-slot: 45
+      next-slot: 53
+      show-current-page-amount: true
+      hide-previous-on-first-page: true
+      hide-next-on-last-page: true
+
+extra-items: []
+
+items:
+  fill:
+    item: "minecraft:black_stained_glass_pane"
+    display-name: " "
+    lore: []
+
+  info:
+    item: "minecraft:paper"
+    display-name: "<dark_gray>» <yellow>Invite Player</yellow>"
+    lore:
+      - ""
+      - "<yellow>│ <gray>Bank: <yellow><bank-name></yellow>"
+      - "<yellow>│ <gray>Owner: <yellow><owner-name></yellow>"
+      - "<yellow>│ <gray>Online players: <yellow><online-count></yellow>"
+      - ""
+      - "<dark_gray>Choose a player to continue</dark_gray>"
+
+  player-entry:
+    item: "minecraft:player_head"
+    display-name: "<dark_gray>» <yellow><player-name></yellow>"
+    lore:
+      - ""
+      - "<yellow>│ <gray>UUID: <yellow><player-uuid></yellow>"
+      - ""
+      - "<dark_gray>Click to select a role</dark_gray>"
+
+  navigation:
+    previous:
+      item: "minecraft:arrow"
+      display-name: "<yellow>Previous Page</yellow>"
+      lore: []
+    next:
+      item: "minecraft:arrow"
+      display-name: "<yellow>Next Page</yellow>"
+      lore: []
+
+  back:
+    item: "minecraft:arrow"
+    display-name: "<yellow>Back</yellow>"
+    lore:
+      - ""
+      - "<dark_gray>Return to bank details</dark_gray>"
+

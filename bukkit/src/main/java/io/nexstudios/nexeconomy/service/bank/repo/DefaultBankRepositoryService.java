@@ -688,6 +688,36 @@ public final class DefaultBankRepositoryService implements BankRepositoryService
   }
 
   @Override
+  public CompletableFuture<List<BankAccountRef>> findBankAccountsOwnedBy(UUID ownerUuid) {
+    if (ownerUuid == null) return CompletableFuture.completedFuture(List.of());
+
+    return dbAsync.executeAsyncInTransaction(em -> {
+      List<Object[]> rows = em.createQuery(
+              "select a.id, a.bankIdLower, a.ownerUuid from BankAccountEntity a where a.ownerUuid = :owner",
+              Object[].class
+          )
+          .setParameter("owner", ownerUuid)
+          .getResultList();
+
+      if (rows == null || rows.isEmpty()) return List.of();
+
+      ArrayList<BankAccountRef> out = new ArrayList<>(rows.size());
+      for (Object[] r : rows) {
+        if (r == null || r.length < 3) continue;
+
+        UUID id = r[0] instanceof UUID u ? u : null;
+        String bankIdLower = r[1] == null ? null : String.valueOf(r[1]);
+        UUID owner = r[2] instanceof UUID u ? u : null;
+        if (id == null) continue;
+
+        out.add(new BankAccountRef(id, bankIdLower, owner));
+      }
+
+      return List.copyOf(out);
+    });
+  }
+
+  @Override
   public CompletableFuture<Long> countOtherBankMemberships(UUID memberUuid) {
     if (memberUuid == null) return CompletableFuture.completedFuture(0L);
 

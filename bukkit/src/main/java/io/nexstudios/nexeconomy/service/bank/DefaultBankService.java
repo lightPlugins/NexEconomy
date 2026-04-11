@@ -202,17 +202,29 @@ public final class DefaultBankService implements BankService, Service {
     }
 
     // 2) DB fallback (async)
-    return repo.findBankAccountsForMember(playerUuid).thenApply(refs -> {
-      if (refs == null || refs.isEmpty()) return List.of();
+    return repo.findBankAccountsForMember(playerUuid)
+        .thenCombine(repo.findBankAccountsOwnedBy(playerUuid), (memberRefs, ownedRefs) -> {
+          ArrayList<BankRepositoryService.BankAccountRef> out = new ArrayList<>();
 
-      ArrayList<BankRepositoryService.BankAccountRef> out = new ArrayList<>(refs.size());
-      for (BankRepositoryService.BankAccountRef r : refs) {
-        if (r == null || r.bankAccountId() == null || r.ownerUuid() == null) continue;
-        // Add ALL banks (no owner filter)
-        out.add(r);
-      }
-      return List.copyOf(out);
-    });
+          for (BankRepositoryService.BankAccountRef r : memberRefs == null ? List.<BankRepositoryService.BankAccountRef>of() : memberRefs) {
+            if (r.bankAccountId() == null || r.ownerUuid() == null) continue;
+            out.add(r);
+          }
+
+          for (BankRepositoryService.BankAccountRef r : ownedRefs == null ? List.<BankRepositoryService.BankAccountRef>of() : ownedRefs) {
+            if (r.bankAccountId() == null || r.ownerUuid() == null) continue;
+            boolean exists = false;
+            for (BankRepositoryService.BankAccountRef existing : out) {
+              if (existing != null && r.bankAccountId().equals(existing.bankAccountId())) {
+                exists = true;
+                break;
+              }
+            }
+            if (!exists) out.add(r);
+          }
+
+          return List.copyOf(out);
+        });
   }
 
   public CompletableFuture<List<BankRepositoryService.BankAccountRef>> otherBanks(UUID memberUuid) {
@@ -447,14 +459,12 @@ public final class DefaultBankService implements BankService, Service {
 
               UUID bankAccountId = view.account().getId();
 
-              BankMemberEntity actorMember = findMemberInList(view.members(), actorUuid);
-              if (actorMember == null) {
+              BankDefinition.RoleDefinition actorRole = resolveActorRole(ms, ownerUuid, actorUuid, view.members());
+              if (actorRole == null) {
                 return CompletableFuture.failedFuture(new IllegalStateException("not a member"));
               }
 
-              BankDefinition.RoleDefinition actorRole = ms.rolesByIdLower().get(normalizeId(actorMember.getRoleIdLower()));
-
-              if (actorRole == null || !actorRole.canInvite()) {
+              if (!actorRole.canInvite()) {
                 return CompletableFuture.failedFuture(new IllegalStateException("no permission"));
               }
 
@@ -775,14 +785,14 @@ public final class DefaultBankService implements BankService, Service {
       return CompletableFuture.failedFuture(new IllegalStateException("member system disabled"));
     }
 
-    return repo.findMember(bankAccountId, actorUuid).thenCompose(memOpt -> {
-      BankMemberEntity mem = memOpt.orElse(null);
-      if (mem == null) return CompletableFuture.failedFuture(new IllegalStateException("not a member"));
-
-      String roleId = normalizeId(mem.getRoleIdLower());
-      BankDefinition.RoleDefinition role = ms.rolesByIdLower().get(roleId);
-      if (role == null) return CompletableFuture.failedFuture(new IllegalStateException("role not found"));
-      return CompletableFuture.completedFuture(role);
+    return repo.findBankAccountById(bankAccountId).thenCompose(accOpt -> {
+      UUID ownerUuid = accOpt.map(BankAccountEntity::getOwnerUuid).orElse(null);
+      return repo.findMember(bankAccountId, actorUuid).thenCompose(memOpt -> {
+        BankMemberEntity mem = memOpt.orElse(null);
+        BankDefinition.RoleDefinition role = resolveActorRole(ms, ownerUuid, actorUuid, mem == null ? null : List.of(mem));
+        if (role == null) return CompletableFuture.failedFuture(new IllegalStateException("not a member"));
+        return CompletableFuture.completedFuture(role);
+      });
     });
   }
 
@@ -1119,17 +1129,46 @@ public final class DefaultBankService implements BankService, Service {
         return CompletableFuture.failedFuture(new IllegalStateException("bank not available"));
       }
 
-      BankMemberEntity mem = findMemberInList(view.members(), actorUuid);
-      if (mem == null) {
+      BankDefinition.RoleDefinition role = resolveActorRole(ms, ownerUuid, actorUuid, view.members());
+      if (role == null) {
         return CompletableFuture.failedFuture(new IllegalStateException("not a member"));
       }
 
-      String roleId = normalizeId(mem.getRoleIdLower());
-      BankDefinition.RoleDefinition role = ms.rolesByIdLower().get(roleId);
-      if (role == null) return CompletableFuture.failedFuture(new IllegalStateException("role not found"));
-
       return CompletableFuture.completedFuture(role);
     });
+  }
+
+  private BankDefinition.RoleDefinition resolveActorRole(
+      BankDefinition.MemberSystem ms,
+      UUID ownerUuid,
+      UUID actorUuid,
+      List<BankMemberEntity> members
+  ) {
+    if (ms == null || ms.rolesByIdLower() == null || actorUuid == null) return null;
+
+    if (ownerUuid != null && ownerUuid.equals(actorUuid)) {
+      return syntheticOwnerRole();
+    }
+
+    BankMemberEntity mem = findMemberInList(members, actorUuid);
+    if (mem == null) return null;
+
+    String roleId = normalizeId(mem.getRoleIdLower());
+    return ms.rolesByIdLower().get(roleId);
+  }
+
+  private static BankDefinition.RoleDefinition syntheticOwnerRole() {
+    return new BankDefinition.RoleDefinition(
+        "owner",
+        "<red>Owner</red>",
+        Integer.MAX_VALUE,
+        true,
+        new BankDefinition.WithdrawDefinition(true, "-1", "-1"),
+        true,
+        true,
+        true,
+        true
+    );
   }
 
   private CompletableFuture<Void> requireActorNotLocked(UUID actorUuid) {

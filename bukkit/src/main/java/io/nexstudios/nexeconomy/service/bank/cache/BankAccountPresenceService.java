@@ -31,7 +31,12 @@ public final class BankAccountPresenceService implements Service {
   public void onPlayerJoin(UUID playerUuid) {
     if (playerUuid == null) return;
 
-    repo.findBankAccountsForMember(playerUuid).thenAccept(refs -> {
+    repo.findBankAccountsForMember(playerUuid).thenCombine(repo.findBankAccountsOwnedBy(playerUuid), (memberRefs, ownedRefs) -> {
+      HashSet<BankRepositoryService.BankAccountRef> allRefs = new HashSet<>();
+      if (memberRefs != null) allRefs.addAll(memberRefs);
+      if (ownedRefs != null) allRefs.addAll(ownedRefs);
+      return allRefs;
+    }).thenAccept(refs -> {
       if (refs == null || refs.isEmpty()) {
         accountsByPlayer.remove(playerUuid);
         return;
@@ -47,7 +52,6 @@ public final class BankAccountPresenceService implements Service {
         AtomicInteger counter = onlineRefsByAccount.computeIfAbsent(ref.bankAccountId(), ignored -> new AtomicInteger(0));
         int prev = counter.getAndIncrement();
         if (prev == 0) {
-          // first online member => keep it cached
           if (cache != null && ref.bankIdLower() != null && ref.ownerUuid() != null) {
             cache.loadOrCreate(ref.bankIdLower(), ref.ownerUuid());
           }

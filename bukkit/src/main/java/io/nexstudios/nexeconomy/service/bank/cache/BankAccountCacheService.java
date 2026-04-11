@@ -260,11 +260,6 @@ public final class BankAccountCacheService implements Service {
         return CompletableFuture.failedFuture(new IllegalStateException("bank account not available"));
       }
 
-      UUID realOwner = acc.getOwnerUuid();
-      if (realOwner != null) {
-        return repo.upsertMember(acc.getId(), realOwner, realOwner, "owner")
-            .thenCompose(ignored -> loadBalanceAndMembers(acc));
-      }
 
       return loadBalanceAndMembers(acc);
     });
