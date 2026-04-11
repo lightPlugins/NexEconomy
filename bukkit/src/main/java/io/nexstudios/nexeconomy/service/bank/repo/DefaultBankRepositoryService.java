@@ -9,6 +9,7 @@ import io.nexstudios.serviceregistry.di.Dependencies;
 import io.nexstudios.serviceregistry.di.ServiceAccessor;
 import jakarta.persistence.EntityManager;
 import jakarta.persistence.LockModeType;
+import lombok.extern.slf4j.Slf4j;
 
 import java.time.Instant;
 import java.util.ArrayList;
@@ -18,6 +19,7 @@ import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
 import java.util.function.Function;
 
+@Slf4j
 @Dependencies({
     LoggerService.class
 })
@@ -461,14 +463,19 @@ public final class DefaultBankRepositoryService implements BankRepositoryService
           )
           .setParameter("acc", bankAccountId)
           .setParameter("mem", memberUuid)
-          .setMaxResults(1)
-          .setLockMode(LockModeType.PESSIMISTIC_WRITE)
           .getResultList();
 
-      BankMemberEntity row = list.isEmpty() ? null : list.getFirst();
-      if (row == null) return false;
+      if (list == null || list.isEmpty()) {
+        return false;
+      }
 
-      em.remove(row);
+      for (BankMemberEntity row : list) {
+        if (row != null) {
+          em.remove(row);
+        }
+      }
+
+      em.flush();
       return true;
     });
   }

@@ -263,15 +263,19 @@ public final class BankMemberRoleMenu {
       bankProvider.changeMemberRole(state.bankId(), state.ownerUuid(), player.getUniqueId(), state.targetUuid(), entry.role().idLower())
           .thenAccept(response -> Bukkit.getScheduler().runTask(plugin, () -> {
             if (response != null && response.isSuccess()) {
-              BankMemberFlowState.start(clickCtx.viewer().uniqueId(), state.bankId(), state.ownerUuid(), state.ownerBank());
-              BankMemberFlowState.markTransition(clickCtx.viewer().uniqueId());
-              if (servicesRef != null) {
-                BankMemberMenu.open(servicesRef, clickCtx.viewer(), state.bankId(), state.ownerUuid(), state.ownerBank());
-              }
+              refreshOpenView(clickCtx.viewer());
             }
           }))
           .exceptionally(ex -> null);
     });
+  }
+
+  private static void refreshOpenView(ViewerRef viewer) {
+    if (servicesRef == null || viewer == null) return;
+    MenuService menuService = servicesRef.getService(MenuService.class);
+    if (menuService == null) return;
+
+    menuService.findOpenView(viewer).ifPresent(MenuView::requestRefresh);
   }
 
   private static List<RoleEntry> buildEntries(UUID viewerUuid) {

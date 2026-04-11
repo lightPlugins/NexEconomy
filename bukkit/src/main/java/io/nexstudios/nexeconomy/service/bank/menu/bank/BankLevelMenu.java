@@ -20,6 +20,7 @@ import io.nexstudios.nexeconomy.provider.bank.BankProviderService;
 import io.nexstudios.nexeconomy.service.bank.effects.BankClickEffectService;
 import io.nexstudios.nexeconomy.service.bank.definition.BankDefinition;
 import io.nexstudios.nexeconomy.service.bank.cache.BankAccountCacheService;
+import io.nexstudios.nexeconomy.service.bank.cache.BankAccountPresenceService;
 import io.nexstudios.nexeconomy.service.bank.level.BankLevelService;
 import io.nexstudios.nexeconomy.service.bank.menu.extra.BankExtraItemSupport;
 import io.nexstudios.nexeconomy.service.bank.registry.BankRegistryService;
@@ -59,6 +60,7 @@ import java.util.concurrent.ConcurrentHashMap;
     BankProviderService.class,
     EconomyPlayerCacheService.class,
     CurrencyRegistryService.class,
+    BankAccountPresenceService.class,
     FileReaderService.class
 })
 public final class BankLevelMenu {
@@ -78,6 +80,7 @@ public final class BankLevelMenu {
   private static FileReaderService fileReaderService;
   private static ConfigItemService configItemService;
   private static BankProviderService bankProvider;
+  private static BankAccountPresenceService presenceService;
   private static FileConfiguration bankConfig;
   private static ItemStack unlockedTemplate;
   private static ItemStack previousNeedsUnlockedTemplate;
@@ -103,6 +106,7 @@ public final class BankLevelMenu {
     fileReaderService = services.getService(FileReaderService.class);
     configItemService = NexEconomyPlugin.getNexLogicService().getService(ConfigItemService.class);
     bankProvider = services.getService(BankProviderService.class);
+    presenceService = services.getService(BankAccountPresenceService.class);
 
     bankConfig = loadConfig();
 
@@ -144,6 +148,17 @@ public final class BankLevelMenu {
     LAST_VIEWS.remove(viewer.uniqueId());
     REFRESH_TASKS.remove(viewer.uniqueId());
     services.getService(MenuService.class).open(viewer, KEY);
+  }
+
+  public static void refreshIfOpen(UUID viewerUuid) {
+    if (viewerUuid == null) {
+      return;
+    }
+
+    Player player = Bukkit.getPlayer(viewerUuid);
+    if (player != null) {
+      refreshOpenView(player);
+    }
   }
 
   private static void populate(MenuPopulateContext ctx) {
@@ -199,7 +214,11 @@ public final class BankLevelMenu {
       if (bankView != null) {
         LAST_VIEWS.put(viewerUuid, bankView);
       } else {
-        bankView = LAST_VIEWS.get(viewerUuid);
+        BankAccountCacheService.View cachedView = LAST_VIEWS.get(viewerUuid);
+        if (canReuseCachedView(viewerUuid, cachedView)) {
+          bankView = cachedView;
+        }
+
         if (bankCache != null) {
           refreshBankViewAsync(player, context.bankId(), context.ownerUuid(), viewerUuid);
         }
@@ -454,6 +473,20 @@ public final class BankLevelMenu {
 
     menuService.findOpenView(ViewerRef.of(player.getUniqueId(), player.getName()))
         .ifPresent(MenuView::requestRefresh);
+  }
+
+  private static boolean canReuseCachedView(UUID viewerUuid, BankAccountCacheService.View view) {
+    if (viewerUuid == null || view == null || view.account() == null || view.account().getId() == null) {
+      return false;
+    }
+
+    if (presenceService == null) {
+      return true;
+    }
+
+    return presenceService.bankAccountIdsIfTracked(viewerUuid)
+        .map(ids -> ids.contains(view.account().getId()))
+        .orElse(false);
   }
 
   private static void refreshBankViewAsync(Player player, String bankId, UUID ownerUuid, UUID viewerUuid) {
@@ -826,7 +859,7 @@ public final class BankLevelMenu {
       }
     }
 
-    return roles.get("member");
+    return null;
   }
 
   private static BankMemberEntity findMember(List<BankMemberEntity> members, UUID viewerUuid) {

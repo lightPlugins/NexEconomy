@@ -2,6 +2,7 @@ package io.nexstudios.nexeconomy.provider.bank;
 
 import io.nexstudios.nexeconomy.definition.MantissaAmount;
 import io.nexstudios.nexeconomy.service.bank.BankService;
+import io.nexstudios.nexeconomy.service.bank.cache.BankAccountPresenceService;
 import io.nexstudios.nexeconomy.service.bank.cache.BankAccountCacheService;
 import io.nexstudios.nexeconomy.service.bank.definition.BankDefinition;
 import io.nexstudios.nexeconomy.service.bank.level.BankLevelService;
@@ -41,6 +42,7 @@ import java.util.concurrent.CompletableFuture;
     BankLevelService.class,
     BankRepositoryService.class,
     BankAccountCacheService.class,
+    BankAccountPresenceService.class,
     CurrencyRegistryService.class,
     EconomyService.class,
     EconomyPlayerCacheService.class,
@@ -53,6 +55,7 @@ public final class DefaultBankProviderService implements BankProviderService, Se
   private final BankLevelService levelService;
   private final BankRepositoryService repo;
   private final BankAccountCacheService cache;
+  private final BankAccountPresenceService presence;
   private final CurrencyRegistryService currencies;
   private final EconomyService economy;
   private final EconomyPlayerCacheService economyCache;
@@ -64,6 +67,7 @@ public final class DefaultBankProviderService implements BankProviderService, Se
     this.levelService = accessor.getService(BankLevelService.class);
     this.repo = accessor.getService(BankRepositoryService.class);
     this.cache = accessor.getService(BankAccountCacheService.class);
+    this.presence = accessor.getService(BankAccountPresenceService.class);
     this.currencies = accessor.getService(CurrencyRegistryService.class);
     this.economy = accessor.getService(EconomyService.class);
     this.economyCache = accessor.getService(EconomyPlayerCacheService.class);
@@ -559,10 +563,13 @@ public final class DefaultBankProviderService implements BankProviderService, Se
 
       return resolveAccount(id, ownerUuid).thenCompose(acc ->
           bankService.members(id, ownerUuid).thenCompose(list -> {
-            BankMemberEntity actorMember = findMember(list, actorUuid);
+            BankDefinition.RoleDefinition actorRole = Objects.equals(ownerUuid, actorUuid)
+                ? syntheticOwnerRole()
+                : null;
+            BankMemberEntity actorMember = actorRole == null ? findMember(list, actorUuid) : null;
             BankMemberEntity targetMember = findMember(list, memberUuid);
 
-            if (actorMember == null) {
+            if (actorRole == null && actorMember == null) {
               return CompletableFuture.completedFuture(BankResponse.failure(BankResponse.Status.NOT_MEMBER, "Actor is not a member.", baseCtx, Boolean.FALSE));
             }
             if (targetMember == null) {
@@ -572,7 +579,9 @@ public final class DefaultBankProviderService implements BankProviderService, Se
               return CompletableFuture.completedFuture(BankResponse.failure(BankResponse.Status.NOT_OWNER, "The owner cannot be kicked.", baseCtx, Boolean.FALSE));
             }
 
-            BankDefinition.RoleDefinition actorRole = ms.rolesByIdLower().get(normalize(actorMember.getRoleIdLower()));
+            if (actorRole == null) {
+              actorRole = ms.rolesByIdLower().get(normalize(actorMember.getRoleIdLower()));
+            }
             BankDefinition.RoleDefinition targetRole = ms.rolesByIdLower().get(normalize(targetMember.getRoleIdLower()));
             if (actorRole == null || targetRole == null) {
               return CompletableFuture.completedFuture(BankResponse.failure(BankResponse.Status.ROLE_NOT_FOUND, "Role not found.", baseCtx, Boolean.FALSE));
@@ -604,15 +613,18 @@ public final class DefaultBankProviderService implements BankProviderService, Se
               return CompletableFuture.completedFuture(BankResponse.failure(BankResponse.Status.BANK_UNAVAILABLE, "Bank account is unavailable.", ctx, Boolean.FALSE));
             }
 
-            return repo.deleteMember(accountId, memberUuid).thenCompose(deleted ->
-                repo.deleteInvite(accountId, memberUuid).exceptionally(ignore -> false).thenApply(ignore -> Boolean.TRUE.equals(deleted))
-            ).thenApply(done -> {
-              if (!done) {
-                return BankResponse.failure(BankResponse.Status.NOT_MEMBER, "Target member not found.", ctx, Boolean.FALSE);
+            return repo.deleteMember(accountId, memberUuid).thenCompose(removed -> {
+              if (!Boolean.TRUE.equals(removed)) {
+                return CompletableFuture.completedFuture(BankResponse.failure(BankResponse.Status.NOT_MEMBER, "Target member not found.", ctx, Boolean.FALSE));
               }
 
-              invalidate(accountId);
-              return BankResponse.success("Member kicked.", ctx, Boolean.TRUE);
+              return repo.deleteInvite(accountId, memberUuid).exceptionally(ignore -> false).thenApply(ignore -> {
+                invalidate(accountId);
+                if (presence != null) {
+                  presence.onMemberRemoved(accountId, memberUuid);
+                }
+                return BankResponse.success("Member kicked.", ctx, Boolean.TRUE);
+              });
             });
           })
       );
@@ -1305,6 +1317,20 @@ public final class DefaultBankProviderService implements BankProviderService, Se
       }
     }
     return null;
+  }
+
+  private static BankDefinition.RoleDefinition syntheticOwnerRole() {
+    return new BankDefinition.RoleDefinition(
+        "owner",
+        "<red>Owner</red>",
+        Integer.MAX_VALUE,
+        true,
+        new BankDefinition.WithdrawDefinition(true, "-1", "-1"),
+        true,
+        true,
+        true,
+        true
+    );
   }
 
   private static BankMemberEntity findMember(List<BankMemberEntity> members, UUID uuid) {

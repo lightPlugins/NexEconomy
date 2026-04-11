@@ -151,6 +151,25 @@ public final class BankMemberMenu {
     services.getService(MenuService.class).open(viewer, KEY);
   }
 
+  public static void refreshIfOpen(UUID viewerUuid) {
+    if (viewerUuid == null || servicesRef == null) {
+      return;
+    }
+
+    Player player = Bukkit.getPlayer(viewerUuid);
+    if (player == null) {
+      return;
+    }
+
+    MenuService menuService = servicesRef.getService(MenuService.class);
+    if (menuService == null) {
+      return;
+    }
+
+    menuService.findOpenView(ViewerRef.of(player.getUniqueId(), player.getName()))
+        .ifPresent(MenuView::requestRefresh);
+  }
+
   private static void populate(MenuPopulateContext ctx) {
     ViewerRef viewer = ctx.viewer();
     Player player = Bukkit.getPlayer(viewer.uniqueId());
@@ -297,15 +316,19 @@ public final class BankMemberMenu {
       bankProvider.kick(state.bankId(), state.ownerUuid(), player.getUniqueId(), entry.memberUuid())
           .thenAccept(response -> Bukkit.getScheduler().runTask(plugin, () -> {
             if (response != null && response.isSuccess()) {
-              BankMemberFlowState.start(viewer.uniqueId(), state.bankId(), state.ownerUuid(), state.ownerBank());
-              BankMemberFlowState.markTransition(viewer.uniqueId());
-              if (servicesRef != null) {
-                BankMemberMenu.open(servicesRef, viewer, state.bankId(), state.ownerUuid(), state.ownerBank());
-              }
+              refreshOpenView(viewer);
             }
           }))
           .exceptionally(ex -> null);
     });
+  }
+
+  private static void refreshOpenView(ViewerRef viewer) {
+    if (servicesRef == null || viewer == null) return;
+    MenuService menuService = servicesRef.getService(MenuService.class);
+    if (menuService == null) return;
+
+    menuService.findOpenView(viewer).ifPresent(MenuView::requestRefresh);
   }
 
   private static List<MemberEntry> buildEntries(UUID viewerUuid) {

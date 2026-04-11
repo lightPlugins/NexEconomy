@@ -22,6 +22,7 @@ import io.nexstudios.nexeconomy.definition.MantissaAmount;
 import io.nexstudios.nexeconomy.provider.bank.BankProviderService;
 import io.nexstudios.nexeconomy.provider.bank.BankResponse;
 import io.nexstudios.nexeconomy.service.bank.cache.BankAccountCacheService;
+import io.nexstudios.nexeconomy.service.bank.cache.BankAccountPresenceService;
 import io.nexstudios.nexeconomy.service.bank.effects.BankClickEffectService;
 import io.nexstudios.nexeconomy.service.bank.definition.BankDefinition;
 import io.nexstudios.nexeconomy.service.bank.menu.extra.BankExtraItemSupport;
@@ -70,6 +71,7 @@ import java.util.concurrent.ConcurrentHashMap;
     ComponentService.class,
     BankProviderService.class,
     BankAccountCacheService.class,
+    BankAccountPresenceService.class,
     EconomyPlayerCacheService.class,
     CurrencyRegistryService.class,
     FileReaderService.class,
@@ -116,6 +118,7 @@ public final class BankDetailMenu {
   private static ItemService itemService;
   private static FileReaderService fileReaderService;
   private static ConfigItemService configItemService;
+  private static BankAccountPresenceService presenceService;
   private static FileConfiguration bankConfig;
   private static ItemStack infoTemplate;
   private static ItemStack depositTemplate;
@@ -148,6 +151,7 @@ public final class BankDetailMenu {
     itemService = services.getService(ItemService.class);
     fileReaderService = services.getService(FileReaderService.class);
     configItemService = NexEconomyPlugin.getNexLogicService().getService(ConfigItemService.class);
+    presenceService = services.getService(BankAccountPresenceService.class);
 
     bankConfig = loadConfig();
 
@@ -207,6 +211,17 @@ public final class BankDetailMenu {
   public static void open(@NotNull ServiceAccessor services, @NotNull ViewerRef viewer, @NotNull String bankId, @NotNull UUID ownerUuid, boolean ownerBank) {
     CONTEXTS.put(viewer.uniqueId(), new BankContext(bankId, ownerUuid, ownerBank));
     services.getService(MenuService.class).open(viewer, KEY);
+  }
+
+  public static void refreshIfOpen(UUID viewerUuid) {
+    if (viewerUuid == null) {
+      return;
+    }
+
+    Player player = Bukkit.getPlayer(viewerUuid);
+    if (player != null) {
+      refreshOpenView(player);
+    }
   }
 
   private static void populate(MenuPopulateContext ctx) {
@@ -277,7 +292,8 @@ public final class BankDetailMenu {
       if (cached != null && cached.context() != null
           && cached.context().bankId().equalsIgnoreCase(context.bankId())
           && cached.context().ownerUuid().equals(context.ownerUuid())
-          && cached.context().ownerBank() == context.ownerBank()) {
+          && cached.context().ownerBank() == context.ownerBank()
+          && canReuseCachedData(player.getUniqueId(), cached)) {
         return cached;
       }
 
@@ -344,6 +360,7 @@ public final class BankDetailMenu {
 
     BankData data = new BankData(
         context,
+        bankView.account() == null ? null : bankView.account().getId(),
         definition,
         currency,
         role,
@@ -1134,6 +1151,24 @@ public final class BankDetailMenu {
         .ifPresent(MenuView::requestRefresh);
   }
 
+  private static boolean canReuseCachedData(UUID viewerUuid, BankData cached) {
+    if (viewerUuid == null || cached == null || cached.accountId() == null) {
+      return false;
+    }
+
+    if (cached.context() != null && cached.context().ownerBank()) {
+      return true;
+    }
+
+    if (presenceService == null) {
+      return true;
+    }
+
+    return presenceService.bankAccountIdsIfTracked(viewerUuid)
+        .map(ids -> ids.contains(cached.accountId()))
+        .orElse(false);
+  }
+
   private static void scheduleRefresh(Player player) {
     if (player == null || plugin == null) return;
 
@@ -1281,7 +1316,7 @@ public final class BankDetailMenu {
       if (role != null) return role;
     }
 
-    return roles.get("member");
+    return null;
   }
 
   private static BankDefinition.RoleDefinition displayRole(BankData data) {
@@ -1473,6 +1508,7 @@ public final class BankDetailMenu {
 
   private record BankData(
       BankContext context,
+      UUID accountId,
       BankDefinition definition,
       CurrencyDefinition currency,
       BankDefinition.RoleDefinition role,
@@ -1504,6 +1540,7 @@ public final class BankDetailMenu {
                             long newUsageRefreshedAtMs) {
       return new BankData(
           context,
+          accountId,
           definition,
           currency,
           role,
