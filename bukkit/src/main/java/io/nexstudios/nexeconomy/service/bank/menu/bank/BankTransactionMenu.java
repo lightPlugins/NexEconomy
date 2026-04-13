@@ -27,7 +27,6 @@ import io.nexstudios.nexlogic.common.services.logging.LoggerService;
 import io.nexstudios.serviceregistry.di.Dependencies;
 import io.nexstudios.serviceregistry.di.ServiceAccessor;
 import lombok.NoArgsConstructor;
-import lombok.extern.slf4j.Slf4j;
 import net.kyori.adventure.text.Component;
 import net.kyori.adventure.text.minimessage.MiniMessage;
 import net.kyori.adventure.text.minimessage.tag.resolver.Placeholder;
@@ -58,7 +57,6 @@ import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentHashMap;
 
-@Slf4j
 @NoArgsConstructor
 @Dependencies({
     ItemService.class,
