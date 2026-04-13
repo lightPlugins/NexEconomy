@@ -4,11 +4,11 @@ import io.nexstudios.configservice.config.FileConfiguration;
 import io.nexstudios.configservice.config.ConfigurationSection;
 import io.nexstudios.configservice.service.singlereader.FileReaderService;
 import io.nexstudios.itemservice.bukkit.service.item.ItemService;
-import io.nexstudios.languageservice.service.component.ComponentService;
-import io.nexstudios.menuservice.common.api.MenuKey;
-import io.nexstudios.menuservice.common.api.MenuService;
-import io.nexstudios.menuservice.common.api.ViewerRef;
+import io.nexstudios.languageservice.service.language.LanguageService;
+import io.nexstudios.languageservice.service.path.StringPathService;
+import io.nexstudios.menuservice.common.api.*;
 import io.nexstudios.menuservice.common.api.builder.MenuDefinitionBuilder;
+import io.nexstudios.menuservice.common.api.interaction.ClickAction;
 import io.nexstudios.menuservice.common.api.interaction.InteractionPolicies;
 import io.nexstudios.menuservice.common.api.item.MenuItem;
 import io.nexstudios.menuservice.common.api.item.PlannedMenuItemSupplier;
@@ -40,6 +40,8 @@ import net.kyori.adventure.text.minimessage.MiniMessage;
 import net.kyori.adventure.text.minimessage.tag.resolver.Placeholder;
 import net.kyori.adventure.text.minimessage.tag.resolver.TagResolver;
 import net.kyori.adventure.text.serializer.legacy.LegacyComponentSerializer;
+import net.kyori.adventure.text.serializer.plain.PlainTextComponentSerializer;
+import org.bukkit.inventory.meta.ItemMeta;
 import org.bukkit.Bukkit;
 import org.bukkit.Material;
 import org.bukkit.entity.Player;
@@ -59,8 +61,9 @@ import java.util.UUID;
 
 @Dependencies({
     ItemService.class,
+    LanguageService.class,
+    StringPathService.class,
     MenuService.class,
-    ComponentService.class,
     BankProviderService.class,
     CurrencyRegistryService.class,
     LoggerService.class,
@@ -85,6 +88,8 @@ public class BankOverviewMenu {
   private static ConfigItemService configItemService;
   private static FileReaderService fileReaderService;
   private static ItemService itemService;
+  private static LanguageService languageService;
+  private static StringPathService stringPathService;
   private static BankProviderService bankProvider;
   private static ItemStack backTemplate;
   private static List<BankExtraItemSupport.ExtraItemBinding> EXTRA_ITEMS = List.of();
@@ -96,6 +101,8 @@ public class BankOverviewMenu {
     accessor = services;
     fileReaderService = services.getService(FileReaderService.class);
     itemService = services.getService(ItemService.class);
+    languageService = services.getService(LanguageService.class);
+    stringPathService = services.getService(StringPathService.class);
     headService = NexEconomyPlugin.getNexLogicService().getService(HeadService.class);
     configItemService = NexEconomyPlugin.getNexLogicService().getService(ConfigItemService.class);
     bankProvider = services.getService(BankProviderService.class);
@@ -137,6 +144,7 @@ public class BankOverviewMenu {
 
           BankExtraItemSupport.populate(ctx, accessor, EXTRA_ITEMS, "bank-overview");
         })
+        .languageAware()
         .build();
 
     menuService.registry().register(def, DuplicateStrategy.REPLACE);
@@ -198,6 +206,7 @@ public class BankOverviewMenu {
           String balanceText = formatBalanceText(balanceAmount, currencyDefinition, currency);
 
           entries.add(new BankEntry(
+              viewerUuid,
               ref.bankIdLower(),
               ref.ownerUuid(),
               category,
@@ -256,8 +265,8 @@ public class BankOverviewMenu {
 
   private static ItemStack renderBankPlaceholder(FileConfiguration bankConfig,
                                                   ItemStack template,
-                                                  BankEntry entry) {
-    String rawName = bankConfig.getString("items.bank-entry.display-name", entry.displayName());
+                                                  BankEntry entry
+  ) {
     TagResolver resolver = TagResolver.resolver(List.of(
         Placeholder.parsed("bank-name", entry.bankName()),
         Placeholder.parsed("display-name", entry.displayName()),
@@ -268,13 +277,22 @@ public class BankOverviewMenu {
         Placeholder.parsed("currency", entry.currency())
     ));
 
-    return itemService.builder(template.clone())
+    String rawName = bankConfig.getString("items.bank-entry.display-name", entry.displayName());
+
+    Player player = Bukkit.getPlayer(entry.viewerUuid());
+    if(player == null) {
+      logger.logger().severe("Failed to render bank entry for viewer " + entry.viewerUuid() + " because player is not online");
+    }
+
+    ItemStack built = itemService.builder(template.clone())
         .name(MiniMessage.miniMessage().deserialize(rawName, resolver))
         .lore(l -> {
           l.tagResolver(resolver);
           l.build();
         })
         .build();
+
+    return localizeBuiltItem(player, built, resolver);
   }
 
   private static PageControlButton buildSortControlButton(ItemStack template,
@@ -312,27 +330,83 @@ public class BankOverviewMenu {
           modeComponents.add(MiniMessage.miniMessage().deserialize(colorPrefix + label));
         }
 
-        ItemStack stack = itemService.builder(template.clone())
-            .lore(l ->  {
-              l.replaceToken("#modes#", modeComponents);
-              l.build();
-            })
-            .build();
+        ItemStack stack = itemService.builder(template.clone()).build();
 
-        return MenuItem.of(stack);
+        Player player = Bukkit.getPlayer(ctx.viewer().uniqueId());
+        stack = localizeBuiltItem(player, stack, TagResolver.empty());
+
+        return MenuItem.of(replaceModesLore(stack, modeComponents));
       }
+
 
       @Override
       public void onClick(ClickContext ctx) {
-        if (ctx.action() == io.nexstudios.menuservice.common.api.interaction.ClickAction.RIGHT_CLICK) {
+        if (ctx.action() == ClickAction.RIGHT_CLICK) {
           ctx.stateStore().cycleToPreviousMode(ctx.viewer(), ctx.menuKey(), ctx.areaId(), ctx.control());
-        } else if (ctx.action() == io.nexstudios.menuservice.common.api.interaction.ClickAction.LEFT_CLICK) {
+        } else if (ctx.action() == ClickAction.LEFT_CLICK) {
           ctx.stateStore().cycleToNextMode(ctx.viewer(), ctx.menuKey(), ctx.areaId(), ctx.control());
         }
 
         ctx.requestAreaRefresh();
       }
     };
+  }
+
+  private static ItemStack replaceModesLore(ItemStack stack, List<Component> modeComponents) {
+    if (stack == null || modeComponents == null || modeComponents.isEmpty()) {
+      return stack;
+    }
+
+    ItemStack out = stack.clone();
+    ItemMeta meta = out.getItemMeta();
+    if (meta == null || !meta.hasLore()) {
+      return out;
+    }
+
+    List<Component> lore = meta.lore();
+    if (lore == null || lore.isEmpty()) {
+      return out;
+    }
+
+    List<Component> replaced = new ArrayList<>(lore.size() + modeComponents.size());
+    boolean changed = false;
+
+    for (Component line : lore) {
+      if (line == null) {
+        replaced.add(null);
+        continue;
+      }
+
+      String plain = PlainTextComponentSerializer.plainText().serialize(line).trim();
+      if ("#modes#".equals(plain) || "modes".equalsIgnoreCase(plain)) {
+        replaced.addAll(modeComponents);
+        changed = true;
+      } else {
+        replaced.add(line);
+      }
+    }
+
+    if (!changed) {
+      return out;
+    }
+
+    meta.lore(replaced);
+    out.setItemMeta(meta);
+    return out;
+  }
+
+  private static ItemStack localizeBuiltItem(Player player, ItemStack stack, TagResolver tagResolver) {
+    if (stack == null || player == null || languageService == null || stringPathService == null) {
+      return stack;
+    }
+
+    String languageId = languageService.getLanguage(player);
+    if (languageId == null || languageId.isBlank()) {
+      return stack;
+    }
+
+    MenuTextResolver resolver = MenuLocalizationSupport.textResolver(stringPathService, languageId);
+    return MenuLocalizationSupport.localizeItem(stack, MenuLocalizationOptions.of(), resolver, tagResolver);
   }
 
   private static PageSortControl<BankEntry> buildSortControl(FileConfiguration bankConfig,
@@ -527,6 +601,7 @@ public class BankOverviewMenu {
     return LegacyComponentSerializer.legacySection().serialize(MiniMessage.miniMessage().deserialize(value));
   }
 
+
   private enum Category {
     OWN_BANK("Owner"),
     MEMBER_BANK("Member");
@@ -543,6 +618,7 @@ public class BankOverviewMenu {
   }
 
   private record BankEntry(
+      UUID viewerUuid,
       String bankName,
       UUID ownerUuid,
       Category category,
