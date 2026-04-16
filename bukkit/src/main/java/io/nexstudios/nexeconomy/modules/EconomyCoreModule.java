@@ -3,7 +3,6 @@ package io.nexstudios.nexeconomy.modules;
 import io.nexstudios.nexeconomy.provider.VaultEconomyBridgeService;
 import io.nexstudios.nexeconomy.service.economy.*;
 import io.nexstudios.nexeconomy.service.economy.leaderboard.EconomyLeaderboardService;
-import io.nexstudios.nexeconomy.service.economy.listener.EconomyPlayerListener;
 import io.nexstudios.nexeconomy.service.economy.repo.EconomyRepository;
 import io.nexstudios.nexeconomy.service.migration.MigrationService;
 import io.nexstudios.nexeconomy.service.migration.impl.VaultEconomyMigrationImporter;
@@ -23,7 +22,6 @@ public final class EconomyCoreModule implements ServiceModule {
     services.register(EconomyPlayerCacheService.class, EconomyPlayerCacheService.class);
     services.register(EconomyRedisSyncService.class, EconomyRedisSyncService.class);
     services.register(EconomyFlushService.class, EconomyFlushService.class);
-    services.register(EconomyPlayerListener.class, EconomyPlayerListener.class);
     services.register(EconomyService.class, EconomyService.class);
     services.register(VaultEconomyBridgeService.class, VaultEconomyBridgeService.class);
     services.register(EconomyLeaderboardService.class, EconomyLeaderboardService.class);

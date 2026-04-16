@@ -8,13 +8,11 @@ import io.nexstudios.framework.paper.NexPaperPlugin;
 import io.nexstudios.itemservice.bukkit.ItemServiceModule;
 import io.nexstudios.languageservice.LanguageServiceModule;
 import io.nexstudios.languageservice.service.language.LanguageService;
-import io.nexstudios.menuservice.bukkit.service.menu.MenuServiceModule;
 import io.nexstudios.nexeconomy.command.*;
 import io.nexstudios.nexeconomy.modules.BankCoreModule;
 import io.nexstudios.nexeconomy.modules.EconomyCoreModule;
 import io.nexstudios.nexeconomy.service.bank.interest.BankInterestService;
 import io.nexstudios.nexeconomy.service.bank.listener.BankPlayerListener;
-import io.nexstudios.nexeconomy.service.bank.menu.register.RegisterMenuService;
 import io.nexstudios.nexeconomy.service.bank.sync.BankRedisSyncService;
 import io.nexstudios.nexeconomy.service.economy.EconomyFlushService;
 import io.nexstudios.nexeconomy.service.economy.EconomyRedisSyncService;
@@ -80,10 +78,6 @@ public class NexEconomyPlugin extends NexPaperPlugin {
 
     // init language files
     services().getService(LanguageService.class).reload();
-
-    // install Menu API / Registry
-    services().install(new MenuServiceModule(this));
-    services().register(RegisterMenuService.class, RegisterMenuService.class).loadMenus();
 
     // register commands
     services().getService(CommandService.class).registerAll(

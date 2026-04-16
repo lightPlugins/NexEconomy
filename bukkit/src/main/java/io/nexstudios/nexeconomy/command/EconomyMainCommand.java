@@ -10,6 +10,8 @@ import io.nexstudios.nexeconomy.command.suggestions.PlayerSuggestion;
 import io.nexstudios.nexeconomy.definition.AmountNotation;
 import io.nexstudios.nexeconomy.definition.CurrencyDefinition;
 import io.nexstudios.nexeconomy.definition.CurrencyType;
+import io.nexstudios.nexeconomy.definition.CurrencyType;
+import io.nexstudios.nexeconomy.service.domain.EcoPlayer;
 import io.nexstudios.nexeconomy.service.economy.leaderboard.EconomyLeaderboardService;
 import io.nexstudios.nexeconomy.service.economy.EconomyService;
 import io.nexstudios.nexeconomy.definition.MantissaAmount;
@@ -87,6 +89,23 @@ public final class EconomyMainCommand implements Service {
       return 0;
     }
 
+    // Fast synchronous path via EcoPlayer cache
+    EcoPlayer eco = EcoPlayer.of(player);
+    if (eco != null) {
+      MantissaAmount amount = def.type() == CurrencyType.VAULT
+          ? eco.vault().balance(def.id())
+          : eco.virtual().balance(def.id());
+      String shown = formatHuman(amount, def);
+      player.sendMessage(componentService.builder(player, "currency.balance", "NotDefined", true)
+          .resolver(TagResolver.resolver(
+              Placeholder.parsed("amount", shown),
+              Placeholder.parsed("currency", def.symbolPlural())
+          ))
+          .build());
+      return 1;
+    }
+
+    // Async fallback (loading still in progress)
     economy.balance(player, def.id()).thenAccept(amount -> {
       String shown = formatHuman(amount, def);
       player.sendMessage(componentService.builder(player, "currency.balance", "NotDefined", true)
@@ -124,6 +143,24 @@ public final class EconomyMainCommand implements Service {
       return 0;
     }
 
+    // Fast synchronous path via EcoPlayer cache
+    EcoPlayer eco = EcoPlayer.of(targetPlayer);
+    if (eco != null) {
+      MantissaAmount amount = def.type() == CurrencyType.VAULT
+          ? eco.vault().balance(def.id())
+          : eco.virtual().balance(def.id());
+      String shown = formatHuman(amount, def);
+      player.sendMessage(componentService.builder(player, "currency.balance-other", "NotDefined", true)
+          .resolver(TagResolver.resolver(
+              Placeholder.parsed("target", targetPlayer.getName()),
+              Placeholder.parsed("amount", shown),
+              Placeholder.parsed("currency", def.symbolPlural())
+          ))
+          .build());
+      return 1;
+    }
+
+    // Async fallback
     economy.balance(targetPlayer, def.id()).thenAccept(amount -> {
       String shown = formatHuman(amount, def);
       player.sendMessage(componentService.builder(player, "currency.balance-other", "NotDefined", true)
@@ -163,7 +200,7 @@ public final class EconomyMainCommand implements Service {
 
     Optional<EconomyLeaderboardService.SnapshotView> viewOpt = leaderboard.getTop(cur, 10);
     if (viewOpt.isEmpty()) {
-      // CRITICAL FIX: Send "loading" message instead of error, then wait for async loading
+      // Send "loading" message instead of error, then wait for async loading
       player.sendMessage(componentService.builder(player, "currency.baltop.loading", "NotDefined", true)
           .resolver(TagResolver.resolver(Placeholder.parsed("currency", def.symbolPlural())))
           .build());
@@ -307,9 +344,14 @@ public final class EconomyMainCommand implements Service {
       return 0;
     }
 
-    economy.set(targetPlayer, def.id(), parsed).thenAccept(ok -> {
-      if (!ok) return;
-
+    // Fast synchronous path via EcoPlayer cache
+    EcoPlayer eco = EcoPlayer.of(targetPlayer);
+    if (eco != null) {
+      if (def.type() == CurrencyType.VAULT) {
+        eco.vault().set(def.id(), parsed);
+      } else {
+        eco.virtual().set(def.id(), parsed);
+      }
       String shown = AmountNotation.formatShort(parsed, def.fractionDigits());
       player.sendMessage(componentService.builder(player, "currency.set", "NotDefined", true)
           .resolver(TagResolver.resolver(
@@ -318,7 +360,6 @@ public final class EconomyMainCommand implements Service {
               Placeholder.parsed("currency", def.symbolPlural())
           ))
           .build());
-
       targetPlayer.sendMessage(componentService.builder(targetPlayer, "currency.set-other", "NotDefined", true)
           .resolver(TagResolver.resolver(
               Placeholder.parsed("player", player.getName()),
@@ -326,6 +367,30 @@ public final class EconomyMainCommand implements Service {
               Placeholder.parsed("currency", def.symbolPlural())
           ))
           .build());
+      return 1;
+    }
+
+    // Async fallback
+    economy.set(targetPlayer, def.id(), parsed).thenAccept(ok -> {
+      if (!ok) return;
+      String shown = AmountNotation.formatShort(parsed, def.fractionDigits());
+      player.sendMessage(componentService.builder(player, "currency.set", "NotDefined", true)
+          .resolver(TagResolver.resolver(
+              Placeholder.parsed("target", targetPlayer.getName()),
+              Placeholder.parsed("amount", shown),
+              Placeholder.parsed("currency", def.symbolPlural())
+          ))
+          .build());
+      targetPlayer.sendMessage(componentService.builder(targetPlayer, "currency.set-other", "NotDefined", true)
+          .resolver(TagResolver.resolver(
+              Placeholder.parsed("player", player.getName()),
+              Placeholder.parsed("amount", shown),
+              Placeholder.parsed("currency", def.symbolPlural())
+          ))
+          .build());
+    }).exceptionally(ex -> {
+      sendEconomyError(player, ex);
+      return null;
     });
 
     return 1;
@@ -358,7 +423,71 @@ public final class EconomyMainCommand implements Service {
       return 0;
     }
 
-    // Max-Balance enforcement: only add remaining until max is reached
+    // Fast synchronous path via EcoPlayer cache
+    EcoPlayer eco = EcoPlayer.of(targetPlayer);
+    if (eco != null) {
+      MantissaAmount added = def.type() == CurrencyType.VAULT
+          ? eco.vault().add(def.id(), parsed)   // handles max-balance cap internally
+          : eco.virtual().add(def.id(), parsed);
+
+      String requestedShown = AmountNotation.formatShort(parsed, def.fractionDigits());
+      String addedShown = AmountNotation.formatShort(added, def.fractionDigits());
+
+      if (added.compareTo(MantissaAmount.zero()) == 0) {
+        // Fully capped – nothing was added
+        String maxShown = def.maxBalance() != null ? formatHuman(MantissaAmount.of(def.maxBalance(), 0), def) : "∞";
+        player.sendMessage(componentService.builder(player, "currency.max-balance.reached-admin", "NotDefined", true)
+            .resolver(TagResolver.resolver(
+                Placeholder.parsed("target", targetPlayer.getName()),
+                Placeholder.parsed("currency", def.symbolPlural()),
+                Placeholder.parsed("max", maxShown)
+            ))
+            .build());
+        return 1;
+      }
+
+      if (added.compareTo(parsed) < 0) {
+        // Partially capped
+        String maxShown = def.maxBalance() != null ? formatHuman(MantissaAmount.of(def.maxBalance(), 0), def) : "∞";
+        player.sendMessage(componentService.builder(player, "currency.max-balance.capped-admin", "NotDefined", true)
+            .resolver(TagResolver.resolver(
+                Placeholder.parsed("target", targetPlayer.getName()),
+                Placeholder.parsed("currency", def.symbolPlural()),
+                Placeholder.parsed("requested", requestedShown),
+                Placeholder.parsed("added", addedShown),
+                Placeholder.parsed("max", maxShown)
+            ))
+            .build());
+        targetPlayer.sendMessage(componentService.builder(targetPlayer, "currency.max-balance.capped-target", "NotDefined", true)
+            .resolver(TagResolver.resolver(
+                Placeholder.parsed("player", player.getName()),
+                Placeholder.parsed("currency", def.symbolPlural()),
+                Placeholder.parsed("requested", requestedShown),
+                Placeholder.parsed("added", addedShown),
+                Placeholder.parsed("max", maxShown)
+            ))
+            .build());
+        return 1;
+      }
+
+      player.sendMessage(componentService.builder(player, "currency.deposit", "NotDefined", true)
+          .resolver(TagResolver.resolver(
+              Placeholder.parsed("target", targetPlayer.getName()),
+              Placeholder.parsed("amount", addedShown),
+              Placeholder.parsed("currency", def.symbolPlural())
+          ))
+          .build());
+      targetPlayer.sendMessage(componentService.builder(targetPlayer, "currency.deposit-other", "NotDefined", true)
+          .resolver(TagResolver.resolver(
+              Placeholder.parsed("target", player.getName()),
+              Placeholder.parsed("amount", addedShown),
+              Placeholder.parsed("currency", def.symbolPlural())
+          ))
+          .build());
+      return 1;
+    }
+
+    // Async fallback
     economy.balance(targetPlayer, def.id()).thenCompose(current -> {
       MantissaAmount allowed = capDeltaToMax(def, current, parsed);
       if (allowed.compareTo(MantissaAmount.zero()) == 0) {
@@ -390,7 +519,6 @@ public final class EconomyMainCommand implements Service {
                   Placeholder.parsed("max", maxShown)
               ))
               .build());
-
           targetPlayer.sendMessage(componentService.builder(targetPlayer, "currency.max-balance.capped-target", "NotDefined", true)
               .resolver(TagResolver.resolver(
                   Placeholder.parsed("player", player.getName()),
@@ -420,6 +548,9 @@ public final class EconomyMainCommand implements Service {
             .build());
         return true;
       });
+    }).exceptionally(ex -> {
+      sendEconomyError(player, ex);
+      return null;
     });
 
     return 1;
@@ -469,9 +600,45 @@ public final class EconomyMainCommand implements Service {
       return 0;
     }
 
-    economy.remove(targetPlayer, def.id(), parsed).thenAccept(ok -> {
-      String shown = AmountNotation.formatShort(parsed, def.fractionDigits());
+    String shown = AmountNotation.formatShort(parsed, def.fractionDigits());
 
+    // Fast synchronous path via EcoPlayer cache
+    EcoPlayer eco = EcoPlayer.of(targetPlayer);
+    if (eco != null) {
+      boolean ok = def.type() == CurrencyType.VAULT
+          ? eco.vault().remove(def.id(), parsed)
+          : eco.virtual().remove(def.id(), parsed);
+
+      if (!ok) {
+        player.sendMessage(componentService.builder(player, "currency.payment.pay-failed", "NotDefined", true)
+            .resolver(TagResolver.resolver(
+                Placeholder.parsed("target", targetPlayer.getName()),
+                Placeholder.parsed("amount", shown),
+                Placeholder.parsed("currency", def.symbolPlural())
+            ))
+            .build());
+        return 1;
+      }
+
+      player.sendMessage(componentService.builder(player, "currency.withdraw", "NotDefined", true)
+          .resolver(TagResolver.resolver(
+              Placeholder.parsed("target", targetPlayer.getName()),
+              Placeholder.parsed("amount", shown),
+              Placeholder.parsed("currency", def.symbolPlural())
+          ))
+          .build());
+      targetPlayer.sendMessage(componentService.builder(targetPlayer, "currency.withdraw-other", "NotDefined", true)
+          .resolver(TagResolver.resolver(
+              Placeholder.parsed("player", player.getName()),
+              Placeholder.parsed("amount", shown),
+              Placeholder.parsed("currency", def.symbolPlural())
+          ))
+          .build());
+      return 1;
+    }
+
+    // Async fallback
+    economy.remove(targetPlayer, def.id(), parsed).thenAccept(ok -> {
       if (!ok) {
         player.sendMessage(componentService.builder(player, "currency.payment.pay-failed", "NotDefined", true)
             .resolver(TagResolver.resolver(
@@ -498,6 +665,9 @@ public final class EconomyMainCommand implements Service {
               Placeholder.parsed("currency", def.symbolPlural())
           ))
           .build());
+    }).exceptionally(ex -> {
+      sendEconomyError(player, ex);
+      return null;
     });
 
     return 1;
@@ -515,5 +685,24 @@ public final class EconomyMainCommand implements Service {
   private static String formatHuman(MantissaAmount amount, CurrencyDefinition def) {
     if (def == null) return "0";
     return AmountNotation.formatShort(amount, def.fractionDigits());
+  }
+
+  private void sendEconomyError(Player player, Throwable ex) {
+    if (player == null) return;
+
+    Throwable root = ex;
+    for (int i = 0; i < 6 && root != null && root.getCause() != null; i++) {
+      root = root.getCause();
+    }
+
+    String msg = root == null
+        ? "Unknown error"
+        : (root.getMessage() == null || root.getMessage().isBlank()
+            ? root.getClass().getSimpleName()
+            : root.getMessage());
+
+    player.sendMessage(componentService.builder(player, "general.response-error", "NotDefined", true)
+        .resolver(TagResolver.resolver(Placeholder.parsed("error", msg)))
+        .build());
   }
 }

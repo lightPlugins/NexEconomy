@@ -6,7 +6,6 @@ import io.nexstudios.commandservice.service.commands.annotations.CommandRoot;
 import io.nexstudios.commandservice.service.commands.annotations.Suggest;
 import io.nexstudios.commandservice.service.commands.source.NexPaperCommandSource;
 import io.nexstudios.languageservice.service.component.ComponentService;
-import io.nexstudios.menuservice.common.api.ViewerRef;
 import io.nexstudios.nexeconomy.command.suggestions.*;
 import io.nexstudios.nexeconomy.definition.AmountNotation;
 import io.nexstudios.nexeconomy.definition.CurrencyDefinition;
@@ -16,11 +15,11 @@ import io.nexstudios.nexeconomy.service.bank.BankService;
 import io.nexstudios.nexeconomy.service.bank.cache.BankAccountCacheService;
 import io.nexstudios.nexeconomy.service.bank.definition.BankDefinition;
 import io.nexstudios.nexeconomy.service.bank.level.BankLevelService;
-import io.nexstudios.nexeconomy.service.bank.menu.bank.BankOverviewMenu;
 import io.nexstudios.nexeconomy.service.bank.repo.BankRepositoryService;
 import io.nexstudios.nexeconomy.service.bank.sync.BankRedisSyncService;
 import io.nexstudios.nexeconomy.service.bank.repo.InviteLookupRow;
 import io.nexstudios.nexeconomy.service.bank.transaction.BankTransactionService;
+import io.nexstudios.nexeconomy.service.domain.EcoPlayer;
 import io.nexstudios.nexeconomy.service.economy.EconomyService;
 import io.nexstudios.nexeconomy.service.registry.CurrencyRegistryService;
 import io.nexstudios.dialogservice.api.ConfirmDialog;
@@ -106,7 +105,6 @@ public final class EconomyBankCommand implements Service {
     Player sender = (Player) source.sender();
     if (sender == null) return 0;
 
-    BankOverviewMenu.open(services, ViewerRef.of(sender.getUniqueId(), sender.getName()));
     return 1;
   }
 
@@ -123,6 +121,27 @@ public final class EconomyBankCommand implements Service {
 
     UUID ownerUuid = sender.getUniqueId();
 
+    // Fast synchronous path via EcoPlayer cache
+    EcoPlayer eco = EcoPlayer.of(sender);
+    MantissaAmount cachedBalance = eco != null ? eco.banks().balance(bankId) : null;
+    if (cachedBalance != null) {
+      resolveCurrency(bankId).thenAccept(cur -> {
+        String shown = AmountNotation.formatShort(cachedBalance, cur == null ? 0 : cur.fractionDigits());
+        sender.sendMessage(components.builder(sender, "bank.balance.self", "NotDefined", true)
+            .resolver(TagResolver.resolver(
+                Placeholder.parsed("bank", bankId),
+                Placeholder.parsed("amount", shown),
+                Placeholder.parsed("currency", cur == null ? "" : cur.symbolPlural())
+            ))
+            .build());
+      }).exceptionally(ex -> {
+        sendBankError(sender, ex);
+        return null;
+      });
+      return 1;
+    }
+
+    // Async fallback
     bankService.balance(bankId, ownerUuid).thenCompose(bal ->
         resolveCurrency(bankId).thenApply(cur -> new BalanceView(bal, cur))
     ).thenAccept(view -> {
@@ -1118,7 +1137,6 @@ public final class EconomyBankCommand implements Service {
     if (id.isBlank()) return CompletableFuture.completedFuture(null);
 
     return bankService.bank(id).thenApply(opt -> opt.orElse(null)).thenApply(def -> {
-      if (def == null) return null;
       return currencies.currency(def.currencyIdLower());
     });
   }
@@ -1262,9 +1280,50 @@ public final class EconomyBankCommand implements Service {
 
     UUID ownerUuid = sender.getUniqueId();
 
+    // Fast synchronous path via EcoPlayer cache
+    EcoPlayer eco = EcoPlayer.of(sender);
+    if (eco != null && eco.banks().isCached(bankId)) {
+      bankService.bank(bankId).thenAccept(bankDefOpt -> {
+        if (bankDefOpt.isEmpty()) {
+          sender.sendMessage(components.builder(sender, "bank.errors.bank-not-available", "NotDefined", true).build());
+          return;
+        }
+        BankDefinition bankDef = bankDefOpt.get();
+        String bankName = bankDef.nameMiniMessage();
+        BankDefinition.RoleDefinition role = resolveOwnerRole(bankDef);
+        if (role != null && !role.canUpgrade()) {
+          sender.sendMessage(components.builder(sender, "bank.level.role-cannot-upgrade", "NotDefined", true)
+              .resolver(TagResolver.resolver(Placeholder.parsed("bank", bankName)))
+              .build());
+          return;
+        }
+
+        int currentLevel = eco.banks().level(bankId);
+        int maxLevel = levelService.getMaxLevel(bankId);
+        MantissaAmount maxBalance = levelService.getMaxBalance(bankId, currentLevel);
+        MantissaAmount nextCost = currentLevel < maxLevel
+            ? levelService.getUpgradeCost(bankId, currentLevel + 1)
+            : MantissaAmount.zero();
+
+        sender.sendMessage(components.builder(sender, "bank.level.current", "NotDefined", true)
+            .resolver(TagResolver.resolver(
+                Placeholder.parsed("bank", bankName),
+                Placeholder.parsed("level", String.valueOf(currentLevel)),
+                Placeholder.parsed("max-balance", AmountNotation.formatShort(maxBalance, 2)),
+                Placeholder.parsed("next-level", currentLevel >= maxLevel ? "MAX" : String.valueOf(currentLevel + 1)),
+                Placeholder.parsed("next-cost", AmountNotation.formatShort(nextCost, 2))
+            ))
+            .build());
+      }).exceptionally(ex -> {
+        sendBankError(sender, ex);
+        return null;
+      });
+      return 1;
+    }
+
+    // Async fallback
     bankService.getOrCreateAccount(bankId, ownerUuid).thenCompose(bankAccount -> {
       UUID bankAccountId = bankAccount.getId();
-
       return bankService.bank(bankId).thenCompose(bankDef -> {
         if (bankDef.isEmpty()) {
           sender.sendMessage(components.builder(sender, "bank.errors.bank-not-available", "NotDefined", true).build());
@@ -1283,21 +1342,17 @@ public final class EconomyBankCommand implements Service {
         return levelService.getLevel(bankAccountId).thenCompose(currentLevel -> {
           int maxLevel = levelService.getMaxLevel(bankId);
           MantissaAmount maxBalance = levelService.getMaxBalance(bankId, currentLevel);
-          MantissaAmount nextCost = currentLevel < maxLevel 
+          MantissaAmount nextCost = currentLevel < maxLevel
               ? levelService.getUpgradeCost(bankId, currentLevel + 1)
               : MantissaAmount.zero();
-
-          String shown = AmountNotation.formatShort(maxBalance, 2);
-          String costShown = AmountNotation.formatShort(nextCost, 2);
-          String nextLevel = currentLevel >= maxLevel ? "MAX" : String.valueOf(currentLevel + 1);
 
           sender.sendMessage(components.builder(sender, "bank.level.current", "NotDefined", true)
               .resolver(TagResolver.resolver(
                   Placeholder.parsed("bank", bankName),
                   Placeholder.parsed("level", String.valueOf(currentLevel)),
-                  Placeholder.parsed("max-balance", shown),
-                  Placeholder.parsed("next-level", nextLevel),
-                  Placeholder.parsed("next-cost", costShown)
+                  Placeholder.parsed("max-balance", AmountNotation.formatShort(maxBalance, 2)),
+                  Placeholder.parsed("next-level", currentLevel >= maxLevel ? "MAX" : String.valueOf(currentLevel + 1)),
+                  Placeholder.parsed("next-cost", AmountNotation.formatShort(nextCost, 2))
               ))
               .build());
 
@@ -1325,25 +1380,40 @@ public final class EconomyBankCommand implements Service {
 
     UUID ownerUuid = sender.getUniqueId();
 
-    bankService.getOrCreateAccount(bankId, ownerUuid).thenCompose(bankAccount -> {
-      UUID bankAccountId = bankAccount.getId();
+    // Resolve bank definition first (sync for definition, then handle level)
+    bankService.bank(bankId).thenCompose(bankDefOpt -> {
+      if (bankDefOpt.isEmpty()) {
+        sender.sendMessage(components.builder(sender, "bank.errors.bank-not-available", "NotDefined", true).build());
+        return CompletableFuture.completedFuture(null);
+      }
 
-      return bankService.bank(bankId).thenCompose(bankDef -> {
-        if (bankDef.isEmpty()) {
-          sender.sendMessage(components.builder(sender, "bank.errors.bank-not-available", "NotDefined", true).build());
-          return CompletableFuture.completedFuture(null);
-        }
+      BankDefinition bankDef = bankDefOpt.get();
+      String bankName = bankDef.nameMiniMessage();
+      BankDefinition.RoleDefinition role = resolveOwnerRole(bankDef);
+      if (role != null && !role.canUpgrade()) {
+        sender.sendMessage(components.builder(sender, "bank.level.role-cannot-upgrade", "NotDefined", true)
+            .resolver(TagResolver.resolver(Placeholder.parsed("bank", bankName)))
+            .build());
+        return CompletableFuture.completedFuture(null);
+      }
 
-        String bankName = bankDef.get().nameMiniMessage();
-        BankDefinition.RoleDefinition role = resolveOwnerRole(bankDef.get());
-        if (role != null && !role.canUpgrade()) {
-          sender.sendMessage(components.builder(sender, "bank.level.role-cannot-upgrade", "NotDefined", true)
-              .resolver(TagResolver.resolver(Placeholder.parsed("bank", bankName)))
-              .build());
-          return CompletableFuture.completedFuture(null);
-        }
+      // Resolve account ID: from cache (sync) or from DB (async)
+      EcoPlayer eco = EcoPlayer.of(sender);
+      UUID cachedAccountId = eco != null ? eco.banks().accountId(bankId) : null;
 
-        return levelService.getLevel(bankAccountId).thenCompose(currentLevel -> {
+      CompletableFuture<UUID> accountIdFuture = cachedAccountId != null
+          ? CompletableFuture.completedFuture(cachedAccountId)
+          : bankService.getOrCreateAccount(bankId, ownerUuid).thenApply(acc -> acc.getId());
+
+      // Resolve current level: from cache (sync) or from service (async)
+      int cachedLevel = eco != null && eco.banks().isCached(bankId) ? eco.banks().level(bankId) : -1;
+
+      return accountIdFuture.thenCompose(bankAccountId -> {
+        CompletableFuture<Integer> levelFuture = cachedLevel >= 0
+            ? CompletableFuture.completedFuture(cachedLevel)
+            : levelService.getLevel(bankAccountId);
+
+        return levelFuture.thenCompose(currentLevel -> {
           int targetLevel = currentLevel + 1;
 
           return levelService.canUpgrade(bankAccountId, bankId, targetLevel).thenCompose(canUpgradeCheck -> {
@@ -1357,12 +1427,10 @@ public final class EconomyBankCommand implements Service {
               return CompletableFuture.completedFuture(null);
             }
 
-
-
             MantissaAmount cost = levelService.getUpgradeCost(bankId, targetLevel);
 
-            // 1. Check permission first
-            String permission = bankDef.get().levels().stream()
+            // Check level permission
+            String permission = bankDef.levels().stream()
                 .filter(l -> l.level() == targetLevel)
                 .map(BankDefinition.LevelDefinition::permission)
                 .findFirst()
@@ -1370,12 +1438,12 @@ public final class EconomyBankCommand implements Service {
 
             if (permission != null && !permission.isEmpty() && !sender.hasPermission(permission)) {
               sender.sendMessage(components.builder(sender, "bank.level.permission-denied", "NotDefined", true)
-                  .resolver(TagResolver.resolver(Placeholder.parsed("bank",  bankName)))
+                  .resolver(TagResolver.resolver(Placeholder.parsed("bank", bankName)))
                   .build());
               return CompletableFuture.completedFuture(null);
             }
 
-            // 2. Deduct money from player (if enough available)
+            // Deduct currency then upgrade
             return resolveCurrency(bankId).thenCompose(currencyDef -> {
               if (currencyDef == null) {
                 sender.sendMessage(components.builder(sender, "bank.errors.internal", "NotDefined", true)
@@ -1396,7 +1464,6 @@ public final class EconomyBankCommand implements Service {
                   return CompletableFuture.completedFuture(null);
                 }
 
-                // 3. Upgrade the bank level (only if money was successfully deducted)
                 return levelService.upgrade(bankAccountId, targetLevel).thenApply(success -> {
                   if (!success) {
                     sender.sendMessage(components.builder(sender, "bank.errors.internal", "NotDefined", true)
@@ -1405,7 +1472,10 @@ public final class EconomyBankCommand implements Service {
                     return null;
                   }
 
-                  if (bankCache != null) {
+                  // Invalidate via EcoPlayer cache if available, else via direct cache ref
+                  if (eco != null) {
+                    eco.banks().invalidate(bankAccountId);
+                  } else if (bankCache != null) {
                     bankCache.invalidate(bankAccountId);
                   }
                   if (redisSync != null) {

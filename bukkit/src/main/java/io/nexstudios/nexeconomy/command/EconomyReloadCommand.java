@@ -8,7 +8,6 @@ import io.nexstudios.languageservice.service.language.LanguageService;
 import io.nexstudios.nexeconomy.service.bank.BankService;
 import io.nexstudios.nexeconomy.service.bank.cache.BankAccountCacheService;
 import io.nexstudios.nexeconomy.service.bank.interest.BankInterestService;
-import io.nexstudios.nexeconomy.service.bank.menu.register.RegisterMenuService;
 import io.nexstudios.nexeconomy.service.bank.registry.BankRegistryService;
 import io.nexstudios.nexeconomy.service.placeholder.EconomyPlaceholderService;
 import io.nexstudios.nexeconomy.service.registry.CurrencyRegistryService;
@@ -31,8 +30,7 @@ import org.bukkit.entity.Player;
     BankService.class,
     BankRegistryService.class,
     BankAccountCacheService.class,
-    BankInterestService.class,
-    RegisterMenuService.class,
+    BankInterestService.class
 })
 public class EconomyReloadCommand implements Service {
 
@@ -45,7 +43,6 @@ public class EconomyReloadCommand implements Service {
   private final BankRegistryService bankRegistry;
   private final BankAccountCacheService bankCache;
   private final BankInterestService bankInterestService;
-  private final RegisterMenuService registerMenuService;
 
   public EconomyReloadCommand(ServiceAccessor accessor) {
     this.componentService = accessor.getService(ComponentService.class);
@@ -57,7 +54,6 @@ public class EconomyReloadCommand implements Service {
     this.bankRegistry = accessor.getService(BankRegistryService.class);
     this.bankCache = accessor.getService(BankAccountCacheService.class);
     this.bankInterestService = accessor.getService(BankInterestService.class);
-    this.registerMenuService = accessor.getService(RegisterMenuService.class);
   }
 
   @Command(value = "reload", permission = "nexeconomy.admin")
@@ -74,7 +70,6 @@ public class EconomyReloadCommand implements Service {
     bankService.reload();
     bankService.ensureMissingUnlockedBanksForAllOnline();
     bankInterestService.reload();
-    registerMenuService.loadMenus();
 
     player.sendMessage(componentService.builder(player, "general.reload", "NotDefined", true).build());
     return 1;

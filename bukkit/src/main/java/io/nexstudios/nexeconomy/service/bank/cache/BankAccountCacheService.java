@@ -425,6 +425,22 @@ public final class BankAccountCacheService implements Service {
     return Math.min(value, MAX_CLEANUP_BATCH);
   }
 
+  /**
+   * Returns a snapshot of all cached {@link View} objects whose owner matches {@code ownerUuid}.
+   * The list may be incomplete if some accounts are still loading.
+   */
+  public java.util.List<View> snapshotByOwner(UUID ownerUuid) {
+    if (ownerUuid == null) return java.util.List.of();
+    java.util.List<View> result = new java.util.ArrayList<>();
+    for (Entry e : byKey.values()) {
+      if (e == null || e.view() == null || e.view().account() == null) continue;
+      if (ownerUuid.equals(e.view().account().getOwnerUuid())) {
+        result.add(e.view());
+      }
+    }
+    return java.util.List.copyOf(result);
+  }
+
   private static String normalize(String s) {
     return s == null ? "" : s.trim().toLowerCase(java.util.Locale.ROOT);
   }

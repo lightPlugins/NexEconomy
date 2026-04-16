@@ -1,8 +1,5 @@
 package io.nexstudios.nexeconomy.service.bank.cache;
 
-import io.nexstudios.nexeconomy.service.bank.menu.bank.BankDetailMenu;
-import io.nexstudios.nexeconomy.service.bank.menu.bank.BankLevelMenu;
-import io.nexstudios.nexeconomy.service.bank.menu.bank.BankMemberMenu;
 import io.nexstudios.nexeconomy.service.bank.repo.BankRepositoryService;
 import io.nexstudios.serviceregistry.di.Dependencies;
 import io.nexstudios.serviceregistry.di.Service;
@@ -177,10 +174,6 @@ public final class BankAccountPresenceService implements Service {
     if (cache != null) {
       cache.invalidate(bankAccountId);
     }
-
-    BankDetailMenu.refreshIfOpen(memberUuid);
-    BankLevelMenu.refreshIfOpen(memberUuid);
-    BankMemberMenu.refreshIfOpen(memberUuid);
   }
 
   public void onBankDeleted(UUID bankAccountId) {
