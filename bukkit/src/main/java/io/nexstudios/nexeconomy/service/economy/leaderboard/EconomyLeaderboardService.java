@@ -4,7 +4,7 @@ import io.nexstudios.configservice.config.FileConfiguration;
 import io.nexstudios.configservice.service.singlereader.FileReaderService;
 import io.nexstudios.nexeconomy.definition.MantissaAmount;
 import io.nexstudios.nexeconomy.service.economy.repo.EconomyRepository;
-import io.nexstudios.nexlogic.bukkit.services.entity.EconomyBalanceEntity;
+import io.nexstudios.nexlogic.bukkit.services.entity.nexeconomy.EconomyBalanceEntity;
 import io.nexstudios.nexlogic.common.services.logging.LoggerService;
 import io.nexstudios.serviceregistry.di.Dependencies;
 import io.nexstudios.serviceregistry.di.Service;

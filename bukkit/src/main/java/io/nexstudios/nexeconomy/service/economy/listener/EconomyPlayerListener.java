@@ -1,7 +1,7 @@
 package io.nexstudios.nexeconomy.service.economy.listener;
 
 import io.nexstudios.framework.paper.services.ServiceListener;
-import io.nexstudios.nexeconomy.service.domain.EcoPlayerRegistry;
+import io.nexstudios.nexeconomy.domain.EcoPlayerRegistry;
 import io.nexstudios.serviceregistry.di.Dependencies;
 import io.nexstudios.serviceregistry.di.ServiceAccessor;
 import org.bukkit.event.EventHandler;

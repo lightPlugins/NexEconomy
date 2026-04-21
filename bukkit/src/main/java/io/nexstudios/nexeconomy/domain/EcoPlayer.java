@@ -1,8 +1,8 @@
-package io.nexstudios.nexeconomy.service.domain;
+package io.nexstudios.nexeconomy.domain;
 
-import io.nexstudios.nexeconomy.service.domain.container.BankContainer;
-import io.nexstudios.nexeconomy.service.domain.container.VaultContainer;
-import io.nexstudios.nexeconomy.service.domain.container.VirtualContainer;
+import io.nexstudios.nexeconomy.domain.container.BankContainer;
+import io.nexstudios.nexeconomy.domain.container.VaultContainer;
+import io.nexstudios.nexeconomy.domain.container.VirtualContainer;
 import org.bukkit.entity.Player;
 import org.jetbrains.annotations.Nullable;
 
@@ -35,7 +35,7 @@ public final class EcoPlayer {
   private final VirtualContainer virtual;
   private final BankContainer banks;
 
-  EcoPlayer(UUID uuid, VaultContainer vault, VirtualContainer virtual, BankContainer banks) {
+  public EcoPlayer(UUID uuid, VaultContainer vault, VirtualContainer virtual, BankContainer banks) {
     this.uuid = uuid;
     this.vault = vault;
     this.virtual = virtual;

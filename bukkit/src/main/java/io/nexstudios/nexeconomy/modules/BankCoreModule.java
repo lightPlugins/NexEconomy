@@ -20,7 +20,7 @@ import io.nexstudios.nexeconomy.service.bank.sync.BankRedisSyncService;
 import io.nexstudios.nexeconomy.service.bank.sync.DefaultBankRedisSyncServiceService;
 import io.nexstudios.nexeconomy.service.bank.transaction.BankTransactionService;
 import io.nexstudios.nexeconomy.service.bank.transaction.DefaultBankTransactionService;
-import io.nexstudios.nexeconomy.service.domain.EcoPlayerRegistry;
+import io.nexstudios.nexeconomy.domain.EcoPlayerRegistry;
 import io.nexstudios.nexeconomy.service.economy.listener.EconomyPlayerListener;
 import io.nexstudios.serviceregistry.di.ServiceAccessor;
 import io.nexstudios.serviceregistry.di.ServiceModule;

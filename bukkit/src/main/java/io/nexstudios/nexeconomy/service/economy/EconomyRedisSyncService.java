@@ -5,7 +5,7 @@ import io.nexstudios.databaseservice.bukkit.service.api.pubsub.PubSubMessage;
 import io.nexstudios.databaseservice.bukkit.service.api.pubsub.PubSubSubscription;
 import io.nexstudios.databaseservice.bukkit.service.api.pubsub.RedisPubSubService;
 import io.nexstudios.framework.paper.services.plugin.PaperPluginService;
-import io.nexstudios.nexlogic.bukkit.services.entity.EconomyBalanceEntity;
+import io.nexstudios.nexlogic.bukkit.services.entity.nexeconomy.EconomyBalanceEntity;
 import io.nexstudios.nexlogic.common.services.logging.LoggerService;
 import io.nexstudios.nexeconomy.NexEconomyPlugin;
 import io.nexstudios.serviceregistry.di.Dependencies;

@@ -1,4 +1,4 @@
-package io.nexstudios.nexeconomy.service.domain.container;
+package io.nexstudios.nexeconomy.domain.container;
 
 import io.nexstudios.nexeconomy.definition.CurrencyDefinition;
 import io.nexstudios.nexeconomy.definition.CurrencyType;

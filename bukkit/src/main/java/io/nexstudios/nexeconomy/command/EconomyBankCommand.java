@@ -19,7 +19,7 @@ import io.nexstudios.nexeconomy.service.bank.repo.BankRepositoryService;
 import io.nexstudios.nexeconomy.service.bank.sync.BankRedisSyncService;
 import io.nexstudios.nexeconomy.service.bank.repo.InviteLookupRow;
 import io.nexstudios.nexeconomy.service.bank.transaction.BankTransactionService;
-import io.nexstudios.nexeconomy.service.domain.EcoPlayer;
+import io.nexstudios.nexeconomy.domain.EcoPlayer;
 import io.nexstudios.nexeconomy.service.economy.EconomyService;
 import io.nexstudios.nexeconomy.service.registry.CurrencyRegistryService;
 import io.nexstudios.dialogservice.api.ConfirmDialog;

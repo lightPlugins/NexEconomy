@@ -10,7 +10,7 @@ import io.nexstudios.nexeconomy.service.economy.repo.EconomyRepository;
 import io.nexstudios.nexeconomy.service.registry.CurrencyRegistryService;
 import io.nexstudios.databaseservice.bukkit.service.api.pubsub.PubSubHealth;
 import io.nexstudios.databaseservice.bukkit.service.api.pubsub.RedisPubSubService;
-import io.nexstudios.nexlogic.bukkit.services.entity.EconomyBalanceEntity;
+import io.nexstudios.nexlogic.bukkit.services.entity.nexeconomy.EconomyBalanceEntity;
 import io.nexstudios.serviceregistry.di.Dependencies;
 import io.nexstudios.serviceregistry.di.Service;
 import io.nexstudios.serviceregistry.di.ServiceAccessor;

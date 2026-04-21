@@ -53,7 +53,6 @@ public final class CurrencyRegistryService implements Service {
       if (id.isBlank()) continue;
 
       YamlConfiguration yml = YamlConfiguration.loadConfiguration(f);
-
       CurrencyType type = CurrencyType.parse(yml.getString("currency-type", "virtual"));
 
       CurrencyDefinition def = new CurrencyDefinition(
@@ -65,8 +64,8 @@ public final class CurrencyRegistryService implements Service {
           yml.getString("top-placeholder", "<dark_gray>● <yellow><bold><number><reset><gray># <dark_gray>● <yellow><name> <gray>- <yellow><amount> <gray><currency>"),
           clampFractionDigits(yml.getInt("fraction-digits", 0)),
           type,
-          readBigDecimal(yml, "start-balance", BigDecimal.ZERO),
-          readMaxBalanceHuman(yml, "max-balance", type, BigDecimal.valueOf(-1)),
+          readBigDecimal(yml),
+          readMaxBalanceHuman(yml, type, BigDecimal.valueOf(-1)),
           yml.getBoolean("payable", true)
       );
 
@@ -126,19 +125,19 @@ public final class CurrencyRegistryService implements Service {
     return Math.min(digits, 8);
   }
 
-  private static BigDecimal readBigDecimal(YamlConfiguration yml, String path, BigDecimal def) {
-    Object raw = yml.get(path);
-    if (raw == null) return def;
+  private static BigDecimal readBigDecimal(YamlConfiguration yml) {
+    Object raw = yml.get("start-balance");
+    if (raw == null) return BigDecimal.ZERO;
     try {
       if (raw instanceof Number n) return new BigDecimal(n.toString());
       return new BigDecimal(String.valueOf(raw).trim());
     } catch (Exception ignored) {
-      return def;
+      return BigDecimal.ZERO;
     }
   }
 
-  private static BigDecimal readMaxBalanceHuman(YamlConfiguration yml, String path, CurrencyType type, BigDecimal def) {
-    Object raw = yml.get(path);
+  private static BigDecimal readMaxBalanceHuman(YamlConfiguration yml, CurrencyType type, BigDecimal def) {
+    Object raw = yml.get("max-balance");
     if (raw == null) return def;
 
     // Allow numeric or suffix notation like "90b" / "90zz"

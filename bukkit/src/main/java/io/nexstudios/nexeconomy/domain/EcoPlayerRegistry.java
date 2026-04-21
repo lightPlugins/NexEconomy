@@ -1,9 +1,9 @@
-package io.nexstudios.nexeconomy.service.domain;
+package io.nexstudios.nexeconomy.domain;
 
 import io.nexstudios.nexeconomy.service.bank.cache.BankAccountCacheService;
-import io.nexstudios.nexeconomy.service.domain.container.BankContainer;
-import io.nexstudios.nexeconomy.service.domain.container.VaultContainer;
-import io.nexstudios.nexeconomy.service.domain.container.VirtualContainer;
+import io.nexstudios.nexeconomy.domain.container.BankContainer;
+import io.nexstudios.nexeconomy.domain.container.VaultContainer;
+import io.nexstudios.nexeconomy.domain.container.VirtualContainer;
 import io.nexstudios.nexeconomy.service.economy.EconomyFlushService;
 import io.nexstudios.nexeconomy.service.economy.EconomyPlayerCacheService;
 import io.nexstudios.nexeconomy.service.registry.CurrencyRegistryService;

@@ -1,12 +1,12 @@
 package io.nexstudios.nexeconomy.provider;
 
 import io.nexstudios.nexeconomy.service.economy.*;
-import io.nexstudios.nexlogic.bukkit.services.entity.EconomyBalanceEntity;
 import io.nexstudios.nexeconomy.definition.CurrencyDefinition;
 import io.nexstudios.nexeconomy.definition.MantissaAmount;
 import io.nexstudios.nexeconomy.service.economy.repo.EconomyPlayer;
 import io.nexstudios.nexeconomy.service.economy.repo.EconomyRepository;
 import io.nexstudios.nexeconomy.service.registry.CurrencyRegistryService;
+import io.nexstudios.nexlogic.bukkit.services.entity.nexeconomy.EconomyBalanceEntity;
 import io.nexstudios.serviceregistry.di.Service;
 import net.milkbowl.vault2.economy.AccountPermission;
 import net.milkbowl.vault2.economy.Economy;

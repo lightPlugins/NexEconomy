@@ -1,4 +1,4 @@
-package io.nexstudios.nexeconomy.service.domain.container;
+package io.nexstudios.nexeconomy.domain.container;
 
 import io.nexstudios.nexeconomy.definition.CurrencyDefinition;
 import io.nexstudios.nexeconomy.definition.CurrencyType;
@@ -157,13 +157,13 @@ public final class VaultContainer {
 
   private static BigDecimal scaleVaultHuman(CurrencyDefinition def, BigDecimal human) {
     if (human == null) return BigDecimal.ZERO;
-    int fd = def == null ? 0 : Math.max(0, Math.min(8, def.fractionDigits()));
+    int fd = def == null ? 0 : Math.clamp(def.fractionDigits(), 0, 8);
     return human.setScale(fd, RoundingMode.DOWN);
   }
 
   private static BigDecimal clampVaultHuman(CurrencyDefinition def, BigDecimal human) {
     if (human == null) return BigDecimal.ZERO;
-    int fd = def == null ? 0 : Math.max(0, Math.min(8, def.fractionDigits()));
+    int fd = def == null ? 0 : Math.clamp(def.fractionDigits(), 0, 8);
     BigDecimal cap = VAULT_DOUBLE_SAFE_INTEGER_LIMIT.movePointLeft(fd);
     if (human.compareTo(cap) > 0) return cap;
     if (human.compareTo(cap.negate()) < 0) return cap.negate();
