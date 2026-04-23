@@ -38,7 +38,6 @@ import java.util.concurrent.CompletableFuture;
 @SuppressWarnings("unused")
 @Dependencies({
     BankService.class,
-    BankRegistryService.class,
     BankLevelService.class,
     BankRepositoryService.class,
     BankAccountCacheService.class,
@@ -51,7 +50,6 @@ import java.util.concurrent.CompletableFuture;
 public final class DefaultBankProviderService implements BankProviderService, Service {
 
   private final BankService bankService;
-  private final BankRegistryService bankRegistry;
   private final BankLevelService levelService;
   private final BankRepositoryService repo;
   private final BankAccountCacheService cache;
@@ -63,7 +61,6 @@ public final class DefaultBankProviderService implements BankProviderService, Se
 
   public DefaultBankProviderService(ServiceAccessor accessor) {
     this.bankService = accessor.getService(BankService.class);
-    this.bankRegistry = accessor.getService(BankRegistryService.class);
     this.levelService = accessor.getService(BankLevelService.class);
     this.repo = accessor.getService(BankRepositoryService.class);
     this.cache = accessor.getService(BankAccountCacheService.class);
@@ -1122,9 +1119,7 @@ public final class DefaultBankProviderService implements BankProviderService, Se
         }
 
         invalidate(bankAccountId);
-        if (levelService != null) {
-          levelService.invalidate(bankAccountId);
-        }
+        levelService.invalidate(bankAccountId);
 
         BankResponse.BankContext ctx = BankResponse.context(id, bankAccountId, ownerUuid, actorUuid, null, null, currentLevel, targetLevel, targetLevel, cost, currentBalance, maxBalance);
         return completed(BankResponse.success("Bank level upgraded.", ctx, targetLevel));
