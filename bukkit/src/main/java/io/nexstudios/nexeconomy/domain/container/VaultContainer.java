@@ -5,12 +5,12 @@ import io.nexstudios.nexeconomy.definition.CurrencyType;
 import io.nexstudios.nexeconomy.definition.MantissaAmount;
 import io.nexstudios.nexeconomy.service.economy.EconomyFlushService;
 import io.nexstudios.nexeconomy.service.economy.EconomyLocks;
+import io.nexstudios.nexeconomy.service.economy.VaultMath;
 import io.nexstudios.nexeconomy.service.economy.repo.EconomyPlayer;
 import io.nexstudios.nexeconomy.service.registry.CurrencyRegistryService;
 import org.jetbrains.annotations.NotNull;
 
 import java.math.BigDecimal;
-import java.math.RoundingMode;
 import java.util.Locale;
 
 /**
@@ -18,8 +18,6 @@ import java.util.Locale;
  * Backed by the in-memory {@link EconomyPlayer} state – no async required for online players.
  */
 public final class VaultContainer {
-
-  private static final BigDecimal VAULT_DOUBLE_SAFE_INTEGER_LIMIT = new BigDecimal("9000000000000000");
 
   private final EconomyPlayer state;
   private final CurrencyRegistryService currencies;
@@ -60,8 +58,8 @@ public final class VaultContainer {
     if (def == null) return;
 
     MantissaAmount value = amount == null ? MantissaAmount.zero() : amount;
-    BigDecimal human = scaleVaultHuman(def, value.toHuman());
-    human = clampVaultHuman(def, human);
+    BigDecimal human = VaultMath.scaleVaultHuman(def, value.toHuman());
+    human = VaultMath.clampVaultHuman(def, human);
 
     var lock = EconomyLocks.lockFor(state.uuid());
     lock.lock();
@@ -82,7 +80,7 @@ public final class VaultContainer {
     CurrencyDefinition def = requireVault(currencyId);
     if (def == null) return MantissaAmount.zero();
 
-    MantissaAmount d = normalizeForVault(def, delta);
+    MantissaAmount d = VaultMath.normalizeForVault(def, delta);
     if (d.isNegative() || d.compareTo(MantissaAmount.zero()) == 0) return MantissaAmount.zero();
 
     var lock = EconomyLocks.lockFor(state.uuid());
@@ -91,11 +89,11 @@ public final class VaultContainer {
       EconomyPlayer.BalanceEntry entry = state.getOrCreate(def.id(), MantissaAmount.zero());
       MantissaAmount current = entry.amount() == null ? MantissaAmount.zero() : entry.amount();
 
-      MantissaAmount allowed = capDeltaToMax(def, current, d);
+      MantissaAmount allowed = VaultMath.capDeltaToMax(def, current, d);
       if (allowed.compareTo(MantissaAmount.zero()) == 0) return MantissaAmount.zero();
 
-      BigDecimal nextHuman = scaleVaultHuman(def, current.toHuman().add(allowed.toHuman()));
-      nextHuman = clampVaultHuman(def, nextHuman);
+      BigDecimal nextHuman = VaultMath.scaleVaultHuman(def, current.toHuman().add(allowed.toHuman()));
+      nextHuman = VaultMath.clampVaultHuman(def, nextHuman);
       entry.set(MantissaAmount.of(nextHuman, 0));
       flush.requestFlush(state);
       return allowed;
@@ -113,7 +111,7 @@ public final class VaultContainer {
     CurrencyDefinition def = requireVault(currencyId);
     if (def == null) return false;
 
-    MantissaAmount d = normalizeForVault(def, delta);
+    MantissaAmount d = VaultMath.normalizeForVault(def, delta);
     if (d.isNegative() || d.compareTo(MantissaAmount.zero()) == 0) return false;
 
     var lock = EconomyLocks.lockFor(state.uuid());
@@ -124,7 +122,7 @@ public final class VaultContainer {
 
       if (current.compareTo(d) < 0) return false;
 
-      BigDecimal nextHuman = scaleVaultHuman(def, current.toHuman().subtract(d.toHuman()));
+      BigDecimal nextHuman = VaultMath.scaleVaultHuman(def, current.toHuman().subtract(d.toHuman()));
       entry.set(MantissaAmount.of(nextHuman, 0));
       flush.requestFlush(state);
       return true;
@@ -145,41 +143,6 @@ public final class VaultContainer {
     String id = currencyId.trim().toLowerCase(Locale.ROOT);
     CurrencyDefinition def = currencies.currency(id);
     return (def != null && def.type() == CurrencyType.VAULT) ? def : null;
-  }
-
-  private static MantissaAmount normalizeForVault(CurrencyDefinition def, MantissaAmount a) {
-    if (a == null) return MantissaAmount.zero();
-    BigDecimal human = MantissaAmount.normalize(a).toHuman();
-    human = scaleVaultHuman(def, human);
-    human = clampVaultHuman(def, human);
-    return MantissaAmount.of(human, 0);
-  }
-
-  private static BigDecimal scaleVaultHuman(CurrencyDefinition def, BigDecimal human) {
-    if (human == null) return BigDecimal.ZERO;
-    int fd = def == null ? 0 : Math.clamp(def.fractionDigits(), 0, 8);
-    return human.setScale(fd, RoundingMode.DOWN);
-  }
-
-  private static BigDecimal clampVaultHuman(CurrencyDefinition def, BigDecimal human) {
-    if (human == null) return BigDecimal.ZERO;
-    int fd = def == null ? 0 : Math.clamp(def.fractionDigits(), 0, 8);
-    BigDecimal cap = VAULT_DOUBLE_SAFE_INTEGER_LIMIT.movePointLeft(fd);
-    if (human.compareTo(cap) > 0) return cap;
-    if (human.compareTo(cap.negate()) < 0) return cap.negate();
-    return human;
-  }
-
-  private static MantissaAmount capDeltaToMax(CurrencyDefinition def, MantissaAmount current, MantissaAmount requested) {
-    if (def == null) return requested;
-    BigDecimal max = def.maxBalance();
-    if (max == null || max.compareTo(BigDecimal.ZERO) < 0) return requested; // unlimited
-
-    BigDecimal remaining = max.subtract((current == null ? MantissaAmount.zero() : MantissaAmount.normalize(current)).toHuman());
-    if (remaining.compareTo(BigDecimal.ZERO) <= 0) return MantissaAmount.zero();
-
-    BigDecimal allowedHuman = (requested == null ? MantissaAmount.zero() : MantissaAmount.normalize(requested)).toHuman().min(remaining);
-    return allowedHuman.compareTo(BigDecimal.ZERO) <= 0 ? MantissaAmount.zero() : MantissaAmount.of(allowedHuman, 0);
   }
 }
 

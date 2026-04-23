@@ -7,6 +7,7 @@ import io.nexstudios.nexeconomy.service.bank.repo.BankRepositoryService;
 import io.nexstudios.nexlogic.bukkit.services.entity.nexeconomy.BankAccountEntity;
 import io.nexstudios.nexlogic.bukkit.services.entity.nexeconomy.BankMemberEntity;
 import io.nexstudios.nexlogic.bukkit.services.entity.nexeconomy.BankWithdrawUsageEntity;
+import io.nexstudios.nexlogic.common.services.logging.LoggerService;
 import io.nexstudios.serviceregistry.di.Dependencies;
 import io.nexstudios.serviceregistry.di.Service;
 import io.nexstudios.serviceregistry.di.ServiceAccessor;
@@ -22,6 +23,7 @@ import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicLong;
 
 @Dependencies({
+    LoggerService.class,
     BankRepositoryService.class,
     FileReaderService.class
 })
@@ -67,6 +69,7 @@ public final class BankAccountCacheService implements Service {
 
   private final BankRepositoryService repo;
   private final FileConfiguration settings;
+  private final LoggerService logger;
 
   private volatile long ttlMs = DEFAULT_TTL_SECONDS * 1000L;
   private volatile int maxEntries = DEFAULT_MAX_ENTRIES;
@@ -82,6 +85,7 @@ public final class BankAccountCacheService implements Service {
   private final AtomicBoolean cleanupRunning = new AtomicBoolean(false);
 
   public BankAccountCacheService(ServiceAccessor accessor) {
+    this.logger = accessor.getService(LoggerService.class);
     this.repo = accessor.getService(BankRepositoryService.class);
 
     FileReaderService fileReader = accessor.getService(FileReaderService.class);
@@ -244,11 +248,10 @@ public final class BankAccountCacheService implements Service {
         return view;
       });
 
-      // Ensure inFlight future is removed even on exception to prevent deadlocks
       return f.whenComplete((r, e) -> {
         inFlight.remove(key);
         if (e != null) {
-          System.err.println("Failed to load bank account " + key + ": " + e.getMessage());
+          logger.logger().severe("Failed to load bank account " + key + ": " + e.getMessage());
         }
       });
     });
@@ -303,7 +306,7 @@ public final class BankAccountCacheService implements Service {
             if (entry != null) {
               entry.refreshing().set(false);
             }
-            System.err.println("Failed to refresh bank account " + key + ": " + e.getMessage());
+            logger.logger().warning("Failed to refresh bank account " + key + ": " + e.getMessage());
           }
         })
     );

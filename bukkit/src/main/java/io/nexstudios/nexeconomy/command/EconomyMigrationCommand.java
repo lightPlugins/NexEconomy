@@ -17,6 +17,7 @@ import io.nexstudios.serviceregistry.di.ServiceAccessor;
 import net.kyori.adventure.text.minimessage.tag.resolver.Placeholder;
 import net.kyori.adventure.text.minimessage.tag.resolver.TagResolver;
 import org.bukkit.Bukkit;
+import org.bukkit.command.CommandSender;
 import org.bukkit.entity.Player;
 import org.bukkit.plugin.Plugin;
 
@@ -54,12 +55,11 @@ public class EconomyMigrationCommand implements Service {
 
   @Command(value = "migrate list", permission = "nexeconomy.admin")
   public int list(NexPaperCommandSource source) {
-    Player player = (Player) source.sender();
-    if (player == null) return 0;
+    CommandSender sender = source.sender();
 
     String ids = String.join(", ", migrationService.availableImporterIds());
 
-    player.sendMessage(componentService.builder(player, "migration.list", "NotDefined", true)
+    sender.sendMessage(componentService.builder(sender, "migration.list", "NotDefined", true)
         .resolver(TagResolver.resolver(
             Placeholder.parsed("importers", ids.isBlank() ? "none" : ids)
         ))
@@ -69,25 +69,24 @@ public class EconomyMigrationCommand implements Service {
 
   @Command(value = "migrate vault", permission = "nexeconomy.admin")
   public int migrateVault(NexPaperCommandSource source) {
-    Player player = (Player) source.sender();
-    if (player == null) return 0;
+    CommandSender sender = source.sender();
 
     String vaultCurrencyId = currencyRegistry.vaultCurrencyId();
     if (vaultCurrencyId == null || vaultCurrencyId.isBlank()) {
-      player.sendMessage(componentService.builder(player, "migration.no-vault-currency", "NotDefined", true).build());
+      sender.sendMessage(componentService.builder(sender, "migration.no-vault-currency", "NotDefined", true).build());
       return 0;
     }
 
-    player.sendMessage(componentService.builder(player, "migration.start", "NotDefined", true)
+    sender.sendMessage(componentService.builder(sender, "migration.start", "NotDefined", true)
         .resolver(TagResolver.resolver(Placeholder.parsed("currency", vaultCurrencyId)))
         .build());
 
     MigrationRequest req = MigrationRequest.vaultDefaults(vaultCurrencyId, false, false, 0);
 
     migrationService.migrate(req).thenAccept(result ->
-        Bukkit.getScheduler().runTask(plugin, () -> sendResultAndRefreshCache(player, result))
+        Bukkit.getScheduler().runTask(plugin, () -> sendResultAndRefreshCache(sender, result))
     ).exceptionally(ex -> {
-      Bukkit.getScheduler().runTask(plugin, () -> sendError(player, ex));
+      Bukkit.getScheduler().runTask(plugin, () -> sendError(sender, ex));
       return null;
     });
 
@@ -96,25 +95,24 @@ public class EconomyMigrationCommand implements Service {
 
   @Command(value = "migrate vault dryrun", permission = "nexeconomy.admin")
   public int migrateVaultDryRun(NexPaperCommandSource source) {
-    Player player = (Player) source.sender();
-    if (player == null) return 0;
+    CommandSender sender = source.sender();
 
     String vaultCurrencyId = currencyRegistry.vaultCurrencyId();
     if (vaultCurrencyId == null || vaultCurrencyId.isBlank()) {
-      player.sendMessage(componentService.builder(player, "migration.no-vault-currency", "NotDefined", true).build());
+      sender.sendMessage(componentService.builder(sender, "migration.no-vault-currency", "NotDefined", true).build());
       return 0;
     }
 
-    player.sendMessage(componentService.builder(player, "migration.start-dryrun", "NotDefined", true)
+    sender.sendMessage(componentService.builder(sender, "migration.start-dryrun", "NotDefined", true)
         .resolver(TagResolver.resolver(Placeholder.parsed("currency", vaultCurrencyId)))
         .build());
 
     MigrationRequest req = MigrationRequest.vaultDefaults(vaultCurrencyId, true, false, 0);
 
     migrationService.migrate(req).thenAccept(result ->
-        Bukkit.getScheduler().runTask(plugin, () -> sendResultAndRefreshCache(player, result))
+        Bukkit.getScheduler().runTask(plugin, () -> sendResultAndRefreshCache(sender, result))
     ).exceptionally(ex -> {
-      Bukkit.getScheduler().runTask(plugin, () -> sendError(player, ex));
+      Bukkit.getScheduler().runTask(plugin, () -> sendError(sender, ex));
       return null;
     });
 
@@ -123,45 +121,44 @@ public class EconomyMigrationCommand implements Service {
 
   @Command(value = "migrate vault overwrite", permission = "nexeconomy.admin")
   public int migrateVaultOverwrite(NexPaperCommandSource source) {
-    Player player = (Player) source.sender();
-    if (player == null) return 0;
+    CommandSender sender = source.sender();
 
     String vaultCurrencyId = currencyRegistry.vaultCurrencyId();
     if (vaultCurrencyId == null || vaultCurrencyId.isBlank()) {
-      player.sendMessage(componentService.builder(player, "migration.no-vault-currency", "NotDefined", true).build());
+      sender.sendMessage(componentService.builder(sender, "migration.no-vault-currency", "NotDefined", true).build());
       return 0;
     }
 
-    player.sendMessage(componentService.builder(player, "migration.start-overwrite", "NotDefined", true)
+    sender.sendMessage(componentService.builder(sender, "migration.start-overwrite", "NotDefined", true)
         .resolver(TagResolver.resolver(Placeholder.parsed("currency", vaultCurrencyId)))
         .build());
 
     MigrationRequest req = MigrationRequest.vaultDefaults(vaultCurrencyId, false, true, 0);
 
     migrationService.migrate(req).thenAccept(result ->
-        Bukkit.getScheduler().runTask(plugin, () -> sendResultAndRefreshCache(player, result))
+        Bukkit.getScheduler().runTask(plugin, () -> sendResultAndRefreshCache(sender, result))
     ).exceptionally(ex -> {
-      Bukkit.getScheduler().runTask(plugin, () -> sendError(player, ex));
+      Bukkit.getScheduler().runTask(plugin, () -> sendError(sender, ex));
       return null;
     });
 
     return 1;
   }
 
-  private void sendError(Player player, Throwable ex) {
-    if (player == null) return;
+  private void sendError(CommandSender sender, Throwable ex) {
+    if (sender == null) return;
 
     String msg = ex == null
         ? "Unknown"
         : (ex.getMessage() == null || ex.getMessage().isBlank() ? ex.getClass().getSimpleName() : ex.getMessage());
 
-    player.sendMessage(componentService.builder(player, "migration.failed", "NotDefined", true)
+    sender.sendMessage(componentService.builder(sender, "migration.failed", "NotDefined", true)
         .resolver(TagResolver.resolver(Placeholder.parsed("error", msg)))
         .build());
   }
 
-  private void sendResultAndRefreshCache(Player player, MigrationResult result) {
-    if (player == null || result == null) return;
+  private void sendResultAndRefreshCache(CommandSender sender, MigrationResult result) {
+    if (sender == null || result == null) return;
 
     TagResolver r = TagResolver.resolver(
         Placeholder.parsed("importer", result.importerId()),
@@ -174,33 +171,29 @@ public class EconomyMigrationCommand implements Service {
         Placeholder.parsed("total", result.totalImportedHuman() == null ? "0" : result.totalImportedHuman().toPlainString())
     );
 
-    componentService.getComponents(player, "migration.result", "NotDefined", r, true)
-        .forEach(player::sendMessage);
+    componentService.getComponents(sender, "migration.result", "NotDefined", r, true)
+        .forEach(sender::sendMessage);
 
     if (result.dryRun()) return;
 
-    player.sendMessage(componentService.builder(player, "migration.cache-refresh-start", "NotDefined", true).build());
+    sender.sendMessage(componentService.builder(sender, "migration.cache-refresh-start", "NotDefined", true).build());
 
     var online = Bukkit.getOnlinePlayers();
 
     CompletableFuture<?>[] futures = online.stream().map(p -> {
-      // Local cache refresh
       playerCache.invalidate(p.getUniqueId());
-
-      // Cross-server invalidation (other servers will drop their cache for that player)
       if (redisSync != null) {
         redisSync.publishInvalidatePlayer(p.getUniqueId());
       }
-
       return playerCache.loadOrCreateOnline(p);
     }).toArray(CompletableFuture[]::new);
 
     CompletableFuture.allOf(futures).whenComplete((v, err) -> Bukkit.getScheduler().runTask(plugin, () -> {
       if (err != null) {
-        sendError(player, err);
+        sendError(sender, err);
         return;
       }
-      player.sendMessage(componentService.builder(player, "migration.cache-refresh-complete", "NotDefined", true)
+      sender.sendMessage(componentService.builder(sender, "migration.cache-refresh-complete", "NotDefined", true)
           .resolver(TagResolver.resolver(Placeholder.parsed("amount", String.valueOf(online.size()))))
           .build());
     }));

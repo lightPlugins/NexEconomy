@@ -17,7 +17,6 @@ import io.nexstudios.serviceregistry.di.ServiceAccessor;
 import net.kyori.adventure.text.minimessage.tag.resolver.Placeholder;
 import net.kyori.adventure.text.minimessage.tag.resolver.TagResolver;
 import org.bukkit.Bukkit;
-import org.bukkit.entity.Player;
 import org.bukkit.plugin.Plugin;
 
 import java.time.Duration;
@@ -52,10 +51,7 @@ public final class EconomyStatusCommand implements Service {
 
   @Command(value = "status", permission = "nexeconomy.admin")
   public int status(NexPaperCommandSource source) {
-    Player player = (Player) source.sender();
-    if (player == null) return 0;
-
-    player.sendMessage(componentService.builder(player, "status.start", "NotDefined", true).build());
+    source.sender().sendMessage(componentService.builder(source.sender(), "status.start", "NotDefined", true).build());
 
     long dbStartNs = System.nanoTime();
     CompletableFuture<DbStatus> dbFuture = repo.ping()
@@ -74,7 +70,7 @@ public final class EconomyStatusCommand implements Service {
       List<CurrencyStat> playerStats = playerCurrencyFuture.getNow(List.of());
       List<CurrencyStat> townyStats = townyCurrencyFuture.getNow(List.of());
 
-      Bukkit.getScheduler().runTask(plugin, () -> sendStatus(player, db, redisStatus, playerStats, townyStats));
+      Bukkit.getScheduler().runTask(plugin, () -> sendStatus(source, db, redisStatus, playerStats, townyStats));
     });
 
     return 1;
@@ -100,19 +96,17 @@ public final class EconomyStatusCommand implements Service {
   }
 
   private void sendStatus(
-      Player player,
+      NexPaperCommandSource source,
       DbStatus db,
       RedisStatus redis,
       List<CurrencyStat> playerCurrencyStats,
       List<CurrencyStat> townyCurrencyStats
   ) {
-    if (player == null) return;
-
-    componentService.getComponents(player, "status.header", "NotDefined", TagResolver.empty(), false)
-        .forEach(player::sendMessage);
+    componentService.getComponents(source.sender(), "status.header", "NotDefined", TagResolver.empty(), false)
+        .forEach(source.sender()::sendMessage);
 
     // DB
-    player.sendMessage(componentService.builder(player, "status.db", "NotDefined", false)
+    source.sender().sendMessage(componentService.builder(source.sender(), "status.db", "NotDefined", false)
         .resolver(TagResolver.resolver(
             Placeholder.parsed("state", db.ok ? "OK" : "FAILED"),
             Placeholder.parsed("took", String.valueOf(db.tookMillis)),
@@ -121,7 +115,7 @@ public final class EconomyStatusCommand implements Service {
         .build());
 
     // Redis
-    player.sendMessage(componentService.builder(player, "status.redis", "NotDefined", false)
+    source.sender().sendMessage(componentService.builder(source.sender(), "status.redis", "NotDefined", false)
         .resolver(TagResolver.resolver(
             Placeholder.parsed("enabled", String.valueOf(redis.enabled)),
             Placeholder.parsed("connected", String.valueOf(redis.connected)),
@@ -131,13 +125,13 @@ public final class EconomyStatusCommand implements Service {
         .build());
 
     // Currencies (PLAYER)
-    componentService.getComponents(player, "status.currencies.header", "NotDefined", TagResolver.empty(), false)
-        .forEach(player::sendMessage);
+    componentService.getComponents(source.sender(), "status.currencies.header", "NotDefined", TagResolver.empty(), false)
+        .forEach(source.sender()::sendMessage);
 
     for (CurrencyStat s : playerCurrencyStats) {
       String accounts = s.accounts >= 0 ? String.valueOf(s.accounts) : "error";
 
-      player.sendMessage(componentService.builder(player, "status.currencies.row", "NotDefined", false)
+      source.sender().sendMessage(componentService.builder(source.sender(), "status.currencies.row", "NotDefined", false)
           .resolver(TagResolver.resolver(
               Placeholder.parsed("currency", s.currencyIdLower),
               Placeholder.parsed("accounts", accounts),
@@ -150,7 +144,7 @@ public final class EconomyStatusCommand implements Service {
     for (CurrencyStat s : townyCurrencyStats) {
       String accounts = s.accounts >= 0 ? String.valueOf(s.accounts) : "error";
 
-      player.sendMessage(componentService.builder(player, "status.currencies.row", "NotDefined", false)
+      source.sender().sendMessage(componentService.builder(source.sender(), "status.currencies.row", "NotDefined", false)
           .resolver(TagResolver.resolver(
               Placeholder.parsed("currency", s.currencyIdLower + " (towny)"),
               Placeholder.parsed("accounts", accounts),
@@ -159,8 +153,8 @@ public final class EconomyStatusCommand implements Service {
           .build());
     }
 
-    componentService.getComponents(player, "status.footer", "NotDefined", TagResolver.empty(), false)
-        .forEach(player::sendMessage);
+    componentService.getComponents(source.sender(), "status.footer", "NotDefined", TagResolver.empty(), false)
+        .forEach(source.sender()::sendMessage);
   }
 
   private RedisStatus readRedisStatus() {

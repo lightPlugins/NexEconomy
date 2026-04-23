@@ -7,6 +7,7 @@ import io.nexstudios.nexeconomy.service.economy.repo.EconomyRepository;
 import io.nexstudios.nexeconomy.service.registry.CurrencyRegistryService;
 import io.nexstudios.nexeconomy.definition.MantissaAmount;
 import io.nexstudios.nexlogic.bukkit.services.entity.nexeconomy.EconomyBalanceEntity;
+import io.nexstudios.nexlogic.common.services.logging.LoggerService;
 import io.nexstudios.serviceregistry.di.Dependencies;
 import io.nexstudios.serviceregistry.di.Service;
 import io.nexstudios.serviceregistry.di.ServiceAccessor;
@@ -20,11 +21,13 @@ import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentHashMap;
 
 @Dependencies({
+    LoggerService.class,
     CurrencyRegistryService.class,
     EconomyRepository.class
 })
 public final class EconomyPlayerCacheService implements Service {
 
+  private final LoggerService logger;
   private final CurrencyRegistryService currencies;
   private final EconomyRepository repo;
 
@@ -35,6 +38,7 @@ public final class EconomyPlayerCacheService implements Service {
   private final ConcurrentHashMap<UUID, CompletableFuture<EconomyPlayer>> townyInFlightLoads = new ConcurrentHashMap<>();
 
   public EconomyPlayerCacheService(ServiceAccessor accessor) {
+    this.logger = accessor.getService(LoggerService.class);
     this.currencies = accessor.getService(CurrencyRegistryService.class);
     this.repo = accessor.getService(EconomyRepository.class);
   }
@@ -105,8 +109,7 @@ public final class EconomyPlayerCacheService implements Service {
       return f.whenComplete((result, error) -> {
         inFlightLoads.remove(uuid);
         if (error != null) {
-          // Log error but don't silently swallow it
-          System.err.println("Failed to load balance for player " + uuid + ": " + error.getMessage());
+          logger.logger().severe("Failed to load balance for player " + uuid + ": " + error.getMessage());
         }
       });
     });
@@ -141,11 +144,10 @@ public final class EconomyPlayerCacheService implements Service {
         return econ;
       });
 
-      // CRITICAL FIX: Remove future from map regardless of success/failure to prevent deadlocks
       return f.whenComplete((result, error) -> {
         townyInFlightLoads.remove(uuid);
         if (error != null) {
-          System.err.println("Failed to load towny balance for " + uuid + ": " + error.getMessage());
+          logger.logger().severe("Failed to load towny balance for " + uuid + ": " + error.getMessage());
         }
       });
     });

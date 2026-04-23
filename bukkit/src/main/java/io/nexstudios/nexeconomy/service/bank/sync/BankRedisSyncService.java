@@ -4,9 +4,12 @@ import io.nexstudios.serviceregistry.di.Service;
 
 import java.util.UUID;
 
-public interface BankRedisSyncService extends Service {
+public interface BankRedisSyncService extends Service, AutoCloseable {
 
   void start();
 
   void publishInvalidateAccount(UUID bankAccountId);
+
+  @Override
+  void close();
 }

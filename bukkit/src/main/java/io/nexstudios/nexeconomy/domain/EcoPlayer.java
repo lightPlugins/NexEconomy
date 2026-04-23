@@ -3,6 +3,7 @@ package io.nexstudios.nexeconomy.domain;
 import io.nexstudios.nexeconomy.domain.container.BankContainer;
 import io.nexstudios.nexeconomy.domain.container.VaultContainer;
 import io.nexstudios.nexeconomy.domain.container.VirtualContainer;
+import lombok.Getter;
 import org.bukkit.entity.Player;
 import org.jetbrains.annotations.Nullable;
 
@@ -25,6 +26,7 @@ import java.util.UUID;
  * MantissaAmount bankBal = eco.banks().balance("savings");
  * }</pre>
  */
+@Getter
 public final class EcoPlayer {
 
   // Set once during plugin startup by EcoPlayerRegistry
@@ -42,7 +44,16 @@ public final class EcoPlayer {
     this.banks = banks;
   }
 
-  // ─── Static factory ───────────────────────────────────────────────────────
+  // Static factory
+
+  /**
+   * Returns the current {@link EcoPlayerRegistry}, or {@code null} if not yet initialised.
+   * Intended for internal use by services that must not declare a DI dependency on the registry
+   * to avoid circular dependencies (e.g. {@link io.nexstudios.nexeconomy.service.economy.EconomyRedisSyncService}).
+   */
+  public static EcoPlayerRegistry registry() {
+    return REGISTRY;
+  }
 
   /**
    * Returns the {@link EcoPlayer} for an online player, or {@code null} if not yet loaded.
@@ -73,13 +84,13 @@ public final class EcoPlayer {
     return eco;
   }
 
-  // ─── Internal wiring ──────────────────────────────────────────────────────
+  // Internal wiring
 
   static void bindRegistry(EcoPlayerRegistry registry) {
     REGISTRY = registry;
   }
 
-  // ─── Containers ───────────────────────────────────────────────────────────
+  // Containers
 
   /**
    * Access to Vault (real-money) currency balances. Always non-null.
@@ -103,7 +114,7 @@ public final class EcoPlayer {
     return banks;
   }
 
-  // ─── Identity ─────────────────────────────────────────────────────────────
+  // Identity
 
   public UUID uuid() {
     return uuid;

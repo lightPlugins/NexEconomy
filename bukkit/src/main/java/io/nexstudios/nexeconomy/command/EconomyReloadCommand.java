@@ -15,7 +15,7 @@ import io.nexstudios.nexeconomy.service.economy.EconomyPlayerCacheService;
 import io.nexstudios.serviceregistry.di.Dependencies;
 import io.nexstudios.serviceregistry.di.Service;
 import io.nexstudios.serviceregistry.di.ServiceAccessor;
-import org.bukkit.entity.Player;
+import org.bukkit.command.CommandSender;
 
 @CommandRoot(
     name = "nexeconomy",
@@ -58,8 +58,7 @@ public class EconomyReloadCommand implements Service {
 
   @Command(value = "reload", permission = "nexeconomy.admin")
   public int reload(NexPaperCommandSource source) {
-    Player player = (Player) source.sender();
-    if (player == null) return 0;
+    CommandSender sender = source.sender();
 
     languageService.reload();
     currencyRegistry.reload();
@@ -71,7 +70,7 @@ public class EconomyReloadCommand implements Service {
     bankService.ensureMissingUnlockedBanksForAllOnline();
     bankInterestService.reload();
 
-    player.sendMessage(componentService.builder(player, "general.reload", "NotDefined", true).build());
+    sender.sendMessage(componentService.builder(sender, "general.reload", "NotDefined", true).build());
     return 1;
   }
 }

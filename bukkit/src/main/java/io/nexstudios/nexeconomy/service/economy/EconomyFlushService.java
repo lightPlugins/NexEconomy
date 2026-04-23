@@ -25,6 +25,7 @@ import java.util.concurrent.ConcurrentHashMap;
     LoggerService.class,
     EconomyRepository.class,
     EconomyPlayerCacheService.class,
+    EconomyRedisSyncService.class,
     PaperPluginService.class
 })
 public final class EconomyFlushService implements Service {

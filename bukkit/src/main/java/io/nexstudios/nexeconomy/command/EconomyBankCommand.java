@@ -696,7 +696,7 @@ public final class EconomyBankCommand implements Service {
     return 1;
   }
 
-  @Command(value = "other invite <bank> <owner> <player> [role]", permission = "nexeconomy.bank.other.invite", playerOnly = true)
+  @Command(value = "other invite <bank> <owner> <player> <role>", permission = "nexeconomy.bank.other.invite", playerOnly = true)
   public int inviteOther(
       NexPaperCommandSource source,
       @Arg("bank") @Suggest(BankSuggestion.class) String bank,

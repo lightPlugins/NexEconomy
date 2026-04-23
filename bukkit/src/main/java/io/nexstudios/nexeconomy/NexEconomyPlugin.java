@@ -109,9 +109,19 @@ public class NexEconomyPlugin extends NexPaperPlugin {
     getLogger().info("NexEconomy Shutting down...");
     EconomyFlushService flush = services().getService(EconomyFlushService.class);
     BankInterestService bankInterest = services().getService(BankInterestService.class);
+    BankRedisSyncService bankRedis = services().getService(BankRedisSyncService.class);
 
     flush.stop();
     bankInterest.stop();
+
+    // Close Redis subscriptions to prevent leaks
+    services().findService(EconomyRedisSyncService.class).ifPresent(s -> {
+      try { s.close(); } catch (Exception e) { getLogger().warning("Error closing EconomyRedisSyncService: " + e.getMessage()); }
+    });
+    if (bankRedis != null) {
+      try { bankRedis.close(); } catch (Exception e) { getLogger().warning("Error closing BankRedisSyncService: " + e.getMessage()); }
+    }
+
     // unregister placeholders
     services().findService(EconomyPlaceholderService.class).ifPresent(EconomyPlaceholderService::close);
 

@@ -17,7 +17,7 @@ import io.nexstudios.nexeconomy.service.bank.registry.DefaultBankRegistryService
 import io.nexstudios.nexeconomy.service.bank.repo.BankRepositoryService;
 import io.nexstudios.nexeconomy.service.bank.repo.DefaultBankRepositoryService;
 import io.nexstudios.nexeconomy.service.bank.sync.BankRedisSyncService;
-import io.nexstudios.nexeconomy.service.bank.sync.DefaultBankRedisSyncServiceService;
+import io.nexstudios.nexeconomy.service.bank.sync.DefaultBankRedisSyncService;
 import io.nexstudios.nexeconomy.service.bank.transaction.BankTransactionService;
 import io.nexstudios.nexeconomy.service.bank.transaction.DefaultBankTransactionService;
 import io.nexstudios.nexeconomy.domain.EcoPlayerRegistry;
@@ -45,7 +45,7 @@ public final class BankCoreModule implements ServiceModule {
     services.register(BankLevelService.class, DefaultBankLevelService.class);
 
     // Register sync and transaction services
-    services.register(BankRedisSyncService.class, DefaultBankRedisSyncServiceService.class);
+    services.register(BankRedisSyncService.class, DefaultBankRedisSyncService.class);
     services.register(BankTransactionService.class, DefaultBankTransactionService.class);
 
     // Register interest service

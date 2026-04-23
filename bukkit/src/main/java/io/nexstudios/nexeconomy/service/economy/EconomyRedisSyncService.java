@@ -5,6 +5,8 @@ import io.nexstudios.databaseservice.bukkit.service.api.pubsub.PubSubMessage;
 import io.nexstudios.databaseservice.bukkit.service.api.pubsub.PubSubSubscription;
 import io.nexstudios.databaseservice.bukkit.service.api.pubsub.RedisPubSubService;
 import io.nexstudios.framework.paper.services.plugin.PaperPluginService;
+import io.nexstudios.nexeconomy.domain.EcoPlayer;
+import io.nexstudios.nexeconomy.domain.EcoPlayerRegistry;
 import io.nexstudios.nexlogic.bukkit.services.entity.nexeconomy.EconomyBalanceEntity;
 import io.nexstudios.nexlogic.common.services.logging.LoggerService;
 import io.nexstudios.nexeconomy.NexEconomyPlugin;
@@ -28,7 +30,7 @@ public final class EconomyRedisSyncService implements Service, AutoCloseable {
 
   private static final String TOPIC = "economy";
 
-  private static final String IDENTIFIER_INVALIDATE_PLAYER = "invalidate-player";
+  /** Only identifier used now – invalidates a single account (player or towny). */
   private static final String IDENTIFIER_INVALIDATE_ACCOUNT = "invalidate-account";
 
   private final LoggerService logger;
@@ -69,9 +71,10 @@ public final class EconomyRedisSyncService implements Service, AutoCloseable {
     String topic = pubSub.namespacedTopic(plugin, TOPIC);
     this.subscription = pubSub.subscribeOnMainThread(plugin, topic, this::handle);
 
-    logger.logger().info("Redis Pub/Sub sync enabled. topic=" + topic + ", identifiers=[" + IDENTIFIER_INVALIDATE_PLAYER + "," + IDENTIFIER_INVALIDATE_ACCOUNT + "]");
+    logger.logger().info("Redis Pub/Sub sync enabled. topic=" + topic + ", identifiers=[" + IDENTIFIER_INVALIDATE_ACCOUNT + "]");
   }
 
+  /** Convenience overload for PLAYER accounts. */
   public void publishInvalidatePlayer(UUID playerId) {
     publishInvalidateAccount(playerId, EconomyBalanceEntity.EconomyAccountType.PLAYER);
   }
@@ -104,45 +107,40 @@ public final class EconomyRedisSyncService implements Service, AutoCloseable {
     RedisPubSubService pubSub = pubSubOpt.orElse(null);
     if (pubSub == null) return;
 
-    // cross-server only
+    // Ignore own messages (same server)
     if (Objects.equals(pubSub.originId(), msg.originId())) return;
 
-    if (IDENTIFIER_INVALIDATE_PLAYER.equals(msg.identifier())) {
-      Optional<String> playerIdStr = msg.stringValue("playerId");
-      if (playerIdStr.isEmpty()) return;
+    if (!IDENTIFIER_INVALIDATE_ACCOUNT.equals(msg.identifier())) return;
 
-      UUID playerId;
-      try {
-        playerId = UUID.fromString(playerIdStr.get());
-      } catch (IllegalArgumentException ex) {
-        return;
-      }
+    Optional<String> accountIdStr = msg.stringValue("accountId");
+    if (accountIdStr.isEmpty()) return;
 
-      cache.invalidate(playerId, EconomyBalanceEntity.EconomyAccountType.PLAYER);
+    UUID accountId;
+    try {
+      accountId = UUID.fromString(accountIdStr.get());
+    } catch (IllegalArgumentException ex) {
       return;
     }
 
-    if (IDENTIFIER_INVALIDATE_ACCOUNT.equals(msg.identifier())) {
-      Optional<String> accountIdStr = msg.stringValue("accountId");
-      if (accountIdStr.isEmpty()) return;
+    String typeStr = msg.stringValue("accountType").orElse(EconomyBalanceEntity.EconomyAccountType.PLAYER.name());
+    EconomyBalanceEntity.EconomyAccountType type;
+    try {
+      type = EconomyBalanceEntity.EconomyAccountType.valueOf(typeStr.trim().toUpperCase());
+    } catch (Exception ignored) {
+      type = EconomyBalanceEntity.EconomyAccountType.PLAYER;
+    }
 
-      UUID accountId;
-      try {
-        accountId = UUID.fromString(accountIdStr.get());
-      } catch (IllegalArgumentException ex) {
-        return;
+    // 1. Evict from EconomyPlayerCacheService (econCache / townyCache)
+    cache.invalidate(accountId, type);
+
+    // 2. Evict + reload EcoPlayer so EcoPlayer.of(player) returns fresh data.
+    //    Uses static accessor to avoid a circular DI dependency.
+    //    Only relevant for PLAYER accounts.
+    if (type == EconomyBalanceEntity.EconomyAccountType.PLAYER) {
+      EcoPlayerRegistry registry = EcoPlayer.registry();
+      if (registry != null) {
+        registry.invalidate(accountId);
       }
-
-      String typeStr = msg.stringValue("accountType").orElse(EconomyBalanceEntity.EconomyAccountType.PLAYER.name());
-
-      EconomyBalanceEntity.EconomyAccountType type;
-      try {
-        type = EconomyBalanceEntity.EconomyAccountType.valueOf(typeStr.trim().toUpperCase());
-      } catch (Exception ignored) {
-        type = EconomyBalanceEntity.EconomyAccountType.PLAYER;
-      }
-
-      cache.invalidate(accountId, type);
     }
   }
 

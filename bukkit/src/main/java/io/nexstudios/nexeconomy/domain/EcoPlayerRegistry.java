@@ -10,6 +10,7 @@ import io.nexstudios.nexeconomy.service.registry.CurrencyRegistryService;
 import io.nexstudios.serviceregistry.di.Dependencies;
 import io.nexstudios.serviceregistry.di.Service;
 import io.nexstudios.serviceregistry.di.ServiceAccessor;
+import org.bukkit.Bukkit;
 import org.bukkit.entity.Player;
 import org.jetbrains.annotations.Nullable;
 
@@ -90,6 +91,20 @@ public final class EcoPlayerRegistry implements Service {
     var econState = econCache.remove(uuid);
     if (econState != null) {
       flush.flushPlayerDirty(econState);
+    }
+  }
+
+  /**
+   * Invalidates the cached {@link EcoPlayer} for the given UUID (triggered by Redis cross-server sync).
+   * Removes the stale entry and immediately reloads if the player is still online on this server.
+   */
+  public void invalidate(UUID uuid) {
+    if (uuid == null) return;
+    players.remove(uuid);
+    // econCache is already cleared by EconomyRedisSyncService before this is called
+    Player p = Bukkit.getPlayer(uuid);
+    if (p != null && p.isOnline()) {
+      load(p); // reload fresh from DB into RAM + re-register EcoPlayer
     }
   }
 
