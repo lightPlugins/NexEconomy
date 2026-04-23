@@ -11,6 +11,7 @@ import io.nexstudios.nexlogic.common.services.logging.LoggerService;
 import io.nexstudios.serviceregistry.di.Dependencies;
 import io.nexstudios.serviceregistry.di.Service;
 import io.nexstudios.serviceregistry.di.ServiceAccessor;
+import org.jetbrains.annotations.Nullable;
 
 import java.nio.file.Path;
 import java.util.ArrayList;
@@ -83,6 +84,12 @@ public final class BankAccountCacheService implements Service {
   private final ConcurrentHashMap<Key, AtomicLong> versionByKey = new ConcurrentHashMap<>();
 
   private final AtomicBoolean cleanupRunning = new AtomicBoolean(false);
+
+  // ─── In-memory lock-state caches ─────────────────────────────────────────
+  // true = unlocked, false = locked, absent = unknown (query DB)
+  private final ConcurrentHashMap<Key, Boolean> unlockStateByKey = new ConcurrentHashMap<>();
+  // true = all accounts locked, false = not locked, absent = unknown
+  private final ConcurrentHashMap<UUID, Boolean> playerLockState = new ConcurrentHashMap<>();
 
   public BankAccountCacheService(ServiceAccessor accessor) {
     this.logger = accessor.getService(LoggerService.class);
@@ -169,6 +176,7 @@ public final class BankAccountCacheService implements Service {
     bumpVersion(key);
     byKey.remove(key, e);
     inFlight.remove(key);
+    unlockStateByKey.remove(key);
     invalidateWithdrawUsage(bankAccountId);
   }
 
@@ -179,12 +187,67 @@ public final class BankAccountCacheService implements Service {
     bumpVersion(key);
     Entry e = byKey.remove(key);
     inFlight.remove(key);
+    unlockStateByKey.remove(key);
 
     if (e != null && e.view() != null && e.view().account() != null && e.view().account().getId() != null) {
       UUID accountId = e.view().account().getId();
       byAccountId.remove(accountId, e);
       invalidateWithdrawUsage(accountId);
     }
+  }
+
+  // ─── Lock-state API ──────────────────────────────────────────────────────
+
+  /**
+   * Returns the cached unlock state for a bank, or {@code null} if unknown.
+   * {@code true} = unlocked, {@code false} = locked.
+   */
+  public @Nullable Boolean getCachedUnlockState(String bankIdLower, UUID ownerUuid) {
+    if (bankIdLower == null || ownerUuid == null) return null;
+    return unlockStateByKey.get(new Key(normalize(bankIdLower), ownerUuid));
+  }
+
+  /**
+   * Stores the unlock state for a bank in memory.
+   * {@code true} = unlocked, {@code false} = locked.
+   */
+  public void setCachedUnlockState(String bankIdLower, UUID ownerUuid, boolean unlocked) {
+    if (bankIdLower == null || ownerUuid == null) return;
+    unlockStateByKey.put(new Key(normalize(bankIdLower), ownerUuid), unlocked);
+  }
+
+  /**
+   * Clears the cached unlock state (e.g., on rollback after a failed DB write).
+   */
+  public void clearCachedUnlockState(String bankIdLower, UUID ownerUuid) {
+    if (bankIdLower == null || ownerUuid == null) return;
+    unlockStateByKey.remove(new Key(normalize(bankIdLower), ownerUuid));
+  }
+
+  /**
+   * Returns the cached player-level lock state, or {@code null} if unknown.
+   * {@code true} = all accounts locked, {@code false} = not locked.
+   */
+  public @Nullable Boolean getCachedPlayerLocked(UUID playerUuid) {
+    if (playerUuid == null) return null;
+    return playerLockState.get(playerUuid);
+  }
+
+  /**
+   * Stores the player-level lock state in memory.
+   * {@code true} = locked, {@code false} = not locked.
+   */
+  public void setCachedPlayerLocked(UUID playerUuid, boolean locked) {
+    if (playerUuid == null) return;
+    playerLockState.put(playerUuid, locked);
+  }
+
+  /**
+   * Clears the cached player-level lock state (e.g., on rollback).
+   */
+  public void clearCachedPlayerLocked(UUID playerUuid) {
+    if (playerUuid == null) return;
+    playerLockState.remove(playerUuid);
   }
 
   public void invalidateWithdrawUsage(UUID bankAccountId) {

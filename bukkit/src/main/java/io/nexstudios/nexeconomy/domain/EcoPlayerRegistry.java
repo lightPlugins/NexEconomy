@@ -1,5 +1,6 @@
 package io.nexstudios.nexeconomy.domain;
 
+import io.nexstudios.nexeconomy.service.bank.BankLockFlushService;
 import io.nexstudios.nexeconomy.service.bank.cache.BankAccountCacheService;
 import io.nexstudios.nexeconomy.domain.container.BankContainer;
 import io.nexstudios.nexeconomy.domain.container.VaultContainer;
@@ -30,6 +31,7 @@ import java.util.concurrent.ConcurrentHashMap;
 @Dependencies({
     EconomyPlayerCacheService.class,
     BankAccountCacheService.class,
+    BankLockFlushService.class,
     CurrencyRegistryService.class,
     EconomyFlushService.class
 })
@@ -37,16 +39,18 @@ public final class EcoPlayerRegistry implements Service {
 
   private final EconomyPlayerCacheService econCache;
   private final BankAccountCacheService bankCache;
+  private final BankLockFlushService bankLockFlush;
   private final CurrencyRegistryService currencies;
   private final EconomyFlushService flush;
 
   private final ConcurrentHashMap<UUID, EcoPlayer> players = new ConcurrentHashMap<>();
 
   public EcoPlayerRegistry(ServiceAccessor accessor) {
-    this.econCache = accessor.getService(EconomyPlayerCacheService.class);
-    this.bankCache = accessor.getService(BankAccountCacheService.class);
-    this.currencies = accessor.getService(CurrencyRegistryService.class);
-    this.flush = accessor.getService(EconomyFlushService.class);
+    this.econCache      = accessor.getService(EconomyPlayerCacheService.class);
+    this.bankCache      = accessor.getService(BankAccountCacheService.class);
+    this.bankLockFlush  = accessor.getService(BankLockFlushService.class);
+    this.currencies     = accessor.getService(CurrencyRegistryService.class);
+    this.flush          = accessor.getService(EconomyFlushService.class);
 
     // Bind static factory so EcoPlayer.of(player) works without injection
     EcoPlayer.bindRegistry(this);
@@ -71,7 +75,7 @@ public final class EcoPlayerRegistry implements Service {
           uuid,
           new VaultContainer(econState, currencies, flush),
           new VirtualContainer(econState, currencies, flush),
-          new BankContainer(bankCache, uuid)
+          new BankContainer(bankCache, bankLockFlush, uuid)
       );
       players.put(uuid, eco);
       return eco;
@@ -83,7 +87,7 @@ public final class EcoPlayerRegistry implements Service {
    * Should be called on player quit.
    */
   public void unload(UUID uuid) {
-    EcoPlayer eco = players.remove(uuid);
+    players.remove(uuid);
 
     flush.cancelScheduled(uuid);
 
@@ -125,5 +129,3 @@ public final class EcoPlayerRegistry implements Service {
     econCache.ensureMissingCurrenciesForAllOnline();
   }
 }
-
-

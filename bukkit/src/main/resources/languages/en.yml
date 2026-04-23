@@ -115,7 +115,7 @@ bank:
     bank-accounts-locked: '<red>This player''s bank accounts are locked.</red>'
 
   admin:
-    unlock:
+    unlock-bank:
       invalid-bank: '<red>Invalid bank id.</red>'
       player-not-found: '<red>Player <dark_red><player></dark_red> could not be found (must be online).</red>'
       success-sender: '<gray>Unlocked bank <yellow><bank></yellow> for <yellow><player></yellow>.</gray>'
@@ -123,7 +123,7 @@ bank:
       failed: '<red>Failed to unlock bank: <dark_red><error></dark_red></red>'
       already-unlocked: '<gray>Bank <yellow><bank></yellow> is already unlocked for <yellow><player></yellow>.</gray>'
 
-    lock:
+    lock-bank:
       invalid-bank: '<red>Invalid bank id.</red>'
       player-not-found: '<red>Player <dark_red><player></dark_red> could not be found (must be online).</red>'
       success-sender: '<gray>Locked bank <yellow><bank></yellow> for <yellow><player></yellow>.</gray>'
@@ -131,13 +131,13 @@ bank:
       already-locked: '<gray>Bank <yellow><bank></yellow> is already locked for <yellow><player></yellow>.</gray>'
       failed: '<red>Failed to lock bank: <dark_red><error></dark_red></red>'
 
-    lockaccounts:
+    lock-player:
       player-not-found: '<red>Player <dark_red><player></dark_red> could not be found (use UUID or cached name).</red>'
       success-sender: '<gray>Locked all bank accounts for <yellow><player></yellow>.</gray>'
       already-locked: '<gray>Bank accounts for <yellow><player></yellow> are already locked.</gray>'
       failed: '<red>Failed to lock bank accounts: <dark_red><error></dark_red></red>'
 
-    unlockaccounts:
+    unlock-player:
       player-not-found: '<red>Player <dark_red><player></dark_red> could not be found (use UUID or cached name).</red>'
       success-sender: '<gray>Unlocked all bank accounts for <yellow><player></yellow>.</gray>'
       not-locked: '<gray>Bank accounts for <yellow><player></yellow> are not locked.</gray>'
@@ -208,5 +208,3 @@ bank:
         title: '<yellow>Withdraw all?</yellow>'
         body: '<gray>Do you really want to withdraw up to <yellow><amount></yellow> from this bank? The role limit may reduce the amount automatically.</gray>'
         confirm: 'Withdraw'
-
-inventories:
