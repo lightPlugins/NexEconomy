@@ -140,12 +140,13 @@ public final class EconomyMainCommand implements Service {
 
   // ─── Set ──────────────────────────────────────────────────────────────────
 
-  @Command(value = "set <currency> <target> <amount>", permission = "nexeconomy.admin")
+  @Command(value = "set <currency> <target> <amount> [silent]", permission = "nexeconomy.admin")
   public int set(
       NexPaperCommandSource source,
       @Arg("currency") @Suggest(CurrencySuggestion.class) String currency,
       @Arg("target") @Suggest(PlayerSuggestion.class) String target,
-      @Arg("amount") @Suggest(AmountSuggestion.class) String amount
+      @Arg("amount") @Suggest(AmountSuggestion.class) String amount,
+      @OptionalArg("silent") boolean silent
   ) {
     CommandSender sender = source.sender();
     Player targetPlayer = Bukkit.getPlayerExact(target);
@@ -171,6 +172,11 @@ public final class EconomyMainCommand implements Service {
       eco.vault().set(def.id(), parsed);
     } else {
       eco.virtual().set(def.id(), parsed);
+    }
+
+    // prevents messages if command is in silent optional mode
+    if(silent) {
+      return 1;
     }
 
     String shown = AmountNotation.formatShort(parsed, def.fractionDigits());
@@ -287,12 +293,13 @@ public final class EconomyMainCommand implements Service {
 
   // ─── Remove ───────────────────────────────────────────────────────────────
 
-  @Command(value = "remove <currency> <target> <amount>", permission = "nexeconomy.admin")
+  @Command(value = "remove <currency> <target> <amount> [silent]", permission = "nexeconomy.admin")
   public int remove(
       NexPaperCommandSource source,
       @Arg("currency") @Suggest(CurrencySuggestion.class) String currency,
       @Arg("target") @Suggest(PlayerSuggestion.class) String target,
-      @Arg("amount") @Suggest(AmountSuggestion.class) String amount
+      @Arg("amount") @Suggest(AmountSuggestion.class) String amount,
+      @OptionalArg("silent") boolean silent
   ) {
     CommandSender sender = source.sender();
     Player targetPlayer = Bukkit.getPlayerExact(target);
@@ -328,6 +335,11 @@ public final class EconomyMainCommand implements Service {
               Placeholder.parsed("currency", def.symbolPlural())
           ))
           .build());
+      return 1;
+    }
+
+    // prevents messages if command is in silent optional mode
+    if(silent) {
       return 1;
     }
 
