@@ -54,7 +54,7 @@ public class NexEconomyPlugin extends NexPaperPlugin {
     services.register(LoggerService.class, BukkitLoggerService.class);
 
     initNexLogic();
-    // install internal ServiceModule
+    // install internal ServiceModules
     List<ServiceModule> modules = List.of(
         new EconomyCoreModule(),
         new BankCoreModule()
@@ -96,6 +96,9 @@ public class NexEconomyPlugin extends NexPaperPlugin {
     services().getService(BankRedisSyncService.class).start();
     services().getService(BankInterestService.class).start();
 
+    // register economy placeholders
+    services().getService(EconomyPlaceholderService.class).start();
+
     registerListeners(
         new EconomyPlayerListener(services()),
         new BankPlayerListener(services())
@@ -116,14 +119,24 @@ public class NexEconomyPlugin extends NexPaperPlugin {
 
     // Close Redis subscriptions to prevent leaks
     services().findService(EconomyRedisSyncService.class).ifPresent(s -> {
-      try { s.close(); } catch (Exception e) { getLogger().warning("Error closing EconomyRedisSyncService: " + e.getMessage()); }
+      try {
+        s.close();
+      } catch (Exception e) {
+        getLogger().warning("Error closing EconomyRedisSyncService: " + e.getMessage());
+      }
     });
     if (bankRedis != null) {
       try { bankRedis.close(); } catch (Exception e) { getLogger().warning("Error closing BankRedisSyncService: " + e.getMessage()); }
     }
 
     // unregister placeholders
-    services().findService(EconomyPlaceholderService.class).ifPresent(EconomyPlaceholderService::close);
+    services().findService(EconomyPlaceholderService.class).ifPresent(s -> {
+      try {
+        s.close();
+      } catch (Exception e) {
+        getLogger().warning("Error closing EconomyPlaceholderService: " + e.getMessage());
+      }
+    });
 
     try {
       getLogger().info("Waiting for final economy flush to finish...");

@@ -6,6 +6,7 @@ import io.nexstudios.nexeconomy.service.economy.leaderboard.EconomyLeaderboardSe
 import io.nexstudios.nexeconomy.service.economy.repo.EconomyRepository;
 import io.nexstudios.nexeconomy.service.migration.MigrationService;
 import io.nexstudios.nexeconomy.service.migration.impl.VaultEconomyMigrationImporter;
+import io.nexstudios.nexeconomy.service.placeholder.DefaultEconomyPlaceholderService;
 import io.nexstudios.nexeconomy.service.placeholder.EconomyPlaceholderService;
 import io.nexstudios.nexeconomy.service.registry.CurrencyRegistryService;
 import io.nexstudios.serviceregistry.di.ServiceAccessor;
@@ -27,6 +28,6 @@ public final class EconomyCoreModule implements ServiceModule {
     services.register(EconomyLeaderboardService.class, EconomyLeaderboardService.class);
     services.register(VaultEconomyMigrationImporter.class, VaultEconomyMigrationImporter.class);
     services.register(MigrationService.class, MigrationService.class);
-    services.register(EconomyPlaceholderService.class, EconomyPlaceholderService.class);
+    services.register(EconomyPlaceholderService.class, DefaultEconomyPlaceholderService.class);
   }
 }

@@ -29,6 +29,27 @@ import java.math.BigDecimal;
 import java.util.Optional;
 import java.util.concurrent.CompletableFuture;
 
+/**
+ * Main command class for player-facing and admin economy operations.
+ *
+ * <p>All balance-related operations work exclusively on the {@link EcoPlayer} cache.
+ * If a player's data is not yet loaded, the action is aborted and a loading message
+ * is displayed. Persistence and cross-server Redis synchronisation are handled by
+ * the underlying containers ({@code vault} / {@code virtual}).</p>
+ *
+ * <p>Registered commands:</p>
+ * <ul>
+ *   <li>{@code /currency} – show own balance (default currency)</li>
+ *   <li>{@code /currency balance [currency]}</li>
+ *   <li>{@code /currency balance <currency> <target>}</li>
+ *   <li>{@code /currency set <currency> <target> <amount> [silent]}</li>
+ *   <li>{@code /currency add <currency> <target> <amount> [silent]}</li>
+ *   <li>{@code /currency remove <currency> <target> <amount> [silent]}</li>
+ *   <li>{@code /currency top <currency>}</li>
+ * </ul>
+ *
+ * <p>Command aliases: {@code money}, {@code eco}.</p>
+ */
 @CommandRoot(
     name = "currency", aliases = {"money", "eco"},
     description = "Money commands"
@@ -45,6 +66,11 @@ public final class EconomyMainCommand implements Service {
   private final Plugin plugin;
   private final EconomyLeaderboardService leaderboard;
 
+  /**
+   * Creates a new instance and injects all required services.
+   *
+   * @param accessor DI accessor used to resolve services
+   */
   public EconomyMainCommand(ServiceAccessor accessor) {
     this.componentService = accessor.getService(ComponentService.class);
     this.economy = accessor.getService(EconomyService.class);
@@ -52,13 +78,26 @@ public final class EconomyMainCommand implements Service {
     this.leaderboard = accessor.getService(EconomyLeaderboardService.class);
   }
 
-  // ─── Balance ──────────────────────────────────────────────────────────────
-
+  /**
+   * Root command handler – delegates to {@link #balance(NexPaperCommandSource)}.
+   *
+   * @param source command source
+   * @return result of {@link #balance}
+   */
   @Command(value = "", permission = "nexeconomy.use")
   public int root(NexPaperCommandSource source) {
     return balance(source);
   }
 
+  /**
+   * Displays the calling player's balance in the default currency.
+   *
+   * <p>Only usable by players. Aborts with an error message if no default
+   * currency is configured.</p>
+   *
+   * @param source command source (must be a {@link Player})
+   * @return {@code 1} on success, {@code 0} on abort
+   */
   @Command(value = "balance", permission = "nexeconomy.use")
   public int balance(NexPaperCommandSource source) {
     if (!(source.sender() instanceof Player player)) {
@@ -74,6 +113,16 @@ public final class EconomyMainCommand implements Service {
     return balanceCurrency(source, cur);
   }
 
+  /**
+   * Displays the calling player's balance for the given currency.
+   *
+   * <p>Only usable by players. Aborts if the currency is unknown or the
+   * player's data is not yet cached.</p>
+   *
+   * @param source   command source (must be a {@link Player})
+   * @param currency currency ID
+   * @return {@code 1} on success, {@code 0} on abort
+   */
   @Command(value = "balance <currency>", permission = "nexeconomy.use")
   public int balanceCurrency(
       NexPaperCommandSource source,
@@ -103,6 +152,14 @@ public final class EconomyMainCommand implements Service {
     return 1;
   }
 
+  /**
+   * Displays another online player's balance for the given currency (admin only).
+   *
+   * @param source   command source
+   * @param currency currency ID
+   * @param target   name of the target player (must be online)
+   * @return {@code 1} on success, {@code 0} on abort
+   */
   @Command(value = "balance <currency> <target>", permission = "nexeconomy.admin")
   public int balanceOtherCurrency(
       NexPaperCommandSource source,
@@ -138,8 +195,19 @@ public final class EconomyMainCommand implements Service {
     return 1;
   }
 
-  // ─── Set ──────────────────────────────────────────────────────────────────
-
+  /**
+   * Sets a player's balance for the given currency to an exact amount.
+   *
+   * <p>Negative amounts are rejected. If the optional {@code silent} flag is
+   * {@code true}, no confirmation messages are sent to either party.</p>
+   *
+   * @param source   command source
+   * @param currency currency ID
+   * @param target   name of the target player (must be online)
+   * @param amount   new balance amount (human-readable notation)
+   * @param silent   when {@code true}, suppresses all feedback messages
+   * @return {@code 1} on success, {@code 0} on abort
+   */
   @Command(value = "set <currency> <target> <amount> [silent]", permission = "nexeconomy.admin")
   public int set(
       NexPaperCommandSource source,
@@ -197,8 +265,21 @@ public final class EconomyMainCommand implements Service {
     return 1;
   }
 
-  // ─── Add ──────────────────────────────────────────────────────────────────
-
+  /**
+   * Adds an amount to a player's balance for the given currency.
+   *
+   * <p>Zero and negative amounts are rejected. If the resulting balance would
+   * exceed the currency's maximum, the addition is capped and informational
+   * messages are sent. If {@code silent} is {@code true}, success messages
+   * are suppressed (cap warnings are still shown).</p>
+   *
+   * @param source   command source
+   * @param currency currency ID
+   * @param target   name of the target player (must be online)
+   * @param amount   amount to add (human-readable notation)
+   * @param silent   when {@code true}, suppresses success feedback messages
+   * @return {@code 1} on success, {@code 0} on abort
+   */
   @Command(value = "add <currency> <target> <amount> [silent]", permission = "nexeconomy.admin")
   public int add(
       NexPaperCommandSource source,
@@ -291,8 +372,20 @@ public final class EconomyMainCommand implements Service {
     return 1;
   }
 
-  // ─── Remove ───────────────────────────────────────────────────────────────
-
+  /**
+   * Removes an amount from a player's balance for the given currency.
+   *
+   * <p>Zero and negative amounts are rejected. If the player has insufficient
+   * funds the operation fails and a failure message is sent to the sender.
+   * If {@code silent} is {@code true}, success messages are suppressed.</p>
+   *
+   * @param source   command source
+   * @param currency currency ID
+   * @param target   name of the target player (must be online)
+   * @param amount   amount to remove (human-readable notation)
+   * @param silent   when {@code true}, suppresses success feedback messages
+   * @return {@code 1} on success, {@code 0} on abort
+   */
   @Command(value = "remove <currency> <target> <amount> [silent]", permission = "nexeconomy.admin")
   public int remove(
       NexPaperCommandSource source,
@@ -360,8 +453,17 @@ public final class EconomyMainCommand implements Service {
     return 1;
   }
 
-  // ─── Top ──────────────────────────────────────────────────────────────────
-
+  /**
+   * Displays the balance leaderboard for the given currency (top 10).
+   *
+   * <p>If the leaderboard snapshot is not yet available, a loading message is
+   * shown and the command polls asynchronously for up to 5 seconds before
+   * giving up.</p>
+   *
+   * @param source   command source
+   * @param currency currency ID
+   * @return {@code 1} on success, {@code 0} on abort
+   */
   @Command(value = "top <currency>", permission = "nexeconomy.use")
   public int top(
       NexPaperCommandSource source,
@@ -397,23 +499,47 @@ public final class EconomyMainCommand implements Service {
     return 1;
   }
 
-  // ─── Helpers ──────────────────────────────────────────────────────────────
-
+  /**
+   * Sends a "data still loading" error message to the given sender.
+   *
+   * @param sender recipient of the message
+   */
   private void sendLoading(CommandSender sender) {
     sendError(sender, "Your economy data is still loading, please try again in a moment.");
   }
 
+  /**
+   * Sends a generic error message with the given text to the sender.
+   *
+   * @param sender  recipient of the message
+   * @param message plain-text error detail
+   */
   private void sendError(CommandSender sender, String message) {
     sender.sendMessage(componentService.builder(sender, "general.response-error", "NotDefined", true)
         .resolver(TagResolver.resolver(Placeholder.parsed("error", message)))
         .build());
   }
 
+  /**
+   * Formats a {@link MantissaAmount} to a short human-readable string.
+   *
+   * @param amount amount to format
+   * @param def    currency definition providing the fraction-digit setting
+   * @return formatted amount string, or {@code "0"} if {@code def} is {@code null}
+   */
   private static String formatAmount(MantissaAmount amount, CurrencyDefinition def) {
     if (def == null) return "0";
     return AmountNotation.formatShort(amount, def.fractionDigits());
   }
 
+  /**
+   * Parses a raw amount string into a {@link MantissaAmount} respecting the
+   * currency type (Vault vs. virtual).
+   *
+   * @param def currency definition (may be {@code null})
+   * @param raw raw input string (may be {@code null})
+   * @return parsed amount, or {@code null} if input is invalid
+   */
   private static MantissaAmount parseAmount(CurrencyDefinition def, String raw) {
     if (def == null || raw == null) return null;
     if (def.type() == CurrencyType.VAULT) {
@@ -423,6 +549,15 @@ public final class EconomyMainCommand implements Service {
     return AmountNotation.parseVirtualMantissaAmount(raw);
   }
 
+  /**
+   * Returns a {@link CompletableFuture} that resolves once the leaderboard
+   * snapshot for the given currency becomes available, or times out.
+   *
+   * @param currency  currency ID
+   * @param limit     maximum number of leaderboard entries to retrieve
+   * @param timeoutMs maximum time to wait in milliseconds
+   * @return future completing with the snapshot view, or {@link Optional#empty()} on timeout
+   */
   private CompletableFuture<Optional<EconomyLeaderboardService.SnapshotView>> waitForLeaderboard(
       String currency, int limit, long timeoutMs
   ) {
@@ -432,6 +567,16 @@ public final class EconomyMainCommand implements Service {
     return future;
   }
 
+  /**
+   * Recursively polls the leaderboard at increasing intervals until the snapshot
+   * is available or the timeout is exceeded.
+   *
+   * @param currency  currency ID
+   * @param limit     maximum number of leaderboard entries to retrieve
+   * @param startTime timestamp (ms) when polling started
+   * @param timeoutMs maximum total polling duration in milliseconds
+   * @param future    future to complete once data is available or timed out
+   */
   private void pollLeaderboard(
       String currency, int limit, long startTime, long timeoutMs,
       CompletableFuture<Optional<EconomyLeaderboardService.SnapshotView>> future
@@ -454,6 +599,16 @@ public final class EconomyMainCommand implements Service {
         delay / 50);
   }
 
+  /**
+   * Renders the leaderboard snapshot to the given sender on the main thread.
+   *
+   * <p>Displays a header, one line per ranked entry, and a footer using the
+   * configured language keys.</p>
+   *
+   * @param sender recipient of the leaderboard output
+   * @param view   leaderboard snapshot to display
+   * @param def    currency definition used for formatting amounts
+   */
   private void displayLeaderboard(CommandSender sender, EconomyLeaderboardService.SnapshotView view, CurrencyDefinition def) {
     var rows = view.top();
 
