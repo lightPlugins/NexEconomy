@@ -198,12 +198,15 @@ public final class BankDetailMenuView extends AbstractMenuView {
         levelSlot, itemProvider, itemService, ph, "[TEST] Level – " + bankId);
 
     // ── Invite ───────────────────────────────────────────────────────────────
-    addButton(config, canInvite ? "items.invite" : "items.invite-disabled",
-        inviteSlot, itemProvider, itemService, ph, "[TEST] Invite – " + bankId);
+    boolean memberSystemEnabled = def != null && def.memberSystem().enabled();
+    if (memberSystemEnabled) {
+      addButton(config, canInvite ? "items.invite" : "items.invite-disabled",
+          inviteSlot, itemProvider, itemService, ph, "[TEST] Invite – " + bankId);
 
-    // ── Member ───────────────────────────────────────────────────────────────
-    addButton(config, canManage ? "items.member" : "items.member-disabled",
-        memberSlot, itemProvider, itemService, ph, "[TEST] Members – " + bankId);
+      // ── Member ─────────────────────────────────────────────────────────────
+      addButton(config, isOwner ? "items.member" : "items.member-disabled",
+          memberSlot, itemProvider, itemService, ph, "[TEST] Members – " + bankId);
+    }
 
     // ── Back ─────────────────────────────────────────────────────────────────
     ConfigurationSection backCfg = config.getSection("items.back");
