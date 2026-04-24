@@ -20,6 +20,7 @@ import io.nexstudios.nexeconomy.domain.EcoPlayer;
 import io.nexstudios.nexeconomy.service.bank.cache.BankAccountCacheService;
 import io.nexstudios.nexeconomy.service.bank.definition.BankDefinition;
 import io.nexstudios.nexeconomy.service.bank.registry.BankRegistryService;
+import io.nexstudios.nexeconomy.service.menu.bank.detail.view.BankDetailMenuView;
 import io.nexstudios.nexeconomy.service.menu.bank.overview.BankOverviewMenuDefinition;
 import io.nexstudios.nexlogic.bukkit.services.items.ItemProviderService;
 import io.nexstudios.serviceregistry.di.ServiceAccessor;
@@ -142,8 +143,8 @@ public final class BankOverviewMenuView extends ControlledPagedMenuView<BankOver
   private MenuElement renderEntry(MenuContext context, BankEntry entry, int idx) {
     return new StaticMenuElement(buildBankEntryItem(entry), (ctx, event) -> {
       UUID ownerUuid = entry.view().account().getOwnerUuid();
-      context.viewer().sendMessage(Component.text("Open Bank Detail Menu: " + entry.def().idLower() + " - " + ownerUuid));
-      //ctx.menuService().open(ctx.viewer(), new BankDetailMenuView(accessor, entry.def().idLower(), ownerUuid));
+      ctx.menuService().open(ctx.viewer(),
+          new BankDetailMenuView(accessor, entry.def().idLower(), ownerUuid, ctx.viewer().getUniqueId()));
     });
   }
 
