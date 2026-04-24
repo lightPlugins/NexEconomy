@@ -10,13 +10,20 @@ import io.nexstudios.nexeconomy.NexEconomyPlugin;
 import io.nexstudios.nexeconomy.definition.AmountNotation;
 import io.nexstudios.nexeconomy.definition.MantissaAmount;
 import io.nexstudios.nexeconomy.domain.EcoPlayer;
+import io.nexstudios.nexeconomy.service.bank.BankService;
 import io.nexstudios.nexeconomy.service.bank.cache.BankAccountCacheService;
 import io.nexstudios.nexeconomy.service.bank.definition.BankDefinition;
 import io.nexstudios.nexeconomy.service.bank.registry.BankRegistryService;
 import io.nexstudios.nexeconomy.service.menu.bank.detail.BankDetailMenuDefinition;
+import io.nexstudios.nexeconomy.service.menu.bank.invite.view.BankInvitePlayerMenuView;
+import io.nexstudios.nexeconomy.service.menu.bank.level.view.BankLevelMenuView;
+import io.nexstudios.nexeconomy.service.menu.bank.member.view.BankMemberMenuView;
 import io.nexstudios.nexeconomy.service.menu.bank.overview.view.BankOverviewMenuView;
+import io.nexstudios.nexeconomy.service.menu.bank.transactions.view.BankTransactionsMenuView;
 import io.nexstudios.nexlogic.bukkit.services.entity.nexeconomy.BankMemberEntity;
+import io.nexstudios.nexlogic.bukkit.services.entity.nexeconomy.BankTransactionEntity;
 import io.nexstudios.nexlogic.bukkit.services.items.ItemProviderService;
+import io.nexstudios.serviceregistry.di.Dependencies;
 import io.nexstudios.serviceregistry.di.ServiceAccessor;
 import net.kyori.adventure.text.Component;
 import net.kyori.adventure.text.minimessage.MiniMessage;
@@ -38,6 +45,12 @@ import java.util.UUID;
  * Opened by clicking a bank entry in {@link BankOverviewMenuView}.
  * All action buttons currently send a test message; real logic is implemented later.
  */
+@Dependencies({
+    FileReaderService.class,
+    ItemService.class,
+    BankRegistryService.class,
+    BankAccountCacheService.class
+})
 public final class BankDetailMenuView extends AbstractMenuView {
 
   private static final MiniMessage MINI = MiniMessage.miniMessage();
@@ -47,11 +60,12 @@ public final class BankDetailMenuView extends AbstractMenuView {
     super(BankDetailMenuDefinition.KEY, rowsToSize(6));
 
     // ── Services ─────────────────────────────────────────────────────────────
-    FileReaderService fileReader      = accessor.getService(FileReaderService.class);
-    ItemService itemService           = accessor.getService(ItemService.class);
-    BankRegistryService bankRegistry  = accessor.getService(BankRegistryService.class);
-    BankAccountCacheService bankCache = accessor.getService(BankAccountCacheService.class);
-    ItemProviderService itemProvider  = NexEconomyPlugin.getNexLogicService().getService(ItemProviderService.class);
+    FileReaderService fileReader          = accessor.getService(FileReaderService.class);
+    ItemService itemService               = accessor.getService(ItemService.class);
+    BankRegistryService bankRegistry      = accessor.getService(BankRegistryService.class);
+    BankAccountCacheService bankCache     = accessor.getService(BankAccountCacheService.class);
+    BankService bankService               = accessor.getService(BankService.class);
+    ItemProviderService itemProvider      = NexEconomyPlugin.getNexLogicService().getService(ItemProviderService.class);
 
     FileConfiguration config = fileReader.load(Path.of(CONFIG_PATH), CONFIG_PATH, false);
 
@@ -174,38 +188,150 @@ public final class BankDetailMenuView extends AbstractMenuView {
     }
 
     // ── Deposit ──────────────────────────────────────────────────────────────
-    addButton(config, canDeposit ? "items.deposit" : "items.deposit-disabled",
-        depositSlot, itemProvider, itemService, ph, "[TEST] Deposit – " + bankId);
+    if (canDeposit) {
+      ConfigurationSection depCfg = config.getSection("items.deposit");
+      if (depCfg != null) {
+        addElement(depositSlot, new StaticMenuElement(
+            buildItem(itemProvider, itemService, depCfg, ph),
+            (ctx, event) -> {
+              Player p = ctx.viewer();
+              EcoPlayer eco = EcoPlayer.of(viewerUuid);
+              MantissaAmount wallet = (eco != null && def != null)
+                  ? eco.vault().balance(def.currencyIdLower()) : MantissaAmount.zero();
+              if (wallet == null || wallet.compareTo(MantissaAmount.zero()) <= 0) {
+                p.sendMessage(Component.text("Your wallet is empty.")); return;
+              }
+              bankService.deposit(bankId, ownerUuid, viewerUuid, wallet)
+                  .thenAccept(d -> p.sendMessage(Component.text("Deposited " + AmountNotation.formatShort(d, 2) + "!")))
+                  .exceptionally(ex -> { p.sendMessage(Component.text("Deposit failed: " + rootMessage(ex))); return null; });
+            }));
+      }
+    } else {
+      addButton(config, "items.deposit-disabled", depositSlot, itemProvider, itemService, ph, "");
+    }
 
     // ── Deposit All ──────────────────────────────────────────────────────────
-    addButton(config, canDeposit ? "items.deposit-all" : "items.deposit-all-disabled",
-        depositAllSlot, itemProvider, itemService, ph, "[TEST] Deposit All – " + bankId);
+    if (canDeposit) {
+      ConfigurationSection depAllCfg = config.getSection("items.deposit-all");
+      if (depAllCfg != null) {
+        addElement(depositAllSlot, new StaticMenuElement(
+            buildItem(itemProvider, itemService, depAllCfg, ph),
+            (ctx, event) -> {
+              Player p = ctx.viewer();
+              EcoPlayer eco = EcoPlayer.of(viewerUuid);
+              MantissaAmount wallet = (eco != null && def != null)
+                  ? eco.vault().balance(def.currencyIdLower()) : MantissaAmount.zero();
+              if (wallet == null || wallet.compareTo(MantissaAmount.zero()) <= 0) {
+                p.sendMessage(Component.text("Your wallet is empty.")); return;
+              }
+              bankService.deposit(bankId, ownerUuid, viewerUuid, wallet)
+                  .thenAccept(d -> p.sendMessage(Component.text("Deposited all " + AmountNotation.formatShort(d, 2) + "!")))
+                  .exceptionally(ex -> { p.sendMessage(Component.text("Deposit failed: " + rootMessage(ex))); return null; });
+            }));
+      }
+    } else {
+      addButton(config, "items.deposit-all-disabled", depositAllSlot, itemProvider, itemService, ph, "");
+    }
 
     // ── Withdraw ─────────────────────────────────────────────────────────────
-    addButton(config, canWithdraw ? "items.withdraw" : "items.withdraw-disabled",
-        withdrawSlot, itemProvider, itemService, ph, "[TEST] Withdraw – " + bankId);
+    if (canWithdraw) {
+      ConfigurationSection wdCfg = config.getSection("items.withdraw");
+      if (wdCfg != null) {
+        addElement(withdrawSlot, new StaticMenuElement(
+            buildItem(itemProvider, itemService, wdCfg, ph),
+            (ctx, event) -> {
+              Player p = ctx.viewer();
+              BankAccountCacheService.View cur = bankCache.get(bankId, ownerUuid);
+              MantissaAmount bankBal = (cur != null && cur.balance() != null) ? cur.balance() : MantissaAmount.zero();
+              if (bankBal.compareTo(MantissaAmount.zero()) <= 0) {
+                p.sendMessage(Component.text("Bank account is empty.")); return;
+              }
+              bankService.withdraw(bankId, ownerUuid, viewerUuid, bankBal)
+                  .thenAccept(w -> p.sendMessage(Component.text("Withdrew " + AmountNotation.formatShort(w, 2) + "!")))
+                  .exceptionally(ex -> { p.sendMessage(Component.text("Withdraw failed: " + rootMessage(ex))); return null; });
+            }));
+      }
+    } else {
+      addButton(config, "items.withdraw-disabled", withdrawSlot, itemProvider, itemService, ph, "");
+    }
 
     // ── Withdraw All ─────────────────────────────────────────────────────────
-    addButton(config, canWithdraw ? "items.withdraw-all" : "items.withdraw-all-disabled",
-        withdrawAllSlot, itemProvider, itemService, ph, "[TEST] Withdraw All – " + bankId);
+    if (canWithdraw) {
+      ConfigurationSection wdAllCfg = config.getSection("items.withdraw-all");
+      if (wdAllCfg != null) {
+        addElement(withdrawAllSlot, new StaticMenuElement(
+            buildItem(itemProvider, itemService, wdAllCfg, ph),
+            (ctx, event) -> {
+              Player p = ctx.viewer();
+              BankAccountCacheService.View cur = bankCache.get(bankId, ownerUuid);
+              MantissaAmount bankBal = (cur != null && cur.balance() != null) ? cur.balance() : MantissaAmount.zero();
+              if (bankBal.compareTo(MantissaAmount.zero()) <= 0) {
+                p.sendMessage(Component.text("Bank account is empty.")); return;
+              }
+              bankService.withdraw(bankId, ownerUuid, viewerUuid, bankBal)
+                  .thenAccept(w -> p.sendMessage(Component.text("Withdrew all " + AmountNotation.formatShort(w, 2) + "!")))
+                  .exceptionally(ex -> { p.sendMessage(Component.text("Withdraw failed: " + rootMessage(ex))); return null; });
+            }));
+      }
+    } else {
+      addButton(config, "items.withdraw-all-disabled", withdrawAllSlot, itemProvider, itemService, ph, "");
+    }
 
     // ── Transactions ─────────────────────────────────────────────────────────
-    addButton(config, canViewLog ? "items.transactions" : "items.transactions-disabled",
-        transSlot, itemProvider, itemService, ph, "[TEST] Transactions – " + bankId);
+    if (canViewLog) {
+      ConfigurationSection transCfg = config.getSection("items.transactions");
+      if (transCfg != null) {
+        addElement(transSlot, new StaticMenuElement(
+            buildItem(itemProvider, itemService, transCfg, ph),
+            (ctx, event) -> ctx.menuService().open(ctx.viewer(),
+                new BankTransactionsMenuView(accessor, bankId, ownerUuid, viewerUuid))
+        ));
+      }
+    } else {
+      addButton(config, "items.transactions-disabled",
+          transSlot, itemProvider, itemService, ph, "");
+    }
 
     // ── Level ────────────────────────────────────────────────────────────────
-    addButton(config, canUpgrade ? "items.level" : "items.level-disabled",
-        levelSlot, itemProvider, itemService, ph, "[TEST] Level – " + bankId);
+    if (canUpgrade) {
+      ConfigurationSection lvlCfg = config.getSection("items.level");
+      if (lvlCfg != null) {
+        addElement(levelSlot, new StaticMenuElement(
+            buildItem(itemProvider, itemService, lvlCfg, ph),
+            (ctx, event) -> ctx.menuService().open(ctx.viewer(),
+                new BankLevelMenuView(accessor, bankId, ownerUuid, viewerUuid))));
+      }
+    } else {
+      addButton(config, "items.level-disabled", levelSlot, itemProvider, itemService, ph, "");
+    }
 
     // ── Invite ───────────────────────────────────────────────────────────────
     boolean memberSystemEnabled = def != null && def.memberSystem().enabled();
     if (memberSystemEnabled) {
-      addButton(config, canInvite ? "items.invite" : "items.invite-disabled",
-          inviteSlot, itemProvider, itemService, ph, "[TEST] Invite – " + bankId);
+      if (canInvite) {
+        ConfigurationSection invCfg = config.getSection("items.invite");
+        if (invCfg != null) {
+          addElement(inviteSlot, new StaticMenuElement(
+              buildItem(itemProvider, itemService, invCfg, ph),
+              (ctx, event) -> ctx.menuService().open(ctx.viewer(),
+                  new BankInvitePlayerMenuView(accessor, bankId, ownerUuid, viewerUuid))));
+        }
+      } else {
+        addButton(config, "items.invite-disabled", inviteSlot, itemProvider, itemService, ph, "");
+      }
 
       // ── Member ─────────────────────────────────────────────────────────────
-      addButton(config, isOwner ? "items.member" : "items.member-disabled",
-          memberSlot, itemProvider, itemService, ph, "[TEST] Members – " + bankId);
+      if (isOwner) {
+        ConfigurationSection memCfg = config.getSection("items.member");
+        if (memCfg != null) {
+          addElement(memberSlot, new StaticMenuElement(
+              buildItem(itemProvider, itemService, memCfg, ph),
+              (ctx, event) -> ctx.menuService().open(ctx.viewer(),
+                  new BankMemberMenuView(accessor, bankId, ownerUuid, viewerUuid))));
+        }
+      } else {
+        addButton(config, "items.member-disabled", memberSlot, itemProvider, itemService, ph, "");
+      }
     }
 
     // ── Back ─────────────────────────────────────────────────────────────────
@@ -272,7 +398,9 @@ public final class BankDetailMenuView extends AbstractMenuView {
     if (cfg == null) return;
     addElement(slot, new StaticMenuElement(
         buildItem(itemProvider, itemService, cfg, ph),
-        (ctx, event) -> ctx.viewer().sendMessage(Component.text(testMessage))));
+        (ctx, event) -> {
+          if (!testMessage.isBlank()) ctx.viewer().sendMessage(Component.text(testMessage));
+        }));
   }
 
   private static ItemStack buildItem(ItemProviderService itemProvider, ItemService itemService,
@@ -301,6 +429,12 @@ public final class BankDetailMenuView extends AbstractMenuView {
     if (online != null) return online.getName();
     String cached = Bukkit.getOfflinePlayer(uuid).getName();
     return cached != null ? cached : uuid.toString();
+  }
+
+  private static String rootMessage(Throwable t) {
+    Throwable r = t;
+    for (int i = 0; i < 8 && r != null && r.getCause() != null; i++) r = r.getCause();
+    return r != null && r.getMessage() != null ? r.getMessage() : "Unknown error";
   }
 }
 

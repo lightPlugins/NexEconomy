@@ -10,6 +10,11 @@ import io.nexstudios.languageservice.LanguageServiceModule;
 import io.nexstudios.languageservice.service.language.LanguageService;
 import io.nexstudios.menuservice.api.MenuRegistry;
 import io.nexstudios.nexeconomy.service.menu.bank.detail.BankDetailMenuDefinition;
+import io.nexstudios.nexeconomy.service.menu.bank.invite.BankInvitePlayerMenuDefinition;
+import io.nexstudios.nexeconomy.service.menu.bank.invite.BankInviteRoleMenuDefinition;
+import io.nexstudios.nexeconomy.service.menu.bank.level.BankLevelMenuDefinition;
+import io.nexstudios.nexeconomy.service.menu.bank.member.BankMemberMenuDefinition;
+import io.nexstudios.nexeconomy.service.menu.bank.member.BankMemberRoleMenuDefinition;
 import io.nexstudios.nexeconomy.service.menu.bank.overview.BankOverviewMenuDefinition;
 import io.nexstudios.nexeconomy.command.*;
 import io.nexstudios.nexeconomy.modules.BankCoreModule;
@@ -110,6 +115,11 @@ public class NexEconomyPlugin extends NexPaperPlugin {
     MenuRegistry menuRegistry = getNexLogicService().getService(MenuRegistry.class);
     menuRegistry.register(new BankOverviewMenuDefinition(services()));
     menuRegistry.register(new BankDetailMenuDefinition(services()));
+    menuRegistry.register(new BankLevelMenuDefinition(services()));
+    menuRegistry.register(new BankInvitePlayerMenuDefinition(services()));
+    menuRegistry.register(new BankInviteRoleMenuDefinition(services()));
+    menuRegistry.register(new BankMemberMenuDefinition(services()));
+    menuRegistry.register(new BankMemberRoleMenuDefinition(services()));
 
     getLogger().info("NexEconomy successfully started.");
   }

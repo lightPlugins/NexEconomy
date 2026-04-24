@@ -86,9 +86,9 @@ public final class DefaultBankLevelService implements BankLevelService, Service 
     return repo.updateBankLevel(bankAccountId, targetLevel)
         .thenApply(success -> {
           if (Boolean.TRUE.equals(success)) {
-            invalidate(bankAccountId);
+            levelCache.put(bankAccountId, targetLevel);
             if (cache != null) {
-              cache.invalidate(bankAccountId);
+              cache.updateAccountLevel(bankAccountId, targetLevel);
             }
             return true;
           }

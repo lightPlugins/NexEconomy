@@ -6,6 +6,7 @@ import io.nexstudios.nexeconomy.definition.MantissaAmount;
 import io.nexstudios.nexeconomy.service.bank.repo.BankRepositoryService;
 import io.nexstudios.nexlogic.bukkit.services.entity.nexeconomy.BankAccountEntity;
 import io.nexstudios.nexlogic.bukkit.services.entity.nexeconomy.BankMemberEntity;
+import io.nexstudios.nexlogic.bukkit.services.entity.nexeconomy.BankTransactionEntity;
 import io.nexstudios.nexlogic.bukkit.services.entity.nexeconomy.BankWithdrawUsageEntity;
 import io.nexstudios.nexlogic.common.services.logging.LoggerService;
 import io.nexstudios.serviceregistry.di.Dependencies;
@@ -32,10 +33,14 @@ public final class BankAccountCacheService implements Service {
 
   public record Key(String bankIdLower, UUID ownerUuid) {}
 
+  /** Max number of transactions stored per account in the cache. */
+  public static final int TX_CACHE_LIMIT = 100;
+
   public record View(
       BankAccountEntity account,
       MantissaAmount balance,
-      List<BankMemberEntity> members
+      List<BankMemberEntity> members,
+      List<BankTransactionEntity> transactions
   ) {}
 
   private record WithdrawUsageKey(
@@ -176,10 +181,77 @@ public final class BankAccountCacheService implements Service {
 
     View old = existing.view();
     MantissaAmount safe = newBalance != null ? newBalance : MantissaAmount.zero();
-    View updated = new View(old.account(), safe, old.members());
+    View updated = new View(old.account(), safe, old.members(), old.transactions());
 
     Key key = new Key(normalize(old.account().getBankIdLower()), old.account().getOwnerUuid());
     put(key, updated);
+  }
+
+  /**
+   * Updates the level stored inside the cached {@link BankAccountEntity} in-place.
+   * All other cached data (balance, members, transactions) is preserved.
+   * If the entry is not currently cached this is a no-op.
+   */
+  public void updateAccountLevel(UUID bankAccountId, int newLevel) {
+    if (bankAccountId == null) return;
+
+    Entry existing = byAccountId.get(bankAccountId);
+    if (existing == null || existing.view() == null || existing.view().account() == null) return;
+
+    BankAccountEntity acc = existing.view().account();
+    acc.setLevel(newLevel);                          // mutate the entity in-place (same object)
+
+    // Re-put to refresh entry timestamp so TTL resets
+    View old = existing.view();
+    View refreshed = new View(acc, old.balance(), old.members(), old.transactions());
+    Key key = new Key(normalize(acc.getBankIdLower()), acc.getOwnerUuid());
+    put(key, refreshed);
+  }
+
+  /**
+   * Replaces the cached transaction list for a bank account in-place.
+   * If no entry is cached, this is a no-op – the next load will fetch from DB.
+   */
+  public void updateTransactions(UUID bankAccountId, List<BankTransactionEntity> transactions) {
+    if (bankAccountId == null) return;
+
+    Entry existing = byAccountId.get(bankAccountId);
+    if (existing == null || existing.view() == null || existing.view().account() == null) return;
+
+    View old = existing.view();
+    List<BankTransactionEntity> safe = transactions != null ? List.copyOf(transactions) : List.of();
+    View updated = new View(old.account(), old.balance(), old.members(), safe);
+
+    Key key = new Key(normalize(old.account().getBankIdLower()), old.account().getOwnerUuid());
+    put(key, updated);
+  }
+
+  /**
+   * Prepends a single new transaction to the cached list for a bank account.
+   * The list is trimmed to {@link #TX_CACHE_LIMIT} afterwards.
+   * If no entry is cached, this is a no-op – the next load will fetch from DB.
+   */
+  public void prependTransaction(UUID bankAccountId, BankTransactionEntity tx) {
+    if (bankAccountId == null || tx == null) return;
+
+    Entry existing = byAccountId.get(bankAccountId);
+    if (existing == null || existing.view() == null || existing.view().account() == null) return;
+
+    View old = existing.view();
+    List<BankTransactionEntity> current = old.transactions();
+
+    List<BankTransactionEntity> updated = new ArrayList<>(Math.min(TX_CACHE_LIMIT, (current == null ? 0 : current.size()) + 1));
+    updated.add(tx);
+    if (current != null) {
+      for (BankTransactionEntity e : current) {
+        if (updated.size() >= TX_CACHE_LIMIT) break;
+        updated.add(e);
+      }
+    }
+
+    View newView = new View(old.account(), old.balance(), old.members(), List.copyOf(updated));
+    Key key = new Key(normalize(old.account().getBankIdLower()), old.account().getOwnerUuid());
+    put(key, newView);
   }
 
   public void invalidate(UUID bankAccountId) {
@@ -354,15 +426,18 @@ public final class BankAccountCacheService implements Service {
   private CompletableFuture<View> loadBalanceAndMembers(BankAccountEntity acc) {
     CompletableFuture<MantissaAmount> balF = repo.loadBalance(acc.getId());
     CompletableFuture<List<BankMemberEntity>> memF = repo.listMembers(acc.getId());
+    CompletableFuture<List<BankTransactionEntity>> txF = repo.listRecentTransactions(acc.getId(), TX_CACHE_LIMIT);
 
-    return CompletableFuture.allOf(balF, memF).thenApply(v -> {
+    return CompletableFuture.allOf(balF, memF, txF).thenApply(v -> {
       MantissaAmount bal = balF.getNow(MantissaAmount.zero());
       List<BankMemberEntity> mem = memF.getNow(List.of());
+      List<BankTransactionEntity> txs = txF.getNow(List.of());
 
       return new View(
           acc,
           bal == null ? MantissaAmount.zero() : bal,
-          mem == null ? List.of() : List.copyOf(mem)
+          mem == null ? List.of() : List.copyOf(mem),
+          txs == null ? List.of() : List.copyOf(txs)
       );
     });
   }

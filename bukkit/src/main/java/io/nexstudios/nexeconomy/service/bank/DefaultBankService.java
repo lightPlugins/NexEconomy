@@ -6,7 +6,6 @@ import io.nexstudios.nexeconomy.definition.AmountNotation;
 import io.nexstudios.nexeconomy.definition.CurrencyDefinition;
 import io.nexstudios.nexeconomy.definition.CurrencyType;
 import io.nexstudios.nexeconomy.definition.MantissaAmount;
-import io.nexstudios.nexeconomy.provider.bank.BankResponse;
 import io.nexstudios.nexeconomy.service.bank.cache.BankAccountCacheService;
 import io.nexstudios.nexeconomy.service.bank.cache.BankAccountPresenceService;
 import io.nexstudios.nexeconomy.service.bank.definition.BankDefinition;
@@ -736,7 +735,12 @@ public final class DefaultBankService implements BankService, Service {
                             allowed,
                             null
                         ).thenApply(ignoredTx -> {
-                          if (cache != null) cache.updateBalance(acc.getId(), nextBalance);
+                          if (cache != null) {
+                            cache.updateBalance(acc.getId(), nextBalance);
+                            // Reload transaction list in background so the Transactions menu shows fresh data.
+                            repo.listRecentTransactions(acc.getId(), BankAccountCacheService.TX_CACHE_LIMIT)
+                                .thenAccept(txs -> cache.updateTransactions(acc.getId(), txs));
+                          }
                           if (redisSync != null) redisSync.publishInvalidateAccount(acc.getId());
                           return allowed;
                         })
@@ -822,7 +826,12 @@ public final class DefaultBankService implements BankService, Service {
                               );
 
                               return CompletableFuture.allOf(usageF, txF).thenApply(x -> {
-                                if (cache != null) cache.updateBalance(acc.getId(), nextBank);
+                                if (cache != null) {
+                                  cache.updateBalance(acc.getId(), nextBank);
+                                  // Reload transaction list in background so the Transactions menu shows fresh data.
+                                  repo.listRecentTransactions(acc.getId(), BankAccountCacheService.TX_CACHE_LIMIT)
+                                      .thenAccept(txs -> cache.updateTransactions(acc.getId(), txs));
+                                }
                                 if (redisSync != null) redisSync.publishInvalidateAccount(acc.getId());
                                 return allowed;
                               });

@@ -77,13 +77,16 @@ public final class DefaultBankTransactionService implements BankTransactionServi
                 return CompletableFuture.failedFuture(new IllegalStateException("bank not available"));
               }
 
-              BankMemberEntity member = findMember(view.members(), viewerUuid);
-              if (member == null) return CompletableFuture.failedFuture(new IllegalStateException("not a member"));
+              // Owner always has access – no member-role check needed.
+              if (!viewerUuid.equals(ownerUuid)) {
+                BankMemberEntity member = findMember(view.members(), viewerUuid);
+                if (member == null) return CompletableFuture.failedFuture(new IllegalStateException("not a member"));
 
-              String roleId = normalize(member.getRoleIdLower());
-              BankDefinition.RoleDefinition role = ms.rolesByIdLower() == null ? null : ms.rolesByIdLower().get(roleId);
-              if (role == null) return CompletableFuture.failedFuture(new IllegalStateException("no permission"));
-              if (!role.canViewLog()) return CompletableFuture.failedFuture(new IllegalStateException("no permission"));
+                String roleId = normalize(member.getRoleIdLower());
+                BankDefinition.RoleDefinition role = ms.rolesByIdLower() == null ? null : ms.rolesByIdLower().get(roleId);
+                if (role == null) return CompletableFuture.failedFuture(new IllegalStateException("no permission"));
+                if (!role.canViewLog()) return CompletableFuture.failedFuture(new IllegalStateException("no permission"));
+              }
 
               return repo.listRecentTransactions(view.account().getId(), effectiveLimit);
             })

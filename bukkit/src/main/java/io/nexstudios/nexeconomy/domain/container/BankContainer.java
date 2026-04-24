@@ -4,6 +4,7 @@ import io.nexstudios.nexeconomy.definition.MantissaAmount;
 import io.nexstudios.nexeconomy.service.bank.BankLockFlushService;
 import io.nexstudios.nexeconomy.service.bank.cache.BankAccountCacheService;
 import io.nexstudios.nexlogic.bukkit.services.entity.nexeconomy.BankMemberEntity;
+import io.nexstudios.nexlogic.bukkit.services.entity.nexeconomy.BankTransactionEntity;
 import org.jetbrains.annotations.Nullable;
 
 import java.util.List;
@@ -52,6 +53,43 @@ public final class BankContainer {
   public @Nullable List<BankMemberEntity> members(String bankId) {
     BankAccountCacheService.View v = view(bankId);
     return v == null ? null : v.members();
+  }
+
+  /**
+   * Returns the cached recent transactions for this bank, or an empty list if not yet cached.
+   * Transactions are loaded together with balance/members and limited to
+   * {@link BankAccountCacheService#TX_CACHE_LIMIT} entries.
+   */
+  public List<BankTransactionEntity> transactions(String bankId) {
+    BankAccountCacheService.View v = view(bankId);
+    if (v == null || v.transactions() == null) return List.of();
+    return v.transactions();
+  }
+
+  /**
+   * Returns the cached recent transactions for a bank owned by {@code bankOwnerUuid}.
+   * Use this when the player is a <em>member</em> of the bank (not the owner) so the cache
+   * is keyed under the bank owner's UUID.
+   *
+   * @param bankId       the bank identifier
+   * @param bankOwnerUuid the UUID of the bank owner (may differ from this container's ownerUuid)
+   * @return the cached transaction list, or an empty list if not yet cached
+   */
+  public List<BankTransactionEntity> transactions(String bankId, UUID bankOwnerUuid) {
+    if (bankId == null || bankId.isBlank() || bankOwnerUuid == null) return List.of();
+    BankAccountCacheService.View v = cache.get(normalize(bankId), bankOwnerUuid);
+    if (v == null || v.transactions() == null) return List.of();
+    return v.transactions();
+  }
+
+  /**
+   * Updates the cached transaction list for the given bank.
+   * Use this after a deposit/withdraw to keep the cache in sync without a full reload.
+   */
+  public void updateTransactions(String bankId, List<BankTransactionEntity> transactions) {
+    UUID accountId = accountId(bankId);
+    if (accountId == null) return;
+    cache.updateTransactions(accountId, transactions);
   }
 
   /** Returns the current bank level, or 1 (default) if not cached. */
