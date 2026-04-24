@@ -162,6 +162,26 @@ public final class BankAccountCacheService implements Service {
     return v;
   }
 
+  /**
+   * Updates the cached balance for the given bank account in-place.
+   * The cache entry (account + members) is preserved; only the balance is replaced.
+   * If the entry is not currently cached this is a no-op – the next load will fetch the
+   * correct value from DB anyway.
+   */
+  public void updateBalance(UUID bankAccountId, MantissaAmount newBalance) {
+    if (bankAccountId == null) return;
+
+    Entry existing = byAccountId.get(bankAccountId);
+    if (existing == null || existing.view() == null || existing.view().account() == null) return;
+
+    View old = existing.view();
+    MantissaAmount safe = newBalance != null ? newBalance : MantissaAmount.zero();
+    View updated = new View(old.account(), safe, old.members());
+
+    Key key = new Key(normalize(old.account().getBankIdLower()), old.account().getOwnerUuid());
+    put(key, updated);
+  }
+
   public void invalidate(UUID bankAccountId) {
     if (bankAccountId == null) return;
 
@@ -532,3 +552,4 @@ public final class BankAccountCacheService implements Service {
     return s == null ? "" : s.trim().toLowerCase(java.util.Locale.ROOT);
   }
 }
+

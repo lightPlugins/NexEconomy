@@ -736,7 +736,7 @@ public final class DefaultBankService implements BankService, Service {
                             allowed,
                             null
                         ).thenApply(ignoredTx -> {
-                          if (cache != null) cache.invalidate(acc.getId());
+                          if (cache != null) cache.updateBalance(acc.getId(), nextBalance);
                           if (redisSync != null) redisSync.publishInvalidateAccount(acc.getId());
                           return allowed;
                         })
@@ -822,7 +822,7 @@ public final class DefaultBankService implements BankService, Service {
                               );
 
                               return CompletableFuture.allOf(usageF, txF).thenApply(x -> {
-                                if (cache != null) cache.invalidate(acc.getId());
+                                if (cache != null) cache.updateBalance(acc.getId(), nextBank);
                                 if (redisSync != null) redisSync.publishInvalidateAccount(acc.getId());
                                 return allowed;
                               });

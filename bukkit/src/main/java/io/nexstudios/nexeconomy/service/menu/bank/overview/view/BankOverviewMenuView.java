@@ -98,9 +98,12 @@ public final class BankOverviewMenuView extends ControlledPagedMenuView<BankOver
     String ownerLabel = sortModes != null ? sortModes.getString("owner", "Owned → Member") : "Owned → Member";
     String memberLabel = sortModes != null ? sortModes.getString("member", "Member → Owned") : "Member → Owned";
 
+    int sortSlot = config.getInt("layout.slots.sort-button", 8);
+    String sortDisplayName = config.getString("items.sort-button.display-name", "<yellow>Bank Sorting");
+
     this.sortControl = addSortControl(
-        config.getInt("layout.slots.sort-button", 8),
-        config.getString("items.sort-button.display-name", "<yellow>Bank Sorting"),
+        sortSlot,
+        sortDisplayName,
         Material.COMPARATOR,
         BasicPageSortControl.<BankEntry>builder("bank-sort")
             .mode("owner", ownerLabel, (a, b) -> Boolean.compare(!a.isOwner(), !b.isOwner()))
