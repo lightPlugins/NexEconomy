@@ -89,6 +89,14 @@ public final class BankContainer {
     return List.copyOf(cache.snapshotByOwner(ownerUuid));
   }
 
+  /**
+   * Returns all cached bank views where this player is a non-owner member (snapshot).
+   * May be incomplete if some accounts have not been loaded into cache yet.
+   */
+  public List<BankAccountCacheService.View> memberBankViews() {
+    return List.copyOf(cache.snapshotAsMember(ownerUuid));
+  }
+
   // ─── Lock-state reads (from in-memory cache) ─────────────────────────────
 
   /**

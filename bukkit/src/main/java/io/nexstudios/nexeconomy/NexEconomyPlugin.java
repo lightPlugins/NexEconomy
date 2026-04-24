@@ -8,6 +8,9 @@ import io.nexstudios.framework.paper.NexPaperPlugin;
 import io.nexstudios.itemservice.bukkit.ItemServiceModule;
 import io.nexstudios.languageservice.LanguageServiceModule;
 import io.nexstudios.languageservice.service.language.LanguageService;
+import io.nexstudios.menuservice.api.MenuRegistry;
+import io.nexstudios.nexeconomy.service.menu.bank.detail.BankDetailMenuDefinition;
+import io.nexstudios.nexeconomy.service.menu.bank.overview.BankOverviewMenuDefinition;
 import io.nexstudios.nexeconomy.command.*;
 import io.nexstudios.nexeconomy.modules.BankCoreModule;
 import io.nexstudios.nexeconomy.modules.EconomyCoreModule;
@@ -103,6 +106,10 @@ public class NexEconomyPlugin extends NexPaperPlugin {
         new EconomyPlayerListener(services()),
         new BankPlayerListener(services())
     );
+
+    MenuRegistry menuRegistry = getNexLogicService().getService(MenuRegistry.class);
+    menuRegistry.register(new BankOverviewMenuDefinition(services()));
+    menuRegistry.register(new BankDetailMenuDefinition(services()));
 
     getLogger().info("NexEconomy successfully started.");
   }

@@ -9,7 +9,7 @@ import io.nexstudios.nexeconomy.service.bank.BankService;
 import io.nexstudios.nexeconomy.service.bank.cache.BankAccountCacheService;
 import io.nexstudios.nexeconomy.service.bank.interest.BankInterestService;
 import io.nexstudios.nexeconomy.service.bank.registry.BankRegistryService;
-import io.nexstudios.nexeconomy.service.placeholder.DefaultEconomyPlaceholderService;
+import io.nexstudios.nexeconomy.service.placeholder.EconomyPlaceholderService;
 import io.nexstudios.nexeconomy.service.registry.CurrencyRegistryService;
 import io.nexstudios.nexeconomy.service.economy.EconomyPlayerCacheService;
 import io.nexstudios.serviceregistry.di.Dependencies;
@@ -26,7 +26,7 @@ import org.bukkit.command.CommandSender;
     LanguageService.class,
     CurrencyRegistryService.class,
     EconomyPlayerCacheService.class,
-    DefaultEconomyPlaceholderService.class,
+    EconomyPlaceholderService.class,
     BankService.class,
     BankRegistryService.class,
     BankAccountCacheService.class,
@@ -38,7 +38,7 @@ public class EconomyReloadCommand implements Service {
   private final LanguageService languageService;
   private final CurrencyRegistryService currencyRegistry;
   private final EconomyPlayerCacheService playerCache;
-  private final DefaultEconomyPlaceholderService placeholderService;
+  private final EconomyPlaceholderService placeholderService;
   private final BankService bankService;
   private final BankRegistryService bankRegistry;
   private final BankAccountCacheService bankCache;
@@ -49,7 +49,7 @@ public class EconomyReloadCommand implements Service {
     this.languageService = accessor.getService(LanguageService.class);
     this.currencyRegistry = accessor.getService(CurrencyRegistryService.class);
     this.playerCache = accessor.getService(EconomyPlayerCacheService.class);
-    this.placeholderService = accessor.getService(DefaultEconomyPlaceholderService.class);
+    this.placeholderService = accessor.getService(EconomyPlaceholderService.class);
     this.bankService = accessor.getService(BankService.class);
     this.bankRegistry = accessor.getService(BankRegistryService.class);
     this.bankCache = accessor.getService(BankAccountCacheService.class);

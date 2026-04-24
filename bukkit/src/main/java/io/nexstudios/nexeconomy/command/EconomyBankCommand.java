@@ -24,6 +24,9 @@ import io.nexstudios.nexeconomy.service.economy.EconomyService;
 import io.nexstudios.nexeconomy.service.registry.CurrencyRegistryService;
 import io.nexstudios.dialogservice.api.ConfirmDialog;
 import io.nexstudios.dialogservice.service.ConfirmDialogService;
+import io.nexstudios.menuservice.api.MenuService;
+import io.nexstudios.nexeconomy.NexEconomyPlugin;
+import io.nexstudios.nexeconomy.service.menu.bank.overview.view.BankOverviewMenuView;
 import io.nexstudios.framework.paper.services.plugin.PaperPluginService;
 import io.nexstudios.nexlogic.bukkit.services.entity.nexeconomy.BankTransactionEntity;
 import io.nexstudios.serviceregistry.di.Dependencies;
@@ -85,6 +88,7 @@ public final class EconomyBankCommand implements Service {
   private final ConfirmDialogService confirmDialogs;
   private final Plugin plugin;
   private final ServiceAccessor services;
+  private final MenuService menuService;
 
   public EconomyBankCommand(ServiceAccessor accessor) {
     this.components = accessor.getService(ComponentService.class);
@@ -98,6 +102,7 @@ public final class EconomyBankCommand implements Service {
     this.confirmDialogs = accessor.getService(ConfirmDialogService.class);
     this.plugin = accessor.getService(PaperPluginService.class).plugin();
     this.services = accessor;
+    this.menuService = NexEconomyPlugin.getNexLogicService().getService(MenuService.class);
   }
 
   @Command(value = "overview", permission = "nexeconomy.bank.overview", playerOnly = true)
@@ -105,6 +110,7 @@ public final class EconomyBankCommand implements Service {
     Player sender = (Player) source.sender();
     if (sender == null) return 0;
 
+    menuService.open(sender, new BankOverviewMenuView(services));
     return 1;
   }
 

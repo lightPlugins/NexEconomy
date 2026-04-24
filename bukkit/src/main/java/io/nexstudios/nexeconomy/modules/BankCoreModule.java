@@ -16,6 +16,7 @@ import io.nexstudios.nexeconomy.service.bank.registry.BankRegistryService;
 import io.nexstudios.nexeconomy.service.bank.registry.DefaultBankRegistryService;
 import io.nexstudios.nexeconomy.service.bank.repo.BankRepositoryService;
 import io.nexstudios.nexeconomy.service.bank.repo.DefaultBankRepositoryService;
+import io.nexstudios.nexeconomy.service.bank.BankLockFlushService;
 import io.nexstudios.nexeconomy.service.bank.sync.BankRedisSyncService;
 import io.nexstudios.nexeconomy.service.bank.sync.DefaultBankRedisSyncService;
 import io.nexstudios.nexeconomy.service.bank.transaction.BankTransactionService;
@@ -56,6 +57,9 @@ public final class BankCoreModule implements ServiceModule {
 
     // Register the public bank API for later use in commands/menus/holograms
     services.register(BankProviderService.class, DefaultBankProviderService.class);
+
+    // Register BankLockFlushService (required by EcoPlayerRegistry)
+    services.register(BankLockFlushService.class, BankLockFlushService.class);
 
     // Register EcoPlayerRegistry and its listener here – after BankAccountCacheService is available.
     // EconomyPlayerListener depends on EcoPlayerRegistry which depends on BankAccountCacheService.

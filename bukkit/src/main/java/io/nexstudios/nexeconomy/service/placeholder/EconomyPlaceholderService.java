@@ -22,4 +22,9 @@ public interface EconomyPlaceholderService extends Service, AutoCloseable {
    * Must be called explicitly after construction, before the service is used.
    */
   void start();
+
+  /**
+   * Reloads all placeholders (e.g. after a config reload).
+   */
+  void reload();
 }

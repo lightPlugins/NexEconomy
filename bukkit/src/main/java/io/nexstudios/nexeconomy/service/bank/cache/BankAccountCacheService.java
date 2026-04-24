@@ -507,6 +507,27 @@ public final class BankAccountCacheService implements Service {
     return java.util.List.copyOf(result);
   }
 
+  /**
+   * Returns a snapshot of all cached {@link View} objects where {@code memberUuid} appears as a
+   * non-owner member. The list may be incomplete if some accounts are still loading.
+   */
+  public java.util.List<View> snapshotAsMember(UUID memberUuid) {
+    if (memberUuid == null) return java.util.List.of();
+    java.util.List<View> result = new java.util.ArrayList<>();
+    for (java.util.Map.Entry<Key, Entry> e : byKey.entrySet()) {
+      if (e.getValue() == null || e.getValue().view() == null) continue;
+      View v = e.getValue().view();
+      if (v.account() == null) continue;
+      // Skip banks owned by this player – those are covered by snapshotByOwner.
+      if (memberUuid.equals(v.account().getOwnerUuid())) continue;
+      if (v.members() == null) continue;
+      boolean isMember = v.members().stream()
+          .anyMatch(m -> memberUuid.equals(m.getMemberUuid()));
+      if (isMember) result.add(v);
+    }
+    return java.util.List.copyOf(result);
+  }
+
   private static String normalize(String s) {
     return s == null ? "" : s.trim().toLowerCase(java.util.Locale.ROOT);
   }
