@@ -14,12 +14,12 @@ import io.nexstudios.menuservice.core.page.ControlledPagedMenuView;
 import io.nexstudios.menuservice.core.page.element.NextPageElement;
 import io.nexstudios.menuservice.core.page.element.PreviousPageElement;
 import io.nexstudios.nexeconomy.NexEconomyPlugin;
-import io.nexstudios.nexeconomy.service.bank.cache.BankAccountCacheService;
+import io.nexstudios.nexeconomy.domain.EcoPlayer;
 import io.nexstudios.nexeconomy.service.bank.definition.BankDefinition;
-import io.nexstudios.nexeconomy.service.bank.registry.BankRegistryService;
 import io.nexstudios.nexeconomy.service.menu.bank.detail.view.BankDetailMenuView;
 import io.nexstudios.nexeconomy.service.menu.bank.invite.BankInvitePlayerMenuDefinition;
 import io.nexstudios.nexeconomy.service.menu.bank.invite.view.BankInviteRoleMenuView;
+import io.nexstudios.nexlogic.bukkit.services.entity.nexeconomy.BankMemberEntity;
 import io.nexstudios.nexlogic.bukkit.services.items.ItemProviderService;
 import io.nexstudios.serviceregistry.di.ServiceAccessor;
 import net.kyori.adventure.text.minimessage.MiniMessage;
@@ -39,6 +39,7 @@ import java.util.UUID;
 /**
  * Paged view of all online players eligible to be invited to a bank.
  * Clicking a player head opens {@link BankInviteRoleMenuView} for role selection.
+ * All reads go through {@link EcoPlayer} / BankContainer – no direct cache/registry service calls.
  */
 public final class BankInvitePlayerMenuView extends ControlledPagedMenuView<Player> {
 
@@ -51,7 +52,6 @@ public final class BankInvitePlayerMenuView extends ControlledPagedMenuView<Play
   private final UUID ownerUuid;
   private final UUID viewerUuid;
   private final BankDefinition def;
-  private final BankAccountCacheService bankCache;
   private final FileConfiguration config;
   private final ItemProviderService itemProvider;
   private final ItemService itemService;
@@ -66,19 +66,19 @@ public final class BankInvitePlayerMenuView extends ControlledPagedMenuView<Play
     super(KEY, rowsToSize(6), PageBounds.of(1, 2, 7, 3), "bank-invite-player",
         List.of(), (ctx, entry, idx) -> rendererBox[0].render(ctx, entry, idx));
 
-    this.accessor  = accessor;
-    this.bankId    = bankId.toLowerCase(Locale.ROOT);
-    this.ownerUuid = ownerUuid;
+    this.accessor   = accessor;
+    this.bankId     = bankId.toLowerCase(Locale.ROOT);
+    this.ownerUuid  = ownerUuid;
     this.viewerUuid = viewerUuid;
 
-    FileReaderService fileReader      = accessor.getService(FileReaderService.class);
-    this.itemService                  = accessor.getService(ItemService.class);
-    BankRegistryService bankRegistry  = accessor.getService(BankRegistryService.class);
-    this.bankCache                    = accessor.getService(BankAccountCacheService.class);
-    this.itemProvider                 = NexEconomyPlugin.getNexLogicService().getService(ItemProviderService.class);
+    FileReaderService fileReader = accessor.getService(FileReaderService.class);
+    this.itemService             = accessor.getService(ItemService.class);
+    this.itemProvider            = NexEconomyPlugin.getNexLogicService().getService(ItemProviderService.class);
 
     this.config = fileReader.load(Path.of(CONFIG_PATH), CONFIG_PATH, false);
-    this.def    = bankRegistry.bank(this.bankId).orElse(null);
+
+    EcoPlayer ownerEco = EcoPlayer.of(ownerUuid);
+    this.def = ownerEco != null ? ownerEco.banks().definition(this.bankId) : null;
 
     rendererBox[0] = this::renderEntry;
 
@@ -116,11 +116,12 @@ public final class BankInvitePlayerMenuView extends ControlledPagedMenuView<Play
 
   @Override
   protected List<Player> resolveItems(MenuContext context) {
-    BankAccountCacheService.View view = bankCache.get(bankId, ownerUuid);
+    EcoPlayer ownerEco = EcoPlayer.of(ownerUuid);
+    List<BankMemberEntity> members = ownerEco != null ? ownerEco.banks().members(bankId) : null;
     List<UUID> memberUuids = new ArrayList<>();
     memberUuids.add(ownerUuid);
-    if (view != null && view.members() != null) {
-      view.members().forEach(m -> { if (m != null && m.getMemberUuid() != null) memberUuids.add(m.getMemberUuid()); });
+    if (members != null) {
+      members.forEach(m -> { if (m != null && m.getMemberUuid() != null) memberUuids.add(m.getMemberUuid()); });
     }
 
     List<Player> result = new ArrayList<>();
@@ -172,7 +173,4 @@ public final class BankInvitePlayerMenuView extends ControlledPagedMenuView<Play
     return name != null ? name : uuid.toString();
   }
 }
-
-
-
 

@@ -1,12 +1,17 @@
 package io.nexstudios.nexeconomy.domain.container;
 
+import io.nexstudios.nexeconomy.definition.AmountNotation;
 import io.nexstudios.nexeconomy.definition.MantissaAmount;
+import io.nexstudios.nexeconomy.service.bank.BankBalanceFlushService;
 import io.nexstudios.nexeconomy.service.bank.BankLockFlushService;
 import io.nexstudios.nexeconomy.service.bank.cache.BankAccountCacheService;
+import io.nexstudios.nexeconomy.service.bank.definition.BankDefinition;
+import io.nexstudios.nexeconomy.service.bank.registry.BankRegistryService;
 import io.nexstudios.nexlogic.bukkit.services.entity.nexeconomy.BankMemberEntity;
 import io.nexstudios.nexlogic.bukkit.services.entity.nexeconomy.BankTransactionEntity;
 import org.jetbrains.annotations.Nullable;
 
+import java.math.BigDecimal;
 import java.util.List;
 import java.util.Locale;
 import java.util.UUID;
@@ -23,13 +28,19 @@ public final class BankContainer {
 
   private final BankAccountCacheService cache;
   private final BankLockFlushService lockFlush;
+  private final BankBalanceFlushService balanceFlush;
+  private final BankRegistryService bankRegistry;
   private final UUID ownerUuid;
 
   public BankContainer(BankAccountCacheService cache,
                        BankLockFlushService lockFlush,
+                       BankBalanceFlushService balanceFlush,
+                       BankRegistryService bankRegistry,
                        UUID ownerUuid) {
     this.cache = cache;
     this.lockFlush = lockFlush;
+    this.balanceFlush = balanceFlush;
+    this.bankRegistry = bankRegistry;
     this.ownerUuid = ownerUuid;
   }
 
@@ -135,7 +146,100 @@ public final class BankContainer {
     return List.copyOf(cache.snapshotAsMember(ownerUuid));
   }
 
-  // ─── Lock-state reads (from in-memory cache) ─────────────────────────────
+  // ─── Balance mutations (sync cache-first + async DB + Redis via BankBalanceFlushService) ──
+
+  /**
+   * Sets the balance for the given bank to {@code amount}.
+   * The in-memory cache is updated immediately; the DB write happens asynchronously.
+   * On DB failure the cache entry is invalidated so the next read fetches the real value.
+   *
+   * @param bankId bank identifier
+   * @param amount new balance; {@code null} is treated as zero
+   */
+  public void set(String bankId, @Nullable MantissaAmount amount) {
+    String id = normalize(bankId);
+    UUID accountId = accountId(id);
+    if (accountId == null) return;
+
+    MantissaAmount safe = amount != null ? amount : MantissaAmount.zero();
+    cache.updateBalance(accountId, safe);
+    balanceFlush.requestSet(accountId, safe);
+  }
+
+  /**
+   * Adds {@code delta} to the balance of the given bank.
+   * The in-memory cache is updated immediately; the DB write happens asynchronously.
+   * On DB failure the cache entry is invalidated.
+   *
+   * @param bankId bank identifier
+   * @param delta  amount to add (must be positive)
+   * @return {@code true} if the bank was cached and the add was applied; {@code false} if not cached
+   */
+  public boolean add(String bankId, MantissaAmount delta) {
+    String id = normalize(bankId);
+    UUID accountId = accountId(id);
+    if (accountId == null) return false;
+
+    MantissaAmount d = delta != null ? delta : MantissaAmount.zero();
+    MantissaAmount current = balance(id);
+    MantissaAmount next = current != null
+        ? MantissaAmount.of(current.toHuman().add(d.toHuman()), 0)
+        : d;
+    cache.updateBalance(accountId, next);
+    balanceFlush.requestAdd(accountId, d);
+    return true;
+  }
+
+  /**
+   * Removes {@code delta} from the balance of the given bank if sufficient funds exist.
+   * The in-memory cache is updated immediately; the DB write happens asynchronously.
+   * On DB failure the cache entry is invalidated.
+   *
+   * @param bankId bank identifier
+   * @param delta  amount to remove (must be positive)
+   * @return {@code true} if sufficient funds existed and the removal was applied; {@code false} otherwise
+   */
+  public boolean remove(String bankId, MantissaAmount delta) {
+    String id = normalize(bankId);
+    UUID accountId = accountId(id);
+    if (accountId == null) return false;
+
+    MantissaAmount d = delta != null ? delta : MantissaAmount.zero();
+    MantissaAmount current = balance(id);
+    if (current == null || current.compareTo(d) < 0) return false;
+
+    MantissaAmount next = MantissaAmount.of(current.toHuman().subtract(d.toHuman()), 0);
+    cache.updateBalance(accountId, next);
+    balanceFlush.requestRemove(accountId, d);
+    return true;
+  }
+
+  /**
+   * Upgrades the bank level to {@code targetLevel}.
+   * The in-memory cache is updated immediately (optimistic); the DB write happens asynchronously.
+   * On DB failure the cache entry is invalidated so the next read fetches the real value.
+   * <p>
+   * Does nothing if the bank is not currently cached or {@code targetLevel} is not greater than
+   * the current cached level.
+   *
+   * @param bankId      bank identifier
+   * @param targetLevel the new level to set
+   * @return {@code true} if the bank was cached and the level was optimistically applied
+   */
+  public boolean upgradeLevel(String bankId, int targetLevel) {
+    String id = normalize(bankId);
+    UUID accountId = accountId(id);
+    if (accountId == null) return false;
+
+    int current = level(id);
+    if (targetLevel <= current) return false;
+
+    cache.updateAccountLevel(accountId, targetLevel);
+    balanceFlush.requestLevelSet(accountId, targetLevel);
+    return true;
+  }
+
+  // ─── Lock-state reads (from in-memory cache)
 
   /**
    * Returns the cached unlock state of a specific bank.
@@ -211,6 +315,77 @@ public final class BankContainer {
     UUID actor = actorUuid != null ? actorUuid : ownerUuid;
     cache.setCachedPlayerLocked(ownerUuid, false);
     lockFlush.requestPlayerUnlock(ownerUuid, actor);
+  }
+
+  /**
+   * Records a transaction for the given bank immediately in the cache and asynchronously in the DB.
+   * Use this after any sync balance change (deposit/withdraw) to keep the Transactions menu current.
+   *
+   * @param bankId      bank identifier
+   * @param type        transaction type
+   * @param actorUuid   who performed the action
+   * @param amount      amount involved
+   */
+  public void recordTransaction(String bankId, BankTransactionEntity.Type type,
+                                 UUID actorUuid, MantissaAmount amount) {
+    UUID accountId = accountId(normalize(bankId));
+    if (accountId == null) return;
+    balanceFlush.requestAppendTransaction(accountId, type, actorUuid, actorUuid, amount, null);
+  }
+
+  // ─── Bank definition helpers ──────────────────────────────────────────────
+
+  /**
+   * Returns the {@link BankDefinition} for the given bank ID, or {@code null} if not configured.
+   *
+   * @param bankId bank identifier
+   */
+  public @Nullable BankDefinition definition(String bankId) {
+    return bankRegistry.bank(normalize(bankId)).orElse(null);
+  }
+
+  /**
+   * Returns the maximum level defined for the given bank, or 1 if no levels are configured.
+   *
+   * @param bankId bank identifier
+   */
+  public int maxLevel(String bankId) {
+    BankDefinition def = bankRegistry.bank(normalize(bankId)).orElse(null);
+    if (def == null || def.levels() == null || def.levels().isEmpty()) return 1;
+    return def.levels().stream().mapToInt(BankDefinition.LevelDefinition::level).max().orElse(1);
+  }
+
+  /**
+   * Returns the upgrade cost for the given bank and target level, read directly from the bank
+   * definition. Returns {@link MantissaAmount#zero()} if the level or bank is not configured.
+   *
+   * @param bankId      bank identifier
+   * @param targetLevel level whose cost should be returned
+   */
+  public MantissaAmount upgradeCost(String bankId, int targetLevel) {
+    BankDefinition def = bankRegistry.bank(normalize(bankId)).orElse(null);
+    if (def == null || def.levels() == null) return MantissaAmount.zero();
+    for (BankDefinition.LevelDefinition lvl : def.levels()) {
+      if (lvl.level() == targetLevel) {
+        String raw = lvl.upgradeCostRaw();
+        MantissaAmount amount = AmountNotation.parseVirtualMantissaAmount(raw);
+        if (amount != null) return amount;
+        BigDecimal vault = AmountNotation.parseVaultHuman(raw);
+        if (vault != null) return MantissaAmount.of(vault, 0);
+        return MantissaAmount.zero();
+      }
+    }
+    return MantissaAmount.zero();
+  }
+
+  /**
+   * Returns the currency ID used for upgrade costs for this bank, or an empty string if not found.
+   *
+   * @param bankId bank identifier
+   */
+  public String upgradeCurrencyId(String bankId) {
+    BankDefinition def = bankRegistry.bank(normalize(bankId)).orElse(null);
+    return def != null && def.currencyIdLower() != null ? def.currencyIdLower() : "";
   }
 
   // ─── Internal ─────────────────────────────────────────────────────────────

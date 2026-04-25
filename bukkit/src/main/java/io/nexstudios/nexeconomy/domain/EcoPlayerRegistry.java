@@ -1,7 +1,9 @@
 package io.nexstudios.nexeconomy.domain;
 
+import io.nexstudios.nexeconomy.service.bank.BankBalanceFlushService;
 import io.nexstudios.nexeconomy.service.bank.BankLockFlushService;
 import io.nexstudios.nexeconomy.service.bank.cache.BankAccountCacheService;
+import io.nexstudios.nexeconomy.service.bank.registry.BankRegistryService;
 import io.nexstudios.nexeconomy.domain.container.BankContainer;
 import io.nexstudios.nexeconomy.domain.container.VaultContainer;
 import io.nexstudios.nexeconomy.domain.container.VirtualContainer;
@@ -32,6 +34,8 @@ import java.util.concurrent.ConcurrentHashMap;
     EconomyPlayerCacheService.class,
     BankAccountCacheService.class,
     BankLockFlushService.class,
+    BankBalanceFlushService.class,
+    BankRegistryService.class,
     CurrencyRegistryService.class,
     EconomyFlushService.class
 })
@@ -40,17 +44,21 @@ public final class EcoPlayerRegistry implements Service {
   private final EconomyPlayerCacheService econCache;
   private final BankAccountCacheService bankCache;
   private final BankLockFlushService bankLockFlush;
+  private final BankBalanceFlushService bankBalanceFlush;
+  private final BankRegistryService bankRegistry;
   private final CurrencyRegistryService currencies;
   private final EconomyFlushService flush;
 
   private final ConcurrentHashMap<UUID, EcoPlayer> players = new ConcurrentHashMap<>();
 
   public EcoPlayerRegistry(ServiceAccessor accessor) {
-    this.econCache      = accessor.getService(EconomyPlayerCacheService.class);
-    this.bankCache      = accessor.getService(BankAccountCacheService.class);
-    this.bankLockFlush  = accessor.getService(BankLockFlushService.class);
-    this.currencies     = accessor.getService(CurrencyRegistryService.class);
-    this.flush          = accessor.getService(EconomyFlushService.class);
+    this.econCache          = accessor.getService(EconomyPlayerCacheService.class);
+    this.bankCache          = accessor.getService(BankAccountCacheService.class);
+    this.bankLockFlush      = accessor.getService(BankLockFlushService.class);
+    this.bankBalanceFlush   = accessor.getService(BankBalanceFlushService.class);
+    this.bankRegistry       = accessor.getService(BankRegistryService.class);
+    this.currencies         = accessor.getService(CurrencyRegistryService.class);
+    this.flush              = accessor.getService(EconomyFlushService.class);
 
     // Bind static factory so EcoPlayer.of(player) works without injection
     EcoPlayer.bindRegistry(this);
@@ -75,7 +83,7 @@ public final class EcoPlayerRegistry implements Service {
           uuid,
           new VaultContainer(econState, currencies, flush),
           new VirtualContainer(econState, currencies, flush),
-          new BankContainer(bankCache, bankLockFlush, uuid)
+          new BankContainer(bankCache, bankLockFlush, bankBalanceFlush, bankRegistry, uuid)
       );
       players.put(uuid, eco);
       return eco;

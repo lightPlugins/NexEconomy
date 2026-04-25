@@ -17,22 +17,17 @@ import io.nexstudios.nexeconomy.NexEconomyPlugin;
 import io.nexstudios.nexeconomy.definition.AmountNotation;
 import io.nexstudios.nexeconomy.definition.MantissaAmount;
 import io.nexstudios.nexeconomy.domain.EcoPlayer;
-import io.nexstudios.nexeconomy.service.bank.cache.BankAccountCacheService;
+import io.nexstudios.nexeconomy.domain.container.BankContainer;
 import io.nexstudios.nexeconomy.service.bank.definition.BankDefinition;
-import io.nexstudios.nexeconomy.service.bank.level.BankLevelService;
-import io.nexstudios.nexeconomy.service.bank.registry.BankRegistryService;
-import io.nexstudios.nexeconomy.service.economy.EconomyService;
 import io.nexstudios.nexeconomy.service.menu.bank.detail.view.BankDetailMenuView;
 import io.nexstudios.nexeconomy.service.menu.bank.level.BankLevelMenuDefinition;
 import io.nexstudios.nexlogic.bukkit.services.items.ItemProviderService;
 import io.nexstudios.serviceregistry.di.ServiceAccessor;
 import net.kyori.adventure.text.Component;
 import net.kyori.adventure.text.minimessage.MiniMessage;
-import org.bukkit.Bukkit;
 import org.bukkit.Material;
 import org.bukkit.entity.Player;
 import org.bukkit.inventory.ItemStack;
-import org.bukkit.plugin.java.JavaPlugin;
 
 import java.nio.file.Path;
 import java.util.ArrayList;
@@ -42,11 +37,11 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.UUID;
-import java.util.concurrent.CompletableFuture;
 
 /**
  * Paged view of bank levels for a single bank account.
  * Allows upgrading to the next level when requirements are met.
+ * All data is read synchronously via {@link BankContainer} – no CompletableFutures.
  */
 public final class BankLevelMenuView extends ControlledPagedMenuView<BankDefinition.LevelDefinition> {
 
@@ -59,13 +54,10 @@ public final class BankLevelMenuView extends ControlledPagedMenuView<BankDefinit
   private final UUID ownerUuid;
   private final UUID viewerUuid;
   private final int currentLevel;
-  private final UUID bankAccountId;
   private final BankDefinition def;
   private final FileConfiguration config;
   private final ItemProviderService itemProvider;
   private final ItemService itemService;
-  private final BankLevelService levelService;
-  private final EconomyService econService;
 
   public BankLevelMenuView(ServiceAccessor accessor, String bankId, UUID ownerUuid, UUID viewerUuid) {
     this(accessor, bankId, ownerUuid, viewerUuid, new PageItemRenderer[1]);
@@ -82,21 +74,18 @@ public final class BankLevelMenuView extends ControlledPagedMenuView<BankDefinit
     this.ownerUuid  = ownerUuid;
     this.viewerUuid = viewerUuid;
 
-    FileReaderService fileReader        = accessor.getService(FileReaderService.class);
-    this.itemService                    = accessor.getService(ItemService.class);
-    this.levelService                   = accessor.getService(BankLevelService.class);
-    this.econService                    = accessor.getService(EconomyService.class);
-    BankRegistryService bankRegistry    = accessor.getService(BankRegistryService.class);
-    BankAccountCacheService bankCache   = accessor.getService(BankAccountCacheService.class);
-    this.itemProvider                   = NexEconomyPlugin.getNexLogicService().getService(ItemProviderService.class);
+    FileReaderService fileReader = accessor.getService(FileReaderService.class);
+    this.itemService             = accessor.getService(ItemService.class);
+    this.itemProvider            = NexEconomyPlugin.getNexLogicService().getService(ItemProviderService.class);
 
     this.config = fileReader.load(Path.of(CONFIG_PATH), CONFIG_PATH, false);
-    this.def    = bankRegistry.bank(this.bankId).orElse(null);
 
-    BankAccountCacheService.View view = bankCache.get(this.bankId, ownerUuid);
-    int lvl = (view != null && view.account() != null) ? view.account().getLevel() : 1;
-    this.currentLevel   = lvl <= 0 ? 1 : lvl;
-    this.bankAccountId  = (view != null && view.account() != null) ? view.account().getId() : null;
+    // Read current level from the owner's BankContainer (cache-first, sync)
+    EcoPlayer owner = EcoPlayer.of(ownerUuid);
+    BankContainer banks = owner != null ? owner.banks() : null;
+    this.def          = banks != null ? banks.definition(this.bankId) : null;
+    int lvl           = banks != null ? banks.level(this.bankId) : 1;
+    this.currentLevel = lvl <= 0 ? 1 : lvl;
 
     rendererBox[0] = this::renderEntry;
 
@@ -130,16 +119,19 @@ public final class BankLevelMenuView extends ControlledPagedMenuView<BankDefinit
     int level = levelDef.level();
     Player viewer = context.viewer();
 
-    String bankName  = def != null ? MINI.stripTags(def.nameMiniMessage()) : bankId;
-    MantissaAmount cost = levelService.getUpgradeCost(bankId, level);
-    String costStr   = AmountNotation.formatShort(cost, 2);
-    String maxBalStr = levelDef.maxBalanceRaw() != null ? levelDef.maxBalanceRaw() : "∞";
-    String interestStr = levelDef.interestRateRaw() != null ? levelDef.interestRateRaw() : "0%";
-    int maxLevel     = levelService.getMaxLevel(bankId);
-
     EcoPlayer eco = EcoPlayer.of(viewer.getUniqueId());
-    MantissaAmount walletBal = (eco != null && def != null)
-        ? eco.vault().balance(def.currencyIdLower())
+    BankContainer banks = eco != null ? eco.banks() : null;
+
+    String bankName    = def != null ? MINI.stripTags(def.nameMiniMessage()) : bankId;
+    MantissaAmount cost = banks != null ? banks.upgradeCost(bankId, level) : MantissaAmount.zero();
+    String costStr     = AmountNotation.formatShort(cost, 2);
+    String maxBalStr   = levelDef.maxBalanceRaw() != null ? levelDef.maxBalanceRaw() : "∞";
+    String interestStr = levelDef.interestRateRaw() != null ? levelDef.interestRateRaw() : "0%";
+    int maxLevel       = banks != null ? banks.maxLevel(bankId) : 1;
+
+    String currencyId    = banks != null ? banks.upgradeCurrencyId(bankId) : "";
+    MantissaAmount walletBal = (eco != null && !currencyId.isBlank())
+        ? eco.vault().balance(currencyId)
         : MantissaAmount.zero();
     String walletStr = AmountNotation.formatShort(walletBal, 2);
 
@@ -180,7 +172,7 @@ public final class BankLevelMenuView extends ControlledPagedMenuView<BankDefinit
     // ── Next upgradeable level ───────────────────────────────────────────
     boolean hasPermission = levelDef.permission() == null || levelDef.permission().isBlank()
         || viewer.hasPermission(levelDef.permission());
-    boolean hasFunds = walletBal.compareTo(cost) >= 0;
+    boolean hasFunds = cost != null && walletBal.compareTo(cost) >= 0;
 
     if (!hasPermission || !hasFunds) {
       ph.put("upgrade-reason", !hasPermission ? "Missing permission" : "Insufficient funds");
@@ -193,47 +185,34 @@ public final class BankLevelMenuView extends ControlledPagedMenuView<BankDefinit
     ConfigurationSection cfg = config.getSection("items.ready-for-unlock");
     ItemStack item = cfg != null ? buildItem(cfg, ph) : new ItemStack(Material.YELLOW_STAINED_GLASS_PANE);
 
-    final UUID accId          = bankAccountId;
     final MantissaAmount upgradeCost = cost;
-    final int targetLevel     = level;
-    final String currencyId   = def != null ? def.currencyIdLower() : "";
+    final int targetLevel            = level;
+    final String fCurrencyId         = currencyId;
 
     return new StaticMenuElement(item, (ctx, event) -> {
       Player p = ctx.viewer();
-      if (accId == null) { p.sendMessage(Component.text("Bank account not found.")); return; }
+      EcoPlayer ecoPlayer = EcoPlayer.of(p.getUniqueId());
+      if (ecoPlayer == null) { p.sendMessage(Component.text("Not loaded.")); return; }
 
-      econService.remove(p, currencyId, upgradeCost)
-          .thenCompose(ok -> {
-            if (!Boolean.TRUE.equals(ok)) {
-              runOnMain(() -> p.sendMessage(Component.text("Insufficient funds to upgrade!")));
-              return CompletableFuture.completedFuture(false);
-            }
-            return levelService.upgrade(accId, targetLevel);
-          })
-          .thenAccept(success -> {
-            if (Boolean.TRUE.equals(success)) {
-              runOnMain(() -> {
-                p.sendMessage(Component.text("Bank upgraded to level " + targetLevel + "!"));
-                ctx.menuService().open(p, new BankLevelMenuView(accessor, bankId, ownerUuid, viewerUuid));
-              });
-            } else {
-              econService.add(p, currencyId, upgradeCost);
-              runOnMain(() -> p.sendMessage(Component.text("Upgrade failed. Cost has been refunded.")));
-            }
-          })
-          .exceptionally(ex -> {
-            econService.add(p, currencyId, upgradeCost);
-            runOnMain(() -> p.sendMessage(Component.text("Upgrade failed: " + rootMessage(ex))));
-            return null;
-          });
+      BankContainer b = ecoPlayer.banks();
+      if (!b.isCached(bankId)) { p.sendMessage(Component.text("Bank not cached.")); return; }
+
+      // Deduct cost from vault synchronously (cache-first)
+      if (!ecoPlayer.vault().remove(fCurrencyId, upgradeCost)) {
+        p.sendMessage(Component.text("Insufficient funds to upgrade!"));
+        return;
+      }
+
+      // Upgrade level synchronously in cache + async DB flush
+      if (b.upgradeLevel(bankId, targetLevel)) {
+        p.sendMessage(Component.text("Bank upgraded to level " + targetLevel + "!"));
+        ctx.menuService().open(p, new BankLevelMenuView(accessor, bankId, ownerUuid, viewerUuid));
+      } else {
+        // Refund – bank not cached or already at this level
+        ecoPlayer.vault().add(fCurrencyId, upgradeCost);
+        p.sendMessage(Component.text("Upgrade failed. Cost has been refunded."));
+      }
     });
-  }
-
-  // ── Helpers ──────────────────────────────────────────────────────────────
-
-  /** Runs a task on the Bukkit main thread. Safe to call from any thread. */
-  private static void runOnMain(Runnable task) {
-    Bukkit.getScheduler().runTask(JavaPlugin.getPlugin(NexEconomyPlugin.class), task);
   }
 
   // ── Item builder ─────────────────────────────────────────────────────────
@@ -254,13 +233,4 @@ public final class BankLevelMenuView extends ControlledPagedMenuView<BankDefinit
     for (Map.Entry<String, String> e : ph.entrySet()) text = text.replace("<" + e.getKey() + ">", e.getValue());
     return text;
   }
-
-  private static String rootMessage(Throwable t) {
-    Throwable r = t;
-    for (int i = 0; i < 8 && r != null && r.getCause() != null; i++) r = r.getCause();
-    return r != null && r.getMessage() != null ? r.getMessage() : "Unknown error";
-  }
 }
-
-
-

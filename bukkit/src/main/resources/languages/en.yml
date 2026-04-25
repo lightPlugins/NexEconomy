@@ -203,8 +203,8 @@ bank:
       deposit-all:
         title: '<yellow>Deposit all?</yellow>'
         body: '<gray>Do you really want to deposit <yellow><amount></yellow> from your wallet into this bank?</gray>'
-        confirm: 'Deposit'
+        confirm: 'Deposit All'
       withdraw-all:
         title: '<yellow>Withdraw all?</yellow>'
         body: '<gray>Do you really want to withdraw up to <yellow><amount></yellow> from this bank? The role limit may reduce the amount automatically.</gray>'
-        confirm: 'Withdraw'
+        confirm: 'Withdraw All'

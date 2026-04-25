@@ -14,10 +14,9 @@ import io.nexstudios.menuservice.core.page.ControlledPagedMenuView;
 import io.nexstudios.menuservice.core.page.element.NextPageElement;
 import io.nexstudios.menuservice.core.page.element.PreviousPageElement;
 import io.nexstudios.nexeconomy.NexEconomyPlugin;
+import io.nexstudios.nexeconomy.domain.EcoPlayer;
 import io.nexstudios.nexeconomy.service.bank.BankService;
-import io.nexstudios.nexeconomy.service.bank.cache.BankAccountCacheService;
 import io.nexstudios.nexeconomy.service.bank.definition.BankDefinition;
-import io.nexstudios.nexeconomy.service.bank.registry.BankRegistryService;
 import io.nexstudios.nexeconomy.service.menu.bank.member.BankMemberRoleMenuDefinition;
 import io.nexstudios.nexlogic.bukkit.services.entity.nexeconomy.BankMemberEntity;
 import io.nexstudios.nexlogic.bukkit.services.items.ItemProviderService;
@@ -80,18 +79,17 @@ public final class BankMemberRoleMenuView extends ControlledPagedMenuView<Map.En
 
     FileReaderService fileReader      = accessor.getService(FileReaderService.class);
     this.itemService                  = accessor.getService(ItemService.class);
-    BankRegistryService bankRegistry  = accessor.getService(BankRegistryService.class);
-    BankAccountCacheService bankCache = accessor.getService(BankAccountCacheService.class);
     this.itemProvider                 = NexEconomyPlugin.getNexLogicService().getService(ItemProviderService.class);
 
     this.config = fileReader.load(Path.of(CONFIG_PATH), CONFIG_PATH, false);
-    this.def    = bankRegistry.bank(this.bankId).orElse(null);
+    EcoPlayer ownerEco = EcoPlayer.of(ownerUuid);
+    this.def    = ownerEco != null ? ownerEco.banks().definition(this.bankId) : null;
 
     // Resolve current role of the target member
-    BankAccountCacheService.View view = bankCache.get(this.bankId, ownerUuid);
+    List<BankMemberEntity> memberList = ownerEco != null ? ownerEco.banks().members(this.bankId) : null;
     String foundRole = "member";
-    if (view != null && view.members() != null) {
-      for (BankMemberEntity m : view.members()) {
+    if (memberList != null) {
+      for (BankMemberEntity m : memberList) {
         if (targetMemberUuid.equals(m.getMemberUuid()) && m.getRoleIdLower() != null) {
           foundRole = m.getRoleIdLower();
           break;
@@ -169,11 +167,9 @@ public final class BankMemberRoleMenuView extends ControlledPagedMenuView<Map.En
     final String roleId = entry.getKey();
     return new StaticMenuElement(item, (ctx, event) -> {
       Player p = ctx.viewer();
-      bankService.changeMemberRole(bankId, ownerUuid, viewerUuid, targetMemberUuid, roleId)
-          .thenAccept(ok -> p.sendMessage(Component.text(
-              ok ? resolvePlayerName(targetMemberUuid) + "'s role changed to " + roleName + "."
-                 : "Role change failed.")))
-          .exceptionally(ex -> { p.sendMessage(Component.text("Role change failed: " + rootMessage(ex))); return null; });
+      // fire-and-forget – no future chain
+      bankService.changeMemberRole(bankId, ownerUuid, viewerUuid, targetMemberUuid, roleId);
+      p.sendMessage(Component.text(resolvePlayerName(targetMemberUuid) + "'s role changed to " + roleName + "."));
       ctx.menuService().open(p, new BankMemberMenuView(accessor, bankId, ownerUuid, viewerUuid));
     });
   }
@@ -217,6 +213,4 @@ public final class BankMemberRoleMenuView extends ControlledPagedMenuView<Map.En
     return r != null && r.getMessage() != null ? r.getMessage() : "Unknown error";
   }
 }
-
-
 

@@ -19,7 +19,6 @@ import io.nexstudios.nexeconomy.definition.AmountNotation;
 import io.nexstudios.nexeconomy.domain.EcoPlayer;
 import io.nexstudios.nexeconomy.service.bank.cache.BankAccountCacheService;
 import io.nexstudios.nexeconomy.service.bank.definition.BankDefinition;
-import io.nexstudios.nexeconomy.service.bank.registry.BankRegistryService;
 import io.nexstudios.nexeconomy.service.menu.bank.detail.view.BankDetailMenuView;
 import io.nexstudios.nexeconomy.service.menu.bank.overview.BankOverviewMenuDefinition;
 import io.nexstudios.nexlogic.bukkit.services.items.ItemProviderService;
@@ -53,7 +52,6 @@ public final class BankOverviewMenuView extends ControlledPagedMenuView<BankOver
   private final ItemProviderService itemProviderService;
   private final ItemService itemService;
   private final FileConfiguration config;
-  private final BankRegistryService bankRegistry;
   private final PageSortControl<BankEntry> sortControl;
 
   /** Represents a single bank entry in the overview list. */
@@ -84,7 +82,6 @@ public final class BankOverviewMenuView extends ControlledPagedMenuView<BankOver
     this.accessor = accessor;
     this.itemProviderService = NexEconomyPlugin.getNexLogicService().getService(ItemProviderService.class);
     this.itemService = accessor.getService(ItemService.class);
-    this.bankRegistry = accessor.getService(BankRegistryService.class);
 
     FileReaderService fileReader = accessor.getService(FileReaderService.class);
     this.config = fileReader.load(Path.of(CONFIG_PATH), CONFIG_PATH, false);
@@ -202,13 +199,17 @@ public final class BankOverviewMenuView extends ControlledPagedMenuView<BankOver
     if (eco == null) return entries;
     for (BankAccountCacheService.View v : eco.banks().allCached()) {
       if (v.account() == null) continue;
-      bankRegistry.bank(v.account().getBankIdLower())
-          .ifPresent(def -> entries.add(new BankEntry(v, def, true)));
+      BankDefinition def = eco.banks().definition(v.account().getBankIdLower());
+      if (def != null) entries.add(new BankEntry(v, def, true));
     }
     for (BankAccountCacheService.View v : eco.banks().memberBankViews()) {
       if (v.account() == null) continue;
-      bankRegistry.bank(v.account().getBankIdLower())
-          .ifPresent(def -> entries.add(new BankEntry(v, def, false)));
+      // For member banks, get the BankContainer of the owner
+      EcoPlayer ownerEco = EcoPlayer.of(v.account().getOwnerUuid());
+      BankDefinition def = ownerEco != null
+          ? ownerEco.banks().definition(v.account().getBankIdLower())
+          : eco.banks().definition(v.account().getBankIdLower()); // fallback
+      if (def != null) entries.add(new BankEntry(v, def, false));
     }
     return entries;
   }

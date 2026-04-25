@@ -14,10 +14,9 @@ import io.nexstudios.menuservice.core.page.ControlledPagedMenuView;
 import io.nexstudios.menuservice.core.page.element.NextPageElement;
 import io.nexstudios.menuservice.core.page.element.PreviousPageElement;
 import io.nexstudios.nexeconomy.NexEconomyPlugin;
+import io.nexstudios.nexeconomy.domain.EcoPlayer;
 import io.nexstudios.nexeconomy.service.bank.BankService;
-import io.nexstudios.nexeconomy.service.bank.cache.BankAccountCacheService;
 import io.nexstudios.nexeconomy.service.bank.definition.BankDefinition;
-import io.nexstudios.nexeconomy.service.bank.registry.BankRegistryService;
 import io.nexstudios.nexeconomy.service.menu.bank.detail.view.BankDetailMenuView;
 import io.nexstudios.nexeconomy.service.menu.bank.member.BankMemberMenuDefinition;
 import io.nexstudios.nexeconomy.service.menu.bank.member.view.BankMemberRoleMenuView;
@@ -44,6 +43,7 @@ import java.util.UUID;
 /**
  * Paged view of current bank members.
  * Left-click → change role; Right-click → kick member.
+ * All reads go through {@link EcoPlayer} / BankContainer – no direct cache/registry service calls.
  */
 public final class BankMemberMenuView extends ControlledPagedMenuView<BankMemberEntity> {
 
@@ -56,7 +56,6 @@ public final class BankMemberMenuView extends ControlledPagedMenuView<BankMember
   private final UUID ownerUuid;
   private final UUID viewerUuid;
   private final BankDefinition def;
-  private final BankAccountCacheService bankCache;
   private final BankService bankService;
   private final FileConfiguration config;
   private final ItemProviderService itemProvider;
@@ -68,7 +67,7 @@ public final class BankMemberMenuView extends ControlledPagedMenuView<BankMember
 
   @SuppressWarnings("unchecked")
   private BankMemberMenuView(ServiceAccessor accessor, String bankId, UUID ownerUuid, UUID viewerUuid,
-                              PageItemRenderer<BankMemberEntity>[] rendererBox) {
+                               PageItemRenderer<BankMemberEntity>[] rendererBox) {
     super(KEY, rowsToSize(6), PageBounds.of(1, 2, 7, 3), "bank-member",
         List.of(), (ctx, entry, idx) -> rendererBox[0].render(ctx, entry, idx));
 
@@ -78,14 +77,15 @@ public final class BankMemberMenuView extends ControlledPagedMenuView<BankMember
     this.viewerUuid  = viewerUuid;
     this.bankService = accessor.getService(BankService.class);
 
-    FileReaderService fileReader     = accessor.getService(FileReaderService.class);
-    this.itemService                 = accessor.getService(ItemService.class);
-    BankRegistryService bankRegistry = accessor.getService(BankRegistryService.class);
-    this.bankCache                   = accessor.getService(BankAccountCacheService.class);
-    this.itemProvider                = NexEconomyPlugin.getNexLogicService().getService(ItemProviderService.class);
+    FileReaderService fileReader = accessor.getService(FileReaderService.class);
+    this.itemService             = accessor.getService(ItemService.class);
+    this.itemProvider            = NexEconomyPlugin.getNexLogicService().getService(ItemProviderService.class);
 
     this.config = fileReader.load(Path.of(CONFIG_PATH), CONFIG_PATH, false);
-    this.def    = bankRegistry.bank(this.bankId).orElse(null);
+
+    // Read bank definition via EcoPlayer / BankContainer
+    EcoPlayer ownerEco = EcoPlayer.of(ownerUuid);
+    this.def = ownerEco != null ? ownerEco.banks().definition(this.bankId) : null;
 
     rendererBox[0] = this::renderEntry;
 
@@ -96,8 +96,8 @@ public final class BankMemberMenuView extends ControlledPagedMenuView<BankMember
 
     // Info item
     int infoSlot = config.getInt("layout.slots.info", 4);
-    BankAccountCacheService.View view = bankCache.get(this.bankId, ownerUuid);
-    int memberCount = (view != null && view.members() != null) ? view.members().size() : 0;
+    List<BankMemberEntity> members = ownerEco != null ? ownerEco.banks().members(this.bankId) : null;
+    int memberCount = members != null ? members.size() : 0;
     String bankName  = def != null ? MINI.stripTags(def.nameMiniMessage()) : this.bankId;
     String ownerName = resolvePlayerName(ownerUuid);
     ConfigurationSection infoCfg = config.getSection("items.info");
@@ -127,9 +127,10 @@ public final class BankMemberMenuView extends ControlledPagedMenuView<BankMember
 
   @Override
   protected List<BankMemberEntity> resolveItems(MenuContext context) {
-    BankAccountCacheService.View view = bankCache.get(bankId, ownerUuid);
-    if (view == null || view.members() == null) return List.of();
-    List<BankMemberEntity> result = new ArrayList<>(view.members());
+    EcoPlayer ownerEco = EcoPlayer.of(ownerUuid);
+    List<BankMemberEntity> members = ownerEco != null ? ownerEco.banks().members(bankId) : null;
+    if (members == null) return List.of();
+    List<BankMemberEntity> result = new ArrayList<>(members);
     result.removeIf(m -> m == null || ownerUuid.equals(m.getMemberUuid()));
     return result;
   }
@@ -166,11 +167,9 @@ public final class BankMemberMenuView extends ControlledPagedMenuView<BankMember
     return new StaticMenuElement(item, (ctx, event) -> {
       Player p = ctx.viewer();
       if (event.getClick() == ClickType.RIGHT || event.getClick() == ClickType.SHIFT_RIGHT) {
-        // Kick
-        bankService.leave(bankId, ownerUuid, memberUuid)
-            .thenAccept(ok -> p.sendMessage(Component.text(
-                ok ? memberName + " has been removed from the bank." : "Could not remove " + memberName + ".")))
-            .exceptionally(ex -> { p.sendMessage(Component.text("Kick failed: " + rootMessage(ex))); return null; });
+        // Kick – fire-and-forget; no future chain in UI
+        bankService.leave(bankId, ownerUuid, memberUuid);
+        p.sendMessage(Component.text(memberName + " has been removed from the bank."));
         ctx.menuService().open(p, new BankMemberMenuView(accessor, bankId, ownerUuid, viewerUuid));
       } else {
         // Open role change
@@ -206,14 +205,4 @@ public final class BankMemberMenuView extends ControlledPagedMenuView<BankMember
     String name = Bukkit.getOfflinePlayer(uuid).getName();
     return name != null ? name : uuid.toString();
   }
-
-  private static String rootMessage(Throwable t) {
-    Throwable r = t;
-    for (int i = 0; i < 8 && r != null && r.getCause() != null; i++) r = r.getCause();
-    return r != null && r.getMessage() != null ? r.getMessage() : "Unknown error";
-  }
 }
-
-
-
-

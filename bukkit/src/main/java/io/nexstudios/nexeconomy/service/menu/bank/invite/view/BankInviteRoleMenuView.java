@@ -14,9 +14,9 @@ import io.nexstudios.menuservice.core.page.ControlledPagedMenuView;
 import io.nexstudios.menuservice.core.page.element.NextPageElement;
 import io.nexstudios.menuservice.core.page.element.PreviousPageElement;
 import io.nexstudios.nexeconomy.NexEconomyPlugin;
+import io.nexstudios.nexeconomy.domain.EcoPlayer;
 import io.nexstudios.nexeconomy.service.bank.BankService;
 import io.nexstudios.nexeconomy.service.bank.definition.BankDefinition;
-import io.nexstudios.nexeconomy.service.bank.registry.BankRegistryService;
 import io.nexstudios.nexeconomy.service.menu.bank.invite.BankInviteRoleMenuDefinition;
 import io.nexstudios.nexlogic.bukkit.services.items.ItemProviderService;
 import io.nexstudios.serviceregistry.di.ServiceAccessor;
@@ -38,7 +38,7 @@ import java.util.UUID;
 
 /**
  * Paged role-selection view used when inviting a player to a bank.
- * Only shows roles that the acting player may actually assign.
+ * All reads go through {@link EcoPlayer} / BankContainer – no direct cache/registry service calls.
  */
 public final class BankInviteRoleMenuView extends ControlledPagedMenuView<Map.Entry<String, BankDefinition.RoleDefinition>> {
 
@@ -76,13 +76,14 @@ public final class BankInviteRoleMenuView extends ControlledPagedMenuView<Map.En
     this.targetUuid  = targetUuid;
     this.bankService = accessor.getService(BankService.class);
 
-    FileReaderService fileReader     = accessor.getService(FileReaderService.class);
-    this.itemService                 = accessor.getService(ItemService.class);
-    BankRegistryService bankRegistry = accessor.getService(BankRegistryService.class);
-    this.itemProvider                = NexEconomyPlugin.getNexLogicService().getService(ItemProviderService.class);
+    FileReaderService fileReader = accessor.getService(FileReaderService.class);
+    this.itemService             = accessor.getService(ItemService.class);
+    this.itemProvider            = NexEconomyPlugin.getNexLogicService().getService(ItemProviderService.class);
 
     this.config = fileReader.load(Path.of(CONFIG_PATH), CONFIG_PATH, false);
-    this.def    = bankRegistry.bank(this.bankId).orElse(null);
+
+    EcoPlayer ownerEco = EcoPlayer.of(ownerUuid);
+    this.def = ownerEco != null ? ownerEco.banks().definition(this.bankId) : null;
 
     rendererBox[0] = this::renderEntry;
 
@@ -92,8 +93,8 @@ public final class BankInviteRoleMenuView extends ControlledPagedMenuView<Map.En
     if (fillCfg != null) fill(buildItem(fillCfg, Map.of()));
 
     int infoSlot = config.getInt("layout.slots.info", 4);
-    String bankName  = def != null ? MINI.stripTags(def.nameMiniMessage()) : this.bankId;
-    String ownerName = resolvePlayerName(ownerUuid);
+    String bankName   = def != null ? MINI.stripTags(def.nameMiniMessage()) : this.bankId;
+    String ownerName  = resolvePlayerName(ownerUuid);
     String targetName = resolvePlayerName(targetUuid);
     ConfigurationSection infoCfg = config.getSection("items.info");
     if (infoCfg != null) {
@@ -120,17 +121,17 @@ public final class BankInviteRoleMenuView extends ControlledPagedMenuView<Map.En
     if (def.memberSystem().rolesByIdLower() == null) return List.of();
 
     // Actor priority – owner has max priority
-    int actorPriority = viewerUuid.equals(ownerUuid) ? Integer.MAX_VALUE : resolveActorPriority(context.viewer());
+    int actorPriority = viewerUuid.equals(ownerUuid) ? Integer.MAX_VALUE : resolveActorPriority();
 
-    List<Map.Entry<String, BankDefinition.RoleDefinition>> result = new ArrayList<>(def.memberSystem().rolesByIdLower().entrySet());
+    List<Map.Entry<String, BankDefinition.RoleDefinition>> result =
+        new ArrayList<>(def.memberSystem().rolesByIdLower().entrySet());
     result.removeIf(e -> e.getValue().priority() >= actorPriority);
     result.sort(Comparator.comparingInt(e -> -e.getValue().priority()));
     return result;
   }
 
-  private int resolveActorPriority(Player viewer) {
+  private int resolveActorPriority() {
     if (def == null || def.memberSystem() == null || def.memberSystem().rolesByIdLower() == null) return 0;
-    // Would need cache; simplest: owner has all rights, members use their role
     return 0; // Will be gated server-side in BankService.invite() anyway
   }
 
@@ -159,13 +160,9 @@ public final class BankInviteRoleMenuView extends ControlledPagedMenuView<Map.En
     final String roleId = entry.getKey();
     return new StaticMenuElement(item, (ctx, event) -> {
       Player p = ctx.viewer();
-      bankService.invite(bankId, ownerUuid, viewerUuid, targetUuid, roleId)
-          .thenAccept(inv -> p.sendMessage(Component.text(
-              "Invite sent to " + resolvePlayerName(targetUuid) + " as " + roleName + "!")))
-          .exceptionally(ex -> {
-            p.sendMessage(Component.text("Invite failed: " + rootMessage(ex)));
-            return null;
-          });
+      // fire-and-forget – no future chain
+      bankService.invite(bankId, ownerUuid, viewerUuid, targetUuid, roleId);
+      p.sendMessage(Component.text("Invite sent to " + resolvePlayerName(targetUuid) + " as " + roleName + "!"));
       ctx.menuService().close(p);
     });
   }
@@ -195,13 +192,5 @@ public final class BankInviteRoleMenuView extends ControlledPagedMenuView<Map.En
     String name = Bukkit.getOfflinePlayer(uuid).getName();
     return name != null ? name : uuid.toString();
   }
-
-  private static String rootMessage(Throwable t) {
-    Throwable r = t;
-    for (int i = 0; i < 8 && r != null && r.getCause() != null; i++) r = r.getCause();
-    return r != null && r.getMessage() != null ? r.getMessage() : "Unknown error";
-  }
 }
-
-
 
